@@ -1,7 +1,8 @@
 import type { Authenticator, GrantReach, Principal, PrincipalKind } from './auth.js';
 import type { RequestContext } from './operation.js';
+import type { PlainRepository } from './orm.js';
 import { unauthorized } from './problem.js';
-import { sha256 } from './sha256.js';
+import { sha256Hex } from './sha256.js';
 import { idKey } from './uuid.js';
 
 /*
@@ -50,7 +51,12 @@ export interface GrantRow {
 
 /** One entry of the access log. */
 export interface AccessLogEntry {
-  readonly kind: 'reveal' | 'agentRead' | 'keyCall' | 'grantCall';
+  /**
+   * What happened: reveal, agentRead, keyCall and grantCall (D156);
+   * oauthCall, a call made with an OAuth access token, and oauthGrant and
+   * oauthRevoke, an OAuth grant given and revoked (#695).
+   */
+  readonly kind: 'reveal' | 'agentRead' | 'keyCall' | 'grantCall' | 'oauthCall' | 'oauthGrant' | 'oauthRevoke';
   readonly principal?: string;
   readonly principalKind?: PrincipalKind;
   readonly actingFor?: string;
@@ -69,13 +75,7 @@ export interface AccessLog {
 type Values = Record<string, unknown>;
 
 /** A repository as this module runs it: the generated repositories' members it reads and writes through. */
-interface RepositoryShape {
-  readonly def?: { readonly name?: string; readonly key?: string; readonly access?: string };
-  findOne(filter: Values): Promise<Values | null>;
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-  createOne(input: Values): Promise<Values>;
-  updateOne(id: unknown, update: Values): Promise<Values>;
-}
+type RepositoryShape = Pick<PlainRepository, 'def' | 'findOne' | 'findMany' | 'createOne' | 'updateOne'>;
 
 /** An ORM as this module runs it: its repositories by member, and asSystem. */
 interface OrmShape {
@@ -116,7 +116,7 @@ function base64url(bytes: Uint8Array): string {
 
 /** The SHA-256 of a token's text, as the grant's tokenHash holds it: lowercase hex. */
 export function grantTokenHash(token: string): string {
-  return [...sha256(new TextEncoder().encode(token))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return sha256Hex(token);
 }
 
 /** What issueGrant takes: the grant's row, but its key, its token's hash and its stamps. */
@@ -296,6 +296,15 @@ export interface GrantAuthenticatorOptions {
   readonly inner?: Authenticator;
   /** The time a grant is held to; the clock's unless set. */
   readonly now?: () => Date;
+  /**
+   * What an agent run's token meets: refused 401 (refuse, the default), or
+   * handed to inner as any other request is (inner), which accepts it only
+   * where it is the dispatcher's authenticator, agents.authenticator. The
+   * generated server wraps an implementation's authenticator with inner,
+   * so a run's token reaches the API's routes where the implementation
+   * says (D194).
+   */
+  readonly runTokens?: 'refuse' | 'inner';
 }
 
 /**
@@ -344,7 +353,10 @@ function grantAuthenticatorOf(options: GrantAuthenticatorOptions, admitsRuns: bo
     // is no credential of any route.
     if (grant.targetType === 'CalendarFeed' || grant.targetType.startsWith('CalendarFeed;')) throw unauthorized("A calendar feed's token reads its feed alone");
     // An agent run's token is the dispatcher's to resolve (D194).
-    if (!admitsRuns && grant.holderKind === 'agent') throw unauthorized("An agent run's token is resolved by the agent dispatcher's authenticator alone");
+    if (!admitsRuns && grant.holderKind === 'agent') {
+      if (options.runTokens === 'inner') return options.inner ? options.inner(ctx) : null;
+      throw unauthorized("An agent run's token is resolved by the agent dispatcher's authenticator alone");
+    }
     const ended = await grantEnded(db, grant, options.now?.() ?? new Date());
     if (ended !== undefined) throw unauthorized(`The grant has ${ended === 'not started' ? 'not started' : 'ended'}`);
     const role = await roles.findOne({ name: { eq: grant.role } });
@@ -398,5 +410,6 @@ export function callEntry(principal: Principal | null, operation: string, method
   }
   if (principal.credential?.kind === 'apiKey') return { kind: 'keyCall', ...who, credential: principal.credential.id };
   if (principal.credential?.kind === 'grant') return { kind: 'grantCall', ...who, credential: principal.credential.id };
+  if (principal.credential?.kind === 'oauth') return { kind: 'oauthCall', ...who, credential: principal.credential.id };
   return undefined;
 }

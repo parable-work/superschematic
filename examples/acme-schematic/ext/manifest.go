@@ -34,14 +34,12 @@ var manifestKinds = []string{"DB", "API", "General", Kind}
 // the generators they name, so every DB, API, General and Catalog build
 // writes a manifest with no change to the core pipelines. It has no
 // OutputKey: schema.config cannot switch it off. It lists the types by
-// name, nothing a type's behaviors add, so it renders behaviors: a schema
-// whose types compose them builds through it.
+// name, nothing a type's behaviors add.
 func registerManifest(r *registry.Registry, cfg Config) error {
 	return r.RegisterGenerator(registry.GeneratorSpec{
-		Name:             "acmeManifest",
-		Extension:        Name,
-		Kinds:            manifestKinds,
-		RendersBehaviors: true,
+		Name:      "acmeManifest",
+		Extension: Name,
+		Kinds:     manifestKinds,
 		Dirs: func(c registry.GenerateContext) []string {
 			return []string{ManifestDir(c.Options.OutputRoot, c.Config.Name)}
 		},

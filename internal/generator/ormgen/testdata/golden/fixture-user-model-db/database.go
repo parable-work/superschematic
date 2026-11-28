@@ -27,6 +27,10 @@ type Database struct {
 	// readReplica is the Database over the read replica's pool, nil when
 	// ConnectWithPools was given none (D150).
 	readReplica    *Database
+	OAuthClient    *OAuthClientRepository
+	OAuthCode      *OAuthCodeRepository
+	OAuthGrant     *OAuthGrantRepository
+	OAuthToken     *OAuthTokenRepository
 	Role           *RoleRepository
 	Session        *SessionRepository
 	User           *UserRepository
@@ -45,6 +49,10 @@ type Tx struct {
 	// commit is what the transaction runs after it commits (D166), shared
 	// with every Tx nested in it.
 	commit         *txCommit
+	OAuthClient    *OAuthClientRepository
+	OAuthCode      *OAuthCodeRepository
+	OAuthGrant     *OAuthGrantRepository
+	OAuthToken     *OAuthTokenRepository
 	Role           *RoleRepository
 	Session        *SessionRepository
 	User           *UserRepository
@@ -79,6 +87,10 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db := &Database{pool: pool}
 
 	// Initialize repositories
+	db.OAuthClient = &OAuthClientRepository{db: db}
+	db.OAuthCode = &OAuthCodeRepository{db: db}
+	db.OAuthGrant = &OAuthGrantRepository{db: db}
+	db.OAuthToken = &OAuthTokenRepository{db: db}
 	db.Role = &RoleRepository{db: db}
 	db.Session = &SessionRepository{db: db}
 	db.User = &UserRepository{db: db}
@@ -104,6 +116,10 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db := &Database{pool: pool}
 
 	// Initialize repositories
+	db.OAuthClient = &OAuthClientRepository{db: db}
+	db.OAuthCode = &OAuthCodeRepository{db: db}
+	db.OAuthGrant = &OAuthGrantRepository{db: db}
+	db.OAuthToken = &OAuthTokenRepository{db: db}
 	db.Role = &RoleRepository{db: db}
 	db.Session = &SessionRepository{db: db}
 	db.User = &UserRepository{db: db}
@@ -158,6 +174,46 @@ func (db *Database) ReadReplica() DatabaseInterface {
 		return db.readReplica
 	}
 	return db
+}
+
+// GetOAuthClientRepository returns the OAuthClient repository interface.
+func (db *Database) GetOAuthClientRepository() OAuthClientRepositoryInterface {
+	return db.OAuthClient
+}
+
+// GetOAuthClientReadOnlyRepository returns the OAuthClient repository's reads.
+func (db *Database) GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface {
+	return db.OAuthClient
+}
+
+// GetOAuthCodeRepository returns the OAuthCode repository interface.
+func (db *Database) GetOAuthCodeRepository() OAuthCodeRepositoryInterface {
+	return db.OAuthCode
+}
+
+// GetOAuthCodeReadOnlyRepository returns the OAuthCode repository's reads.
+func (db *Database) GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface {
+	return db.OAuthCode
+}
+
+// GetOAuthGrantRepository returns the OAuthGrant repository interface.
+func (db *Database) GetOAuthGrantRepository() OAuthGrantRepositoryInterface {
+	return db.OAuthGrant
+}
+
+// GetOAuthGrantReadOnlyRepository returns the OAuthGrant repository's reads.
+func (db *Database) GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface {
+	return db.OAuthGrant
+}
+
+// GetOAuthTokenRepository returns the OAuthToken repository interface.
+func (db *Database) GetOAuthTokenRepository() OAuthTokenRepositoryInterface {
+	return db.OAuthToken
+}
+
+// GetOAuthTokenReadOnlyRepository returns the OAuthToken repository's reads.
+func (db *Database) GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface {
+	return db.OAuthToken
 }
 
 // GetRoleRepository returns the Role repository interface.
@@ -218,6 +274,46 @@ func (db *Database) GetUserRoleGrantRepository() UserRoleGrantRepositoryInterfac
 // GetUserRoleGrantReadOnlyRepository returns the UserRoleGrant repository's reads.
 func (db *Database) GetUserRoleGrantReadOnlyRepository() ReadOnlyUserRoleGrantRepositoryInterface {
 	return db.UserRoleGrant
+}
+
+// GetOAuthClientRepository returns the OAuthClient transaction repository interface.
+func (tx *Tx) GetOAuthClientRepository() OAuthClientRepositoryInterface {
+	return tx.OAuthClient
+}
+
+// GetOAuthClientReadOnlyRepository returns the OAuthClient transaction repository's reads.
+func (tx *Tx) GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface {
+	return tx.OAuthClient
+}
+
+// GetOAuthCodeRepository returns the OAuthCode transaction repository interface.
+func (tx *Tx) GetOAuthCodeRepository() OAuthCodeRepositoryInterface {
+	return tx.OAuthCode
+}
+
+// GetOAuthCodeReadOnlyRepository returns the OAuthCode transaction repository's reads.
+func (tx *Tx) GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface {
+	return tx.OAuthCode
+}
+
+// GetOAuthGrantRepository returns the OAuthGrant transaction repository interface.
+func (tx *Tx) GetOAuthGrantRepository() OAuthGrantRepositoryInterface {
+	return tx.OAuthGrant
+}
+
+// GetOAuthGrantReadOnlyRepository returns the OAuthGrant transaction repository's reads.
+func (tx *Tx) GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface {
+	return tx.OAuthGrant
+}
+
+// GetOAuthTokenRepository returns the OAuthToken transaction repository interface.
+func (tx *Tx) GetOAuthTokenRepository() OAuthTokenRepositoryInterface {
+	return tx.OAuthToken
+}
+
+// GetOAuthTokenReadOnlyRepository returns the OAuthToken transaction repository's reads.
+func (tx *Tx) GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface {
+	return tx.OAuthToken
 }
 
 // GetRoleRepository returns the Role transaction repository interface.

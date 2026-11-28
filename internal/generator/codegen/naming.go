@@ -32,9 +32,11 @@ var irregularPlurals = map[string]string{
 }
 
 // ToSnakeCase converts PascalCase, camelCase, or kebab-case strings to snake_case.
+// It splits only where a lower-case letter or digit meets a capital, as
+// ToKebabCase does.
 // Examples:
 //   - "UserName" -> "user_name"
-//   - "getHTTPResponse" -> "get_http_response"
+//   - "getHTTPResponse" -> "get_httpresponse"
 //   - "connector-requests" -> "connector_requests"
 func ToSnakeCase(s string) string {
 	s = strings.ReplaceAll(s, "-", "_")
@@ -42,10 +44,19 @@ func ToSnakeCase(s string) string {
 	return strings.ToLower(snake)
 }
 
-// ToKebabCase converts PascalCase or camelCase strings to kebab-case.
+// ToKebabCase converts PascalCase or camelCase strings to kebab-case. It
+// splits only where a lower-case letter or digit meets a capital, so a run
+// of capitals stays one word and an underscore stays.
 // Examples:
 //   - "UserName" -> "user-name"
-//   - "getHTTPResponse" -> "get-http-response"
+//   - "getHTTPResponse" -> "get-httpresponse"
+//   - "line_item" -> "line_item"
+//
+// It is not ir.Kebab (getHTTPResponse is get-http-response there, and
+// line_item line-item): its output is a wire name, an operation's route
+// and capability and a tool's name, which the engine derives the same way
+// (runtime/engine/testdata/tool_parameters_parity.json), so changing it
+// would move routes and tools a deployed API serves.
 func ToKebabCase(s string) string {
 	kebab := caseBoundaryRegex.ReplaceAllString(s, "${1}-${2}")
 	return strings.ToLower(kebab)
@@ -117,6 +128,64 @@ func ToPascalCase(s string) string {
 		s = strings.ToLower(s)
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// JoinCamelCase joins the parts of a snake_case or, without an underscore,
+// kebab-case name in camelCase, keeping each part's case past its first
+// letter: the first part's first letter is lowered and each other part's
+// raised. A name with neither separator only has its first letter lowered.
+// It is not ToCamelCase, which lowers each part first ("user_ID" is userID
+// here and userId there): the TypeScript SDK and the tool documents name
+// members and tool parameters with it (tsutil.ToCamelCase), so changing it
+// would move the names they expose.
+// Examples:
+//   - "send_magic_link" -> "sendMagicLink"
+//   - "SendMagicLink" -> "sendMagicLink"
+//   - "my-namespace" -> "myNamespace"
+func JoinCamelCase(name string) string {
+	separator := ""
+	switch {
+	case strings.Contains(name, "_"):
+		separator = "_"
+	case strings.Contains(name, "-"):
+		separator = "-"
+	default:
+		if len(name) > 0 {
+			return strings.ToLower(name[:1]) + name[1:]
+		}
+		return name
+	}
+	var result strings.Builder
+	for i, part := range strings.Split(name, separator) {
+		if len(part) == 0 {
+			continue
+		}
+		if i == 0 {
+			result.WriteString(strings.ToLower(part[:1]))
+		} else {
+			result.WriteString(strings.ToUpper(part[:1]))
+		}
+		result.WriteString(part[1:])
+	}
+	return result.String()
+}
+
+// JoinPascalCase joins the parts of a snake_case or kebab-case name in
+// PascalCase, raising each part's first letter and keeping the rest, as
+// JoinCamelCase does: the TypeScript SDK's class names (tsutil.ToClassName).
+// Examples:
+//   - "auth" -> "Auth"
+//   - "my-namespace" -> "MyNamespace"
+//   - "line_item" -> "LineItem"
+func JoinPascalCase(name string) string {
+	var result strings.Builder
+	for _, part := range strings.Split(strings.ReplaceAll(name, "_", "-"), "-") {
+		if len(part) > 0 {
+			result.WriteString(strings.ToUpper(part[:1]))
+			result.WriteString(part[1:])
+		}
+	}
+	return result.String()
 }
 
 // TitleCase converts strings to title case using English language rules.

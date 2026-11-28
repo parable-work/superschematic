@@ -92,7 +92,7 @@ var aliasedRulesTest string
 // TestRepositoriesMergeAnAliasedTable runs fixture-aliased-db's Company,
 // whose name is an Aliased field and which implements Mergeable (D147), on
 // both dialects: a name another company holds, as a name or an alias, is
-// refused with that company's key; a rename keeps the old name as an
+// refused, naming nothing of that company; a rename keeps the old name as an
 // alias, which resolve finds; a removed alias and a deleted company's
 // names are freed; and merge_into, on SQLite and on Postgres, moves the
 // aliases of the company merged away, its name among them, its names and
@@ -126,6 +126,107 @@ func TestRepositoriesMergeOnSQLiteAndPostgres(t *testing.T) {
 	runBehaviorRepositoriesWith(t, "fixture-merge-sqlite-db", "merge_rules", mergeRulesTest, true)
 }
 
+//go:embed testdata/orm/audience_rules.rs
+var audienceRulesTest string
+
+// audienceRulesCases are the cases audience_rules.rs runs, by name, each
+// of which it prints as it starts it: ormgen's
+// TestBehaviorOperationsKeepToTheCallerOnPostgres holds the Go ORM to the
+// same ones, and TestHeldBehaviorTablesOnPostgres to the deriver's.
+var audienceRulesCases = []string{
+	"a private row's and a named row's behaviors are not found for a user outside their audience, and write nothing",
+	"a private row's behaviors answer its owner",
+	"a named row's behaviors answer the principals it names",
+	"a party whose grant reaches the row runs its behaviors, and one whose grant reaches another row finds it not there",
+	"an agent run reads a read-only row's conversation, and its moves and posts are not found",
+	"a deriver fills a private note's summary, and another user still cannot read it",
+	"pick answers a user no runner it does not see",
+}
+
+// TestRepositoriesKeepBehaviorOperationsToTheCaller runs
+// fixture-audience-behaviors-db's Task, an @audience table whose status is
+// a Workflow and which holds a conversation, on Postgres (D156, D181,
+// D103): the repositories opened for a caller run a behavior operation on
+// a row only for a caller who may write it, or for one that writes
+// nothing (Comments' listMessages) one who sees it, as update_one and a
+// read are held, and any other caller's is not found before the core runs
+// and writes nothing. A private row answers its owner, a named row the
+// principals it names, a party the row its grant names, and an agent run
+// with read-only access its conversation's reads; the core reads the
+// row's audience ids, a UUID[], as a list. A deriver, through repositories
+// opened as its generated main.rs opens them, fills a private Note's
+// Derived summary, which another user still cannot read (D146); and Pool's
+// pick answers no member for a runner the caller does not see. Every case
+// of audienceRulesCases must run.
+//
+// It needs cargo, which it skips without, the database, and runs outside
+// -short.
+func TestRepositoriesKeepBehaviorOperationsToTheCaller(t *testing.T) {
+	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the Rust repositories' behavior operations under per-record access against Postgres")
+	}
+	out := runBehaviorRepositoriesWith(t, "fixture-audience-behaviors-db", "audience_rules", audienceRulesTest, true)
+	for _, name := range audienceRulesCases {
+		if !strings.Contains(out, "case: "+name+"\n") {
+			t.Errorf("the case %q did not run:\n%s", name, out)
+		}
+	}
+}
+
+//go:embed testdata/orm/audience_rules_sqlite.rs
+var audienceRulesSQLiteTest string
+
+// TestRepositoriesKeepBehaviorOperationsToTheCallerOnSQLite runs
+// fixture-audience-behaviors-db's Task on a SQLite file (D156, D182, D201,
+// #626), the cases of TestRepositoriesKeepBehaviorOperationsToTheCaller
+// but the deriver's, which ormgen's
+// TestBehaviorOperationsKeepToTheCallerOnSQLite runs over the Go
+// repositories: the SQLite repositories opened for a caller run a behavior
+// operation on a row only for a caller who may write it, or for a list
+// one who sees it, and any other caller's is not found before the core
+// runs and writes nothing; a private row answers its owner, a named row
+// the principals it names, a party the row its grant names, an agent run
+// with read-only access its conversation's reads; and Pool's pick answers
+// no member for a runner the caller does not see.
+//
+// It needs cargo, which it skips without, and runs outside -short.
+func TestRepositoriesKeepBehaviorOperationsToTheCallerOnSQLite(t *testing.T) {
+	out := runBehaviorRepositoriesWith(t, "fixture-audience-behaviors-db", "audience_rules_sqlite", audienceRulesSQLiteTest, true)
+	for _, name := range audienceRulesCases {
+		if strings.HasPrefix(name, "a deriver") {
+			continue
+		}
+		if !strings.Contains(out, "case: "+name+"\n") {
+			t.Errorf("the case %q did not run on SQLite:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(out, "the repositories ran on SQLite") {
+		t.Errorf("the SQLite cases did not finish:\n%s", out)
+	}
+}
+
+//go:embed testdata/orm/merge_access_rules.rs
+var mergeAccessRulesTest string
+
+// TestRepositoriesMergeKeepToTheirCaller runs fixture-merge-access-db's
+// labels, notes and brands on Postgres through repositories opened for a
+// caller (D147, D156, D181), as ormgen's TestMergeIntoKeepsToTheCallerOnPostgres
+// holds the Go ORM: a merge of a label the caller may not write, or into
+// one, is not found; one that would repoint a note the caller may not write
+// is refused, out_of_reach naming the table and no key of the note, and
+// writes nothing, where repositories opened for no caller repoint it; a
+// party merges two labels only when its grants reach the notes on the one
+// merged away; and Aliased's resolve answers a party no row for a brand its
+// grants do not reach, a name another brand holds is refused naming nothing
+// of it, and a party whose grants reach two brands merges one into the
+// other.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database it compiles the cases and runs none, and says so.
+func TestRepositoriesMergeKeepToTheirCaller(t *testing.T) {
+	runBehaviorRepositoriesWith(t, "fixture-merge-access-db", "merge_access_rules", mergeAccessRulesTest, true)
+}
+
 // runBehaviorRepositories generates fixture's Rust types with both
 // dialects' repositories and the core bound, holds the types crate to
 // cargo clippy, and runs source, the test crate's tests/<name>.rs, over the
@@ -138,8 +239,9 @@ func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 
 // runBehaviorRepositoriesWith is runBehaviorRepositories, the test crate
 // depending on the HTTP runtime's checkout as well when runtime is set,
-// for a test that runs the runtime's own loops over the repositories.
-func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, runtime bool) {
+// for a test that runs the runtime's own loops over the repositories, and
+// returns what the cases printed.
+func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, runtime bool) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping the behavior tables' cargo test in -short mode")
@@ -243,12 +345,15 @@ func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, run
 	if err != nil {
 		t.Fatalf("cargo test in %s: %v\n%s", crateDir, err, out)
 	}
+	// A source of SQLite cases alone has no Postgres half.
+	postgresHalf := strings.Contains(source, "the repositories ran on Postgres")
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
 		t.Log("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL is unset: the Postgres half did not run")
-	} else if !strings.Contains(string(out), "the repositories ran on Postgres") {
+	} else if postgresHalf && !strings.Contains(string(out), "the repositories ran on Postgres") {
 		t.Errorf("the Postgres half did not run:\n%s", out)
 	}
 	t.Logf("%s", out)
+	return string(out)
 }
 
 // ormBehaviorsManifest is the test crate's Cargo.toml, given the types

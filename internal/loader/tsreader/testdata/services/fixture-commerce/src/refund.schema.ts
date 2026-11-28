@@ -12,7 +12,6 @@ import { Validate, behavior } from "@superschematic/schema";
   outcomes: { rejected: "neutral", failed: "failure" },
 })
 @behavior("Approvals", { gates: { approved: { count: 2, permission: "refunds.approve" } } })
-@behavior("Links", { links: { order: { schema: "Checkout", required: true } } })
 @behavior("Numbering", { format: "RF-{yyyy}-{seq:5}", reset: "yearly" })
 @behavior("StateRules", { states: { requested: { required: ["amountCents", "reason"] }, approved: { frozen: "all" } } })
 @behavior("Payments", {

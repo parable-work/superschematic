@@ -22,6 +22,8 @@
 // SET NULL relations, indexes and raw SQL of D83.
 // TestWorkflowFieldsOnPostgres (workflow_fields_test.go) checks the columns
 // a table whose fields are behaviors takes, and its version (D103).
+// TestAudienceIndexOnPostgres (audience_index_test.go) checks the GIN index
+// over an @audience table's effective audience (D156).
 package pgcheck
 
 import (

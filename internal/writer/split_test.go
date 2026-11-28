@@ -2,6 +2,8 @@ package writer
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,7 +28,7 @@ func TestSplitSchemaCarriesRootExtensionsAndDocuments(t *testing.T) {
 
 	docs := SplitSchema(schema)
 	if len(docs) != 2 {
-		t.Fatalf("documents = %v", sortedKeys(docs))
+		t.Fatalf("documents = %v", slices.Sorted(maps.Keys(docs)))
 	}
 	first := docs["src/item.schema"]
 	if string(first.Extensions["acme"]) != `{"catalog":true}` {

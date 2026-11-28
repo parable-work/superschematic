@@ -26,7 +26,8 @@
 //! access never hides its log row.
 //!
 //! The grants and the table access log run on Postgres, with the
-//! `postgres` feature; the log's entries and [`Logged`] need none.
+//! `postgres` feature, and on a SQLite file, with the `sqlite` feature, in
+//! `access::sqlite` (D182, #611); the log's entries and [`Logged`] need neither.
 
 use async_trait::async_trait;
 use http::request::Parts;
@@ -165,35 +166,35 @@ impl<A: Authenticator> Authenticator for Logged<A> {
     }
 }
 
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use self::shared::*;
+
 #[cfg(feature = "postgres")]
 pub use self::grants::*;
 
-#[cfg(feature = "postgres")]
-mod grants {
+/// The grants and the table access log on a SQLite file (D156, D182,
+/// #611): the same reads and writes over the SQLite repositories.
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+
+/// What the grants and the table access log read and write in either
+/// dialect: a grant's token and its row, a role's reaches, whether a
+/// grant's own columns end it, the principal it establishes, and an access
+/// log entry's row.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod shared {
     use std::collections::BTreeMap;
-    use std::sync::Arc;
     use std::time::SystemTime;
 
-    use async_trait::async_trait;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine as _;
-    use deadpool_postgres::GenericClient;
-    use http::request::Parts;
-    use http::Method;
     use ring::rand::SecureRandom as _;
     use serde_json::{Map, Value};
 
-    use super::{AccessLog, AccessLogEntry};
-    use crate::auth::{
-        bearer_token, Authenticator, Credential, CredentialKind, GrantReach, Principal,
-        PrincipalKind,
-    };
+    use super::AccessLogEntry;
+    use crate::auth::{Credential, CredentialKind, GrantReach, Principal, PrincipalKind};
     use crate::civil::parse_rfc3339;
-    use crate::orm::postgres::{Repositories, Tables};
-    use crate::orm::{
-        rfc3339_millis, Definition, Error, FindOptions, Values, ACCESS_GRANTS, ACCESS_LOG,
-        ACCESS_ROLES,
-    };
+    use crate::orm::{rfc3339_millis, Definition, Error, FindOptions, Values, ACCESS_GRANTS};
     use crate::ApiError;
 
     /// The prefix of a grant's token, which tells a person and a secret
@@ -213,7 +214,7 @@ mod grants {
 
     /// A new grant's token: `grant_` and 43 characters of base64url, 32
     /// random bytes.
-    fn new_token() -> Result<String, Error> {
+    pub(crate) fn new_token() -> Result<String, Error> {
         let mut random = [0u8; 32];
         ring::rand::SystemRandom::new()
             .fill(&mut random)
@@ -253,8 +254,8 @@ mod grants {
         pub state: String,
     }
 
-    /// What [`issue_grant`] takes: the grant's row, but its key, its
-    /// token's hash and its stamps.
+    /// What `issue_grant` takes: the grant's row, but
+    /// its key, its token's hash and its stamps.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct IssueGrant {
         /// The principal the grant lets reach rows.
@@ -276,8 +277,8 @@ mod grants {
         pub ends_when: Option<EndsWhen>,
     }
 
-    /// A grant [`issue_grant`] made: its row and the token only its holder
-    /// is given.
+    /// A grant `issue_grant` made: its row and the
+    /// token only its holder is given.
     #[derive(Clone, Debug)]
     pub struct IssuedGrant {
         /// The grant's row.
@@ -286,7 +287,21 @@ mod grants {
         pub token: String,
     }
 
-    fn grants_of(definition: &Definition) -> Result<&str, Error> {
+    /// What `active_grants` keeps: a holder's
+    /// grants, a target's, or every one.
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    pub struct ActiveGrantsFilter {
+        /// The holder's id.
+        pub holder: Option<String>,
+        /// The target's table type.
+        pub target_type: Option<String>,
+        /// The target's key.
+        pub target_id: Option<String>,
+        /// The time the grants are held to; the clock's unless set.
+        pub now: Option<SystemTime>,
+    }
+
+    pub(crate) fn grants_of(definition: &Definition) -> Result<&str, Error> {
         definition
             .access_table(ACCESS_GRANTS)
             .map(|table| table.name.as_str())
@@ -295,19 +310,19 @@ mod grants {
             })
     }
 
-    fn eq(value: Value) -> Value {
+    pub(crate) fn eq(value: Value) -> Value {
         let mut held = Map::new();
         held.insert("eq".to_owned(), value);
         Value::Object(held)
     }
 
-    fn op(op: &str, value: Value) -> Value {
+    pub(crate) fn op(op: &str, value: Value) -> Value {
         let mut held = Map::new();
         held.insert(op.to_owned(), value);
         Value::Object(held)
     }
 
-    fn text(value: Option<&Value>) -> Option<&str> {
+    pub(crate) fn text(value: Option<&Value>) -> Option<&str> {
         value.and_then(Value::as_str)
     }
 
@@ -315,19 +330,9 @@ mod grants {
         text(value).and_then(parse_rfc3339)
     }
 
-    /// Makes a grant (D156) and its token, which only the holder is given:
-    /// `grant_` and 43 characters of base64url, 32 random bytes, stored as
-    /// the SHA-256 of the whole text. It writes through `repositories` as
-    /// they are, so the grant records who made it, and a caller the target
-    /// is no row of reaches none.
-    pub async fn issue_grant<C: GenericClient + Sync>(
-        repositories: &Repositories<'_, C>,
-        input: &IssueGrant,
-    ) -> Result<IssuedGrant, Error> {
-        let definition = repositories.definition();
-        let grants = repositories.table(grants_of(definition)?)?;
-        let token = new_token()?;
-        let now = repositories.session().now.unwrap_or_else(SystemTime::now);
+    /// The row of the grant `input` describes, whose token is `token`,
+    /// made at `now`.
+    pub(crate) fn grant_row(input: &IssueGrant, token: &str, now: SystemTime) -> Values {
         let stamp =
             |at: Option<SystemTime>| at.map_or(Value::Null, |at| Value::String(rfc3339_millis(at)));
         let mut row = Values::new();
@@ -361,99 +366,75 @@ mod grants {
         row.insert("endsWhenState".to_owned(), state);
         row.insert(
             "tokenHash".to_owned(),
-            Value::String(grant_token_hash(&token)),
+            Value::String(grant_token_hash(token)),
         );
         row.insert("createdAt".to_owned(), stamp(Some(now)));
-        let grant = grants.create_one(&row).await?;
-        Ok(IssuedGrant { grant, token })
+        row
     }
 
-    /// Revokes the grant whose key is `id` at `at`, as the system actor:
-    /// the next call its token makes is refused.
-    pub async fn revoke_grant<C: GenericClient + Sync>(
-        client: &C,
-        definition: &Definition,
-        id: &str,
-        at: SystemTime,
-    ) -> Result<(), Error> {
-        let system = Repositories::new(client, definition)?.as_system();
-        let grants = system.table(grants_of(definition)?)?;
+    /// The update that revokes a grant at `at`.
+    pub(crate) fn revoked_at(at: SystemTime) -> Values {
         let mut update = Values::new();
         update.insert("revokedAt".to_owned(), Value::String(rfc3339_millis(at)));
-        grants
-            .update_one(&Value::String(id.to_owned()), &update, &Default::default())
-            .await?;
-        Ok(())
+        update
     }
 
-    /// Why `grant` is not active at `now`, or none when it is (D156): it
-    /// was revoked, it has not started, it has ended by its date, its
-    /// target's field holds the state that ends it, or its target is gone.
-    /// The target is counted as the system actor, with no value of its
-    /// read, so an encrypted field of it needs no key.
-    pub async fn grant_ended<C: GenericClient + Sync>(
-        client: &C,
-        definition: &Definition,
-        grant: &Values,
-        now: SystemTime,
-    ) -> Result<Option<&'static str>, Error> {
+    /// What ends `grant` at `now` by its own columns: revoked, not started,
+    /// or expired by its date; none when they do not end it.
+    pub(crate) fn ended_by_row(grant: &Values, now: SystemTime) -> Option<&'static str> {
         if grant.get("revokedAt").is_some_and(|at| !at.is_null()) {
-            return Ok(Some("revoked"));
+            return Some("revoked");
         }
         if time(grant.get("startsAt")).is_some_and(|starts| starts > now) {
-            return Ok(Some("not started"));
+            return Some("not started");
         }
         if time(grant.get("endsAt")).is_some_and(|ends| ends <= now) {
-            return Ok(Some("expired"));
+            return Some("expired");
         }
-        let Some(field) = text(grant.get("endsWhenField")).filter(|field| !field.is_empty()) else {
-            return Ok(None);
-        };
-        let target_type = text(grant.get("targetType")).unwrap_or_default();
-        let Ok(target) = definition.table(target_type) else {
-            return Ok(Some("target gone"));
-        };
-        let system = Repositories::new(client, definition)?.as_system();
-        let rows = system.table(&target.name)?;
+        None
+    }
+
+    /// The state a grant ends by, when its target's field holds one: the
+    /// target's table, a filter of the target's row, and the field and the
+    /// state that end it. None for a grant that ends by no state.
+    pub(crate) struct EndsByState {
+        /// The target's table type, which may be no table of the database.
+        pub(crate) target_type: String,
+        /// The target's key, as its row's member holds it.
+        pub(crate) target_id: Value,
+        /// The target's field, and the state of it that ends the grant.
+        pub(crate) field: String,
+        pub(crate) state: Value,
+    }
+
+    pub(crate) fn ends_by_state(grant: &Values) -> Option<EndsByState> {
+        let field = text(grant.get("endsWhenField")).filter(|field| !field.is_empty())?;
+        Some(EndsByState {
+            target_type: text(grant.get("targetType")).unwrap_or_default().to_owned(),
+            target_id: grant.get("targetId").cloned().unwrap_or(Value::Null),
+            field: field.to_owned(),
+            state: grant.get("endsWhenState").cloned().unwrap_or(Value::Null),
+        })
+    }
+
+    /// The filter of the target's row a grant ending by its state names,
+    /// keyed by `key`, and with `state` the row whose field holds it.
+    pub(crate) fn target_filter(key: &str, ends: &EndsByState, state: bool) -> Values {
         let mut filter = Values::new();
-        filter.insert(
-            target.key.clone(),
-            eq(grant.get("targetId").cloned().unwrap_or(Value::Null)),
-        );
-        if rows.count(Some(&filter)).await? == 0 {
-            return Ok(Some("target gone"));
+        filter.insert(key.to_owned(), eq(ends.target_id.clone()));
+        if state {
+            filter.insert(ends.field.clone(), eq(ends.state.clone()));
         }
-        let state = grant.get("endsWhenState").cloned().unwrap_or(Value::Null);
-        filter.insert(field.to_owned(), eq(state));
-        Ok((rows.count(Some(&filter)).await? > 0).then_some("target ended"))
+        filter
     }
 
-    /// What [`active_grants`] keeps: a holder's grants, a target's, or
-    /// every one.
-    #[derive(Clone, Debug, Default, PartialEq, Eq)]
-    pub struct ActiveGrantsFilter {
-        /// The holder's id.
-        pub holder: Option<String>,
-        /// The target's table type.
-        pub target_type: Option<String>,
-        /// The target's key.
-        pub target_id: Option<String>,
-        /// The time the grants are held to; the clock's unless set.
-        pub now: Option<SystemTime>,
-    }
-
-    /// The read of the active grants (D156): each grant that has started,
-    /// has not ended by its date or its target's state, and was not
-    /// revoked, of a holder, of a target, or every one, read as the system
-    /// actor.
-    pub async fn active_grants<C: GenericClient + Sync>(
-        client: &C,
-        definition: &Definition,
+    /// The read of the grants that have started, have not ended by their
+    /// date and were not revoked at `now`, of a holder, of a target, or
+    /// every one, and the options it reads them with.
+    pub(crate) fn active_filter(
         filter: &ActiveGrantsFilter,
-    ) -> Result<Vec<Values>, Error> {
-        let system = Repositories::new(client, definition)?.as_system();
-        let grants = system.table(grants_of(definition)?)?;
-        let now = filter.now.unwrap_or_else(SystemTime::now);
+        now: SystemTime,
+    ) -> (Values, FindOptions) {
         let at = Value::String(rfc3339_millis(now));
         let mut wanted = Values::new();
         wanted.insert("revokedAt".to_owned(), op("isNull", Value::Bool(true)));
@@ -480,6 +461,245 @@ mod grants {
             skip_count: true,
             ..FindOptions::default()
         };
+        (wanted, options)
+    }
+
+    /// The filter of the grant whose token is `token`.
+    pub(crate) fn token_filter(token: &str) -> Values {
+        let mut filter = Values::new();
+        filter.insert(
+            "tokenHash".to_owned(),
+            eq(Value::String(grant_token_hash(token))),
+        );
+        filter
+    }
+
+    /// Refuses a grant whose token is no credential of a route: a calendar
+    /// feed's (D152), and, unless `runs`, an agent run's, which the agent
+    /// dispatcher's authenticator alone resolves (D193). Answers the
+    /// grant's target type.
+    pub(crate) fn admit_grant(grant: &Values, runs: bool) -> Result<String, ApiError> {
+        let target_type = text(grant.get("targetType")).unwrap_or_default().to_owned();
+        // A calendar feed's token reads its feed alone (D152): a leaked
+        // feed URL is no credential of any route.
+        if target_type == "CalendarFeed" || target_type.starts_with("CalendarFeed;") {
+            return Err(ApiError::unauthorized(
+                "A calendar feed's token reads its feed alone",
+            ));
+        }
+        // An agent run's token is the dispatcher's to resolve
+        // (`Agents::authenticator`), which narrows its permissions to
+        // whom it acts for and its paths to its party's grant, and holds
+        // its calls to its autonomy: as its grant's bare holder it would
+        // run with its role's permissions, neither narrowed nor gated
+        // (D193).
+        if !runs && text(grant.get("holderKind")) == Some("agent") {
+            return Err(ApiError::unauthorized(
+                "An agent run's token is resolved by the agent dispatcher's authenticator alone",
+            ));
+        }
+        Ok(target_type)
+    }
+
+    /// The refusal of a grant that ended for `ended`.
+    pub(crate) fn ended_refusal(ended: &str) -> ApiError {
+        ApiError::unauthorized(if ended == "not started" {
+            "The grant has not started"
+        } else {
+            "The grant has ended"
+        })
+    }
+
+    /// The filter of the role a grant names.
+    pub(crate) fn role_filter(grant: &Values) -> Values {
+        let mut by_name = Values::new();
+        by_name.insert(
+            "name".to_owned(),
+            eq(grant.get("role").cloned().unwrap_or(Value::Null)),
+        );
+        by_name
+    }
+
+    /// The principal an active grant establishes: its holder, of its kind,
+    /// with its role's permissions and the grant's reach, its credential
+    /// the grant's id.
+    pub(crate) fn grant_principal(
+        grant: &Values,
+        role: Option<&Values>,
+        target_type: String,
+    ) -> Principal {
+        let list = |member: &str| -> Vec<String> {
+            role.and_then(|role| role.get(member))
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let id = text(grant.get("id"))
+            .map(str::to_owned)
+            .or_else(|| grant.get("id").map(Value::to_string))
+            .unwrap_or_default();
+        let reaches = list("reaches");
+        let reach = GrantReach {
+            id: id.clone(),
+            target_type,
+            target_id: text(grant.get("targetId")).unwrap_or_default().to_owned(),
+            reaches: reaches_of(reaches.iter().map(String::as_str)),
+        };
+        let kind = if text(grant.get("holderKind")) == Some("agent") {
+            PrincipalKind::Agent
+        } else {
+            PrincipalKind::Party
+        };
+        Principal::new(
+            text(grant.get("holder")).unwrap_or_default(),
+            list("permissions"),
+        )
+        .of_kind(kind)
+        .with_grants(vec![reach])
+        .with_credential(Credential {
+            kind: CredentialKind::Grant,
+            id,
+        })
+    }
+
+    /// The row of the access log `entry` is, stamped `at`.
+    pub fn access_log_row(entry: &AccessLogEntry, at: SystemTime) -> Values {
+        let text = |value: &Option<String>| value.clone().map_or(Value::Null, Value::String);
+        let mut row = Values::new();
+        row.insert("at".to_owned(), Value::String(rfc3339_millis(at)));
+        row.insert("kind".to_owned(), Value::from(entry.kind.as_str()));
+        row.insert("principal".to_owned(), text(&entry.principal));
+        row.insert(
+            "principalKind".to_owned(),
+            entry
+                .principal_kind
+                .map_or(Value::Null, |kind| Value::from(kind.as_str())),
+        );
+        row.insert("actingFor".to_owned(), text(&entry.acting_for));
+        row.insert("credential".to_owned(), text(&entry.credential));
+        row.insert("operation".to_owned(), text(&entry.operation));
+        row.insert("targetType".to_owned(), text(&entry.target_type));
+        row.insert("targetId".to_owned(), text(&entry.target_id));
+        row.insert("field".to_owned(), text(&entry.field));
+        row
+    }
+}
+
+#[cfg(feature = "postgres")]
+mod grants {
+    use std::sync::Arc;
+    use std::time::SystemTime;
+
+    use async_trait::async_trait;
+    use deadpool_postgres::GenericClient;
+    use http::request::Parts;
+    use http::Method;
+
+    use super::shared::{
+        active_filter, admit_grant, ended_by_row, ended_refusal, ends_by_state, grant_principal,
+        grant_row, grants_of, new_token, revoked_at, role_filter, target_filter, token_filter,
+    };
+    use super::{
+        access_log_row, AccessLog, AccessLogEntry, ActiveGrantsFilter, IssueGrant, IssuedGrant,
+        GRANT_TOKEN_PREFIX,
+    };
+    use crate::auth::{bearer_token, Authenticator, Principal};
+    use crate::orm::postgres::{Repositories, Tables};
+    use crate::orm::{Definition, Error, FindOptions, Values, ACCESS_LOG, ACCESS_ROLES};
+    use crate::ApiError;
+
+    /// Makes a grant (D156) and its token, which only the holder is given:
+    /// `grant_` and 43 characters of base64url, 32 random bytes, stored as
+    /// the SHA-256 of the whole text. It writes through `repositories` as
+    /// they are, so the grant records who made it, and a caller the target
+    /// is no row of reaches none.
+    pub async fn issue_grant<C: GenericClient + Sync>(
+        repositories: &Repositories<'_, C>,
+        input: &IssueGrant,
+    ) -> Result<IssuedGrant, Error> {
+        let definition = repositories.definition();
+        let grants = repositories.table(grants_of(definition)?)?;
+        let token = new_token()?;
+        let now = repositories.session().now.unwrap_or_else(SystemTime::now);
+        let grant = grants.create_one(&grant_row(input, &token, now)).await?;
+        Ok(IssuedGrant { grant, token })
+    }
+
+    /// Revokes the grant whose key is `id` at `at`, as the system actor:
+    /// the next call its token makes is refused.
+    pub async fn revoke_grant<C: GenericClient + Sync>(
+        client: &C,
+        definition: &Definition,
+        id: &str,
+        at: SystemTime,
+    ) -> Result<(), Error> {
+        let system = Repositories::new(client, definition)?.as_system();
+        let grants = system.table(grants_of(definition)?)?;
+        grants
+            .update_one(
+                &serde_json::Value::String(id.to_owned()),
+                &revoked_at(at),
+                &Default::default(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Why `grant` is not active at `now`, or none when it is (D156): it
+    /// was revoked, it has not started, it has ended by its date, its
+    /// target's field holds the state that ends it, or its target is gone.
+    /// The target is counted as the system actor, with no value of its
+    /// read, so an encrypted field of it needs no key.
+    pub async fn grant_ended<C: GenericClient + Sync>(
+        client: &C,
+        definition: &Definition,
+        grant: &Values,
+        now: SystemTime,
+    ) -> Result<Option<&'static str>, Error> {
+        if let Some(ended) = ended_by_row(grant, now) {
+            return Ok(Some(ended));
+        }
+        let Some(ends) = ends_by_state(grant) else {
+            return Ok(None);
+        };
+        let Ok(target) = definition.table(&ends.target_type) else {
+            return Ok(Some("target gone"));
+        };
+        let system = Repositories::new(client, definition)?.as_system();
+        let rows = system.table(&target.name)?;
+        if rows
+            .count(Some(&target_filter(&target.key, &ends, false)))
+            .await?
+            == 0
+        {
+            return Ok(Some("target gone"));
+        }
+        Ok((rows
+            .count(Some(&target_filter(&target.key, &ends, true)))
+            .await?
+            > 0)
+        .then_some("target ended"))
+    }
+
+    /// The read of the active grants (D156): each grant that has started,
+    /// has not ended by its date or its target's state, and was not
+    /// revoked, of a holder, of a target, or every one, read as the system
+    /// actor.
+    pub async fn active_grants<C: GenericClient + Sync>(
+        client: &C,
+        definition: &Definition,
+        filter: &ActiveGrantsFilter,
+    ) -> Result<Vec<Values>, Error> {
+        let system = Repositories::new(client, definition)?.as_system();
+        let grants = system.table(grants_of(definition)?)?;
+        let now = filter.now.unwrap_or_else(SystemTime::now);
+        let (wanted, options) = active_filter(filter, now);
         let found = grants.find_many(Some(&wanted), &options).await?;
         let mut active = Vec::new();
         for row in found.rows {
@@ -561,95 +781,25 @@ mod grants {
                 .await
                 .map_err(|err| unreachable(&err))?;
             let system = Repositories::new(&client, definition)?.as_system();
-            let mut filter = Values::new();
-            filter.insert(
-                "tokenHash".to_owned(),
-                eq(Value::String(grant_token_hash(token))),
-            );
             let grant = system
                 .table(grants_of(definition)?)?
-                .find_one(Some(&filter), &FindOptions::default())
+                .find_one(Some(&token_filter(token)), &FindOptions::default())
                 .await?
                 .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
-            let target_type = text(grant.get("targetType")).unwrap_or_default().to_owned();
-            // A calendar feed's token reads its feed alone (D152): a leaked
-            // feed URL is no credential of any route.
-            if target_type == "CalendarFeed" || target_type.starts_with("CalendarFeed;") {
-                return Err(ApiError::unauthorized(
-                    "A calendar feed's token reads its feed alone",
-                ));
-            }
-            // An agent run's token is the dispatcher's to resolve
-            // (`Agents::authenticator`), which narrows its permissions to
-            // whom it acts for and its paths to its party's grant, and holds
-            // its calls to its autonomy: as its grant's bare holder it would
-            // run with its role's permissions, neither narrowed nor gated
-            // (D193).
-            if !self.runs && text(grant.get("holderKind")) == Some("agent") {
-                return Err(ApiError::unauthorized(
-                    "An agent run's token is resolved by the agent dispatcher's authenticator alone",
-                ));
-            }
+            let target_type = admit_grant(&grant, self.runs)?;
             let now = self.now.as_ref().map_or_else(SystemTime::now, |now| now());
             if let Some(ended) = grant_ended(&client, definition, &grant, now).await? {
-                return Err(ApiError::unauthorized(if ended == "not started" {
-                    "The grant has not started"
-                } else {
-                    "The grant has ended"
-                }));
+                return Err(ended_refusal(ended));
             }
             let roles = definition
                 .access_table(ACCESS_ROLES)
                 .map(|table| table.name.clone())
                 .unwrap_or_default();
-            let mut by_name = Values::new();
-            by_name.insert(
-                "name".to_owned(),
-                eq(grant.get("role").cloned().unwrap_or(Value::Null)),
-            );
             let role = system
                 .table(&roles)?
-                .find_one(Some(&by_name), &FindOptions::default())
+                .find_one(Some(&role_filter(&grant)), &FindOptions::default())
                 .await?;
-            let list = |member: &str| -> Vec<String> {
-                role.as_ref()
-                    .and_then(|role| role.get(member))
-                    .and_then(Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .map(str::to_owned)
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-            let id = text(grant.get("id"))
-                .map(str::to_owned)
-                .or_else(|| grant.get("id").map(Value::to_string))
-                .unwrap_or_default();
-            let reaches = list("reaches");
-            let reach = GrantReach {
-                id: id.clone(),
-                target_type,
-                target_id: text(grant.get("targetId")).unwrap_or_default().to_owned(),
-                reaches: reaches_of(reaches.iter().map(String::as_str)),
-            };
-            let kind = if text(grant.get("holderKind")) == Some("agent") {
-                PrincipalKind::Agent
-            } else {
-                PrincipalKind::Party
-            };
-            Ok(Principal::new(
-                text(grant.get("holder")).unwrap_or_default(),
-                list("permissions"),
-            )
-            .of_kind(kind)
-            .with_grants(vec![reach])
-            .with_credential(Credential {
-                kind: CredentialKind::Grant,
-                id,
-            }))
+            Ok(grant_principal(&grant, role.as_ref(), target_type))
         }
     }
 
@@ -702,28 +852,6 @@ mod grants {
             .map(|_| TableAccessLog {
                 tables: tables.clone(),
             }))
-    }
-
-    /// The row of the access log `entry` is, stamped `at`.
-    pub fn access_log_row(entry: &AccessLogEntry, at: SystemTime) -> Values {
-        let text = |value: &Option<String>| value.clone().map_or(Value::Null, Value::String);
-        let mut row = Values::new();
-        row.insert("at".to_owned(), Value::String(rfc3339_millis(at)));
-        row.insert("kind".to_owned(), Value::from(entry.kind.as_str()));
-        row.insert("principal".to_owned(), text(&entry.principal));
-        row.insert(
-            "principalKind".to_owned(),
-            entry
-                .principal_kind
-                .map_or(Value::Null, |kind| Value::from(kind.as_str())),
-        );
-        row.insert("actingFor".to_owned(), text(&entry.acting_for));
-        row.insert("credential".to_owned(), text(&entry.credential));
-        row.insert("operation".to_owned(), text(&entry.operation));
-        row.insert("targetType".to_owned(), text(&entry.target_type));
-        row.insert("targetId".to_owned(), text(&entry.target_id));
-        row.insert("field".to_owned(), text(&entry.field));
-        row
     }
 
     #[async_trait]

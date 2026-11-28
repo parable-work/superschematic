@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,7 +110,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <service-dir>/../../dist)")
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.apiLanguage, "api-language", "", "build the target's API server in this language (GO, RUST or TYPESCRIPT) instead of its config's outputs.api.language")
 	cmd.Flags().StringArrayVar(&flags.rewriteMigrations, "rewrite-migration", nil, "write this projection migration stamp's files again and record them in projections.lock, for a stamp no database has applied; repeatable")
 	return cmd
@@ -130,12 +129,15 @@ func targetImportsSiblingSentinels(servicePath string, reg *registry.Registry) b
 		spec, ok := reg.Kind(kind)
 		return ok && spec.ImportsSiblingSentinels
 	}
-	if cfg, err := schemaconfig.ReadFile(servicePath, reg); err == nil {
-		return imports(string(cfg.Kind))
-	} else if !errors.Is(err, os.ErrNotExist) {
+	path, form, ok, err := schemaconfig.Locate(servicePath)
+	if err != nil || !ok {
 		return false
 	}
-	data, err := os.ReadFile(filepath.Join(servicePath, "schema.config.ts"))
+	if form != schemaconfig.FormTS {
+		cfg, err := schemaconfig.ReadFile(servicePath, reg)
+		return err == nil && imports(string(cfg.Kind))
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
@@ -162,7 +164,11 @@ var configImportPattern = regexp.MustCompile(`(?m)^\s*import\b[^'"]*['"]([^'"]+)
 // it needs no compiler program; a false positive only triggers an extra
 // idempotent sentinel sweep.
 func configImportsSentinels(servicePath string, n naming.Naming) bool {
-	data, err := os.ReadFile(filepath.Join(servicePath, "schema.config.ts"))
+	path, form, ok, err := schemaconfig.Locate(servicePath)
+	if err != nil || !ok || form != schemaconfig.FormTS {
+		return false
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
@@ -205,11 +211,7 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 	}
 	repoRoot := filepath.Dir(schemasRoot)
 	buildcache.SetSchemasRoot(schemasRoot)
-	names, err := resolveNaming(flags.namingPath, schemasRoot)
-	if err != nil {
-		return err
-	}
-	reg, err := a.resolveRegistry(names)
+	names, reg, err := a.openNaming(flags.namingPath, schemasRoot)
 	if err != nil {
 		return err
 	}

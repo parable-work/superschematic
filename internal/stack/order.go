@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -165,22 +166,21 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 // as a server does (D52), and so does a site, whose config names the
 // public addresses of the servers it calls (D55). A server's calls to the
 // APIs it serves itself do not order it. An app rolls out after its
-// callees and after each server of its API (D78), whose start deploys the
-// engine document the app's engine waits for. A cycle of calls between
+// callees and after each server of its API (D78). A cycle of calls between
 // servers has no such order and fails.
 func (r *resolver) orderRollout() {
 	callees := map[string][]string{}
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		if e := r.edges[id].res; (e.Kind == ir.EdgeHTTP || e.Kind == ir.EdgeSite) && e.From != e.To {
 			callees[e.From] = append(callees[e.From], e.To)
 		}
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		app := r.deployables[name].res
 		if app.Kind != ir.DeployableApp || app.App == nil {
 			continue
 		}
-		for _, server := range sortedKeys(r.deployables) {
+		for _, server := range slices.Sorted(maps.Keys(r.deployables)) {
 			d := r.deployables[server].res
 			if d.Kind == ir.DeployableServer && slices.ContainsFunc(d.Services, func(s ir.ServiceRef) bool { return s.Name == app.App.API }) &&
 				!slices.Contains(callees[name], server) {
@@ -215,7 +215,7 @@ func (r *resolver) orderRollout() {
 		waves[name] = wave
 		return wave
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		if r.deployables[name].res.Kind.RollsOut() && !cycle {
 			visit(name)
 		}

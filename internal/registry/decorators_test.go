@@ -14,9 +14,9 @@ import (
 func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	reg := New(naming.Naming{})
 	want := map[DecoratorTarget][]string{
-		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "allowUnknownFields", "versioned", "optimistic", "versionGraph", "graphMember", "index", "rawSql", "table", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "tasks", "task", "job", "queue", "worker", "enqueueOnChange", "stateMachine", "fenced", "audience", "accessGrants", "accessLog", "calendarSource", "event", "notifier", "channelIdentities", "party", "conversations", "runRequests", "agents", "references", "attachments", "searchable", "query", "seedRoles", "deriver", "channel", "key", "app", "behaviorWorker", "providers"},
+		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "allowUnknownFields", "versioned", "optimistic", "versionGraph", "graphMember", "index", "rawSql", "table", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "tasks", "task", "job", "queue", "worker", "enqueueOnChange", "stateMachine", "fenced", "audience", "accessGrants", "accessLog", "calendarSource", "event", "notifier", "channelIdentities", "party", "conversations", "runRequests", "agents", "references", "attachments", "searchable", "query", "seedRoles", "seedRows", "deriver", "channel", "key", "app", "behaviorWorker", "providers"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "decrypted", "sourceMustProject", "docs", "purpose", "icon", "uiControl", "display", "column"},
-		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration", "behaviorOperations", "graphOperations", "auth", "publicRoute", "requirePermission"},
+		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration", "behaviorOperations", "graphOperations", "rowFeatureOperations", "triageOperations", "auth", "publicRoute", "requirePermission"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "paginated", "tableOperation", "docs", "mcp", "icon", "idempotent", "httpBinaryStream", "autonomy"},
 	}
 	total := 0
@@ -410,6 +410,20 @@ func TestIdentityRoutesApply(t *testing.T) {
 		// D114: apiKeys adds the API key routes, false when absent.
 		{map[string]any{"apiKeys": true}, ir.UserSessionsConfig{APIKeys: true}},
 		{map[string]any{"apiKeys": false, "register": true}, ir.UserSessionsConfig{Register: true}},
+		// #695: oauth true is every default, false none, and an object
+		// sets the members it names.
+		{map[string]any{"oauth": true}, ir.UserSessionsConfig{OAuth: &ir.IdentityOAuthConfig{}}},
+		{map[string]any{"oauth": false}, ir.UserSessionsConfig{}},
+		{
+			map[string]any{"oauth": map[string]any{
+				"accessTokenTtlSeconds": 900.0, "refreshTokenTtlSeconds": 86400.0, "grantMaxTtlSeconds": 86400.0,
+				"clients": map[string]any{"registration": false}, "consentPath": "/connect",
+			}},
+			ir.UserSessionsConfig{OAuth: &ir.IdentityOAuthConfig{
+				AccessTokenTTLSeconds: 900, RefreshTokenTTLSeconds: 86400, GrantMaxTTLSeconds: 86400,
+				Clients: &ir.IdentityOAuthClients{Registration: new(false)}, ConsentPath: "/connect",
+			}},
+		},
 		// D81: registration, defaultRoles and firstUser; "open" is the
 		// default and leaves Registration empty.
 		{map[string]any{"register": true, "registration": "open"}, ir.UserSessionsConfig{Register: true}},
@@ -447,6 +461,13 @@ func TestIdentityRoutesApply(t *testing.T) {
 	if want := (&ir.UserAdministrationConfig{APIKeys: true}); !reflect.DeepEqual(keyed.UserAdministration, want) {
 		t.Errorf("userAdministration({apiKeys: true}) = %+v, want %+v", keyed.UserAdministration, want)
 	}
+	oauthAdmin := &ir.OperationSet{}
+	if err := apply("userAdministration", oauthAdmin, map[string]any{"oauth": true}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.UserAdministrationConfig{OAuth: true}); !reflect.DeepEqual(oauthAdmin.UserAdministration, want) {
+		t.Errorf("userAdministration({oauth: true}) = %+v, want %+v", oauthAdmin.UserAdministration, want)
+	}
 	if want := (&ir.UserAdministrationConfig{Path: "admin"}); !reflect.DeepEqual(admin.UserAdministration, want) {
 		t.Errorf("userAdministration({ path }) = %+v, want %+v", admin.UserAdministration, want)
 	}
@@ -471,7 +492,7 @@ func TestIdentityRoutesApply(t *testing.T) {
 		want string
 	}{
 		{"userSessions", map[string]any{"login": false, "register": true}, "@userSessions: register needs the login; drop register: true or login: false"},
-		{"userSessions", map[string]any{"roles": true}, `@userSessions config has unknown key "roles"; it takes apiKeys, defaultRoles, firstUser, login, path, register and registration`},
+		{"userSessions", map[string]any{"roles": true}, `@userSessions config has unknown key "roles"; it takes apiKeys, defaultRoles, firstUser, login, oauth, path, register and registration`},
 		{"userSessions", map[string]any{"login": false, "apiKeys": true}, "@userSessions: apiKeys needs the login, since a key is made by a caller signed in with a session; drop apiKeys: true or login: false"},
 		{"userSessions", map[string]any{"registration": "approval"}, "@userSessions: registration configures register, so it needs register: true"},
 		{"userSessions", map[string]any{"defaultRoles": []any{"member"}, "firstUser": map[string]any{"role": "admin", "permissions": []any{"identity"}}}, "@userSessions: defaultRoles and firstUser configure register, so they need register: true"},
@@ -486,7 +507,18 @@ func TestIdentityRoutesApply(t *testing.T) {
 		{"userSessions", map[string]any{"login": "yes"}, "@userSessions login must be true or false"},
 		{"userSessions", map[string]any{"path": 1.0}, "@userSessions path must be a string literal"},
 		{"userSessions", "auth", "@userSessions config must be an object literal"},
-		{"userAdministration", map[string]any{"register": true}, `@userAdministration config has unknown key "register"; it takes apiKeys and path`},
+		{"userSessions", map[string]any{"login": false, "oauth": true}, "@userSessions: oauth needs the login, since a person signs in to consent; drop oauth or login: false"},
+		{"userSessions", map[string]any{"oauth": "yes"}, "@userSessions oauth must be true or an object literal: { accessTokenTtlSeconds?, refreshTokenTtlSeconds?, grantMaxTtlSeconds?, clients?, consentPath? }"},
+		{"userSessions", map[string]any{"oauth": map[string]any{"issuer": "x"}}, `@userSessions oauth has unknown key "issuer"; it takes accessTokenTtlSeconds, clients, consentPath, grantMaxTtlSeconds and refreshTokenTtlSeconds`},
+		{"userSessions", map[string]any{"oauth": map[string]any{"accessTokenTtlSeconds": 0.0}}, "@userSessions oauth.accessTokenTtlSeconds must be a positive whole number of seconds"},
+		{"userSessions", map[string]any{"oauth": map[string]any{"accessTokenTtlSeconds": 1.5}}, "@userSessions oauth.accessTokenTtlSeconds must be a positive whole number of seconds"},
+		{"userSessions", map[string]any{"oauth": map[string]any{"accessTokenTtlSeconds": 2592000.0}}, "@userSessions oauth: an access token's lifetime (2592000 s) must be shorter than a refresh token's (2592000 s)"},
+		{"userSessions", map[string]any{"oauth": map[string]any{"grantMaxTtlSeconds": 3600.0 * 24}}, "@userSessions oauth: a refresh token's lifetime (2592000 s) must be no longer than a grant's (86400 s)"},
+		{"userSessions", map[string]any{"oauth": map[string]any{"clients": map[string]any{"metadataDocuments": false, "registration": false}}}, "@userSessions oauth.clients turns off both kinds of client, so no client could connect; keep metadataDocuments or registration"},
+		{"userSessions", map[string]any{"oauth": map[string]any{"clients": map[string]any{"dcr": true}}}, `@userSessions oauth.clients has unknown key "dcr"; it takes metadataDocuments and registration`},
+		{"userSessions", map[string]any{"oauth": map[string]any{"consentPath": ""}}, "@userSessions oauth.consentPath must be a non-empty string, the path or URL of the project's consent page"},
+		{"userAdministration", map[string]any{"oauth": "yes"}, "@userAdministration oauth must be true or false"},
+		{"userAdministration", map[string]any{"register": true}, `@userAdministration config has unknown key "register"; it takes apiKeys, oauth and path`},
 	} {
 		set := &ir.OperationSet{}
 		err := apply(tc.name, set, tc.arg)

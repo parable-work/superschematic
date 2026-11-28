@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+{{- if .HeldByAccess }}
+	"strings"
+{{- end }}
 
 	"github.com/jackc/pgx/v5"
 {{- if .MergeKeysAreTypes }}
@@ -40,6 +43,16 @@ var ErrMergeSelf = errors.New("a row cannot be merged into itself")
 // itself: repointing it would make the row reference itself. Point it
 // elsewhere first.
 var ErrMergeSelfReference = errors.New("the row that stays references the row merged away")
+{{- if .HeldByAccess }}
+
+// ErrMergeOutOfReach is returned by MergeInto, before it writes, when a
+// row it would repoint or delete, one that references the row merged away,
+// is one the operation's caller may not write (D156, D180): a merge writes
+// the rows of every table that references the row, and keeps to its caller
+// as each of their own writes does. The error names the table. A context
+// outside any operation, and AsSystem's, writes every row.
+var ErrMergeOutOfReach = errors.New("a row the merge would write is one the caller may not write")
+{{- end }}
 
 // mergeStatement is one statement of a merge: its SQL, which takes the key
 // of the row merged away as $1 and the key of the row that stays as $2,
@@ -77,6 +90,15 @@ type mergeStep struct {
 	before     []mergeStatement
 	collisions []mergeStatement
 	repoint    mergeStatement
+	{{- if .HeldByAccess }}
+	// reachType is the table whose per-record access holds the rows the
+	// step writes (D156), and reachRows the read of one of them, taking the
+	// key of the row merged away as $1, which the caller's conditions of a
+	// write of reachType's rows are added to; "" for a step whose rows are
+	// the merged rows' own (sqlutil.MergeStep.Reach).
+	reachType string
+	reachRows string
+	{{- end }}
 }
 {{- range .Repositories }}
 {{- if .Merge }}
@@ -105,11 +127,15 @@ var {{ lowerFirst .TypeName }}MergeSteps = []mergeStep{
 		},
 		{{- end }}
 		repoint: mergeStatement{sql: {{ goRawString .Repoint.SQL }}{{ if .Repoint.Actor }}, actor: true{{ end }}},
+		{{- if and $.HeldByAccess .Reach }}
+		reachType: {{ printf "%q" .Reach.Type }},
+		reachRows: {{ goRawString .Reach.Rows }},
+		{{- end }}
 	},
 {{- end }}
 }
 
-{{ docComment "" (printf "MergeInto folds the %s row from into the row into (D147), in one transaction, the repository's own when it runs in one. It locks both rows, and for each relation of the schema that references %s it deletes the rows that reference from and that a unique index of their table would refuse once they referenced into, stamping one deleted where its table deletes softly and the index holds live rows alone, then repoints every other row that references from to into, deleted rows among them; the rows of a @manyToMany's join table and a @hasMany's back-reference are relations too. Then it deletes from as DeleteOne does%s%s. It returns how many rows of each table it repointed and deleted. It returns ErrMergeSelf, wrapped, when from and into are one row,%s ErrNotFound, wrapped, when either is no%s row, and ErrMergeSelfReference, wrapped, when into references from through a relation of %s to itself; it checks no longer cycle. A refused merge writes nothing. A relation of another schema's table, or of a table outside the schema, is not repointed: its foreign key decides what the delete of from does to it." .TypeName .TypeName (or (and .HasSoftDelete ", softly") "") (or (and .HasBehaviors ", through the behaviors' core") "") (or (and .Merge.RequiresUser " ErrNoUserInContext when the context names no user, since the merge stamps a row deleted,") "") (or (and .HasSoftDelete " live") "") .TypeName) }}
+{{ docComment "" (printf "MergeInto folds the %s row from into the row into (D147), in one transaction, the repository's own when it runs in one. It locks both rows, and for each relation of the schema that references %s it deletes the rows that reference from and that a unique index of their table would refuse once they referenced into, stamping one deleted where its table deletes softly and the index holds live rows alone, then repoints every other row that references from to into, deleted rows among them; the rows of a @manyToMany's join table and a @hasMany's back-reference are relations too. Then it deletes from as DeleteOne does%s%s. It returns how many rows of each table it repointed and deleted. It returns ErrMergeSelf, wrapped, when from and into are one row,%s ErrNotFound, wrapped, when either is no%s row, and ErrMergeSelfReference, wrapped, when into references from through a relation of %s to itself; it checks no longer cycle.%s A refused merge writes nothing. A relation of another schema's table, or of a table outside the schema, is not repointed: its foreign key decides what the delete of from does to it." .TypeName .TypeName (or (and .HasSoftDelete ", softly") "") (or (and .HasBehaviors ", through the behaviors' core") "") (or (and .Merge.RequiresUser " ErrNoUserInContext when the context names no user, since the merge stamps a row deleted,") "") (or (and .HasSoftDelete " live") "") .TypeName (or (and $.HeldByAccess " Under WithPrincipal (D156, D180) it keeps to the caller: either row the caller may not write is ErrNotFound, and a row of another table it would repoint or delete that the caller may not write is ErrMergeOutOfReach, wrapped, naming the table, each before it writes.") "")) }}
 func (r *{{ .Name }}) MergeInto(ctx context.Context, from, into {{ .PrimaryKeyType }}) (*MergeResult, error) {
 	if from == into {
 		return nil, fmt.Errorf("merge {{ .TypeName }} %v: %w", from, ErrMergeSelf)
@@ -184,6 +210,31 @@ func (r *{{ .Name }}) MergeInto(ctx context.Context, from, into {{ .PrimaryKeyTy
 		if !hasInto {
 			return nil, fmt.Errorf("merge {{ .TypeName }}: into %v: %w", into, ErrNotFound)
 		}
+		{{- if $.HeldByAccess }}
+		// Every row a step would repoint or delete is one the caller may
+		// write (D156, D180), read with from locked, so no row comes to
+		// reference it before the steps run: one the caller may not write
+		// refuses the merge, naming its table, before a statement writes.
+		for _, step := range {{ lowerFirst .TypeName }}MergeSteps {
+			if step.reachType == "" {
+				continue
+			}
+			args := []any{fromKey}
+			paramNum := 1
+			conditions := accessConditions(ctx, step.reachType, &args, &paramNum, true)
+			if len(conditions) == 0 {
+				continue
+			}
+			var beyond bool
+			query := "SELECT EXISTS (" + step.reachRows + " AND NOT COALESCE((" + strings.Join(conditions, " AND ") + "), FALSE))"
+			if err := tx.QueryRow(ctx, query, args...).Scan(&beyond); err != nil {
+				return nil, fmt.Errorf("merge {{ .TypeName }}: read the access of %s: %w", step.reachType, err)
+			}
+			if beyond {
+				return nil, fmt.Errorf("merge {{ .TypeName }} %v: %s holds a row that references it, which the caller may not write: %w", from, step.reachType, ErrMergeOutOfReach)
+			}
+		}
+		{{- end }}
 		result = &MergeResult{Repointed: map[string]int{}, Deleted: map[string]int{}}
 		{{- if .Merge.HistoryActor }}
 		// A row a step deletes of a @versioned table leaves a tombstone,

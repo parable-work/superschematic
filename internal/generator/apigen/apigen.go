@@ -57,13 +57,7 @@ type Param struct {
 	IsMap           bool
 	DefaultValue    *string
 
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
+	ir.ValueRules
 
 	// Reference is the reference the argument or field holds (D61), as
 	// written or, for a field, derived from a relation's key, resolved in
@@ -376,15 +370,8 @@ type APIOutput struct {
 	// directive, since a replace in the ORM's go.mod does not reach it.
 	UpstreamVersionGraph bool
 
-	// Engine is the API's engine database (D58), nil when its database
-	// holds no engine type: a server of the API opens the engine on it and
-	// mounts its routes, and the permission catalog lists the permissions
-	// the engine's permission policy asks of each engine type.
-	Engine *EngineInfo
-
-	// TableDerivers are the API's derivers that fill tables that implement
-	// Derived (D146), sorted by name; those that fill engine types are
-	// Engine's.
+	// TableDerivers are the API's derivers, each of which fills tables
+	// that implement Derived (D146), sorted by name.
 	TableDerivers []DeriverInfo
 
 	// GoDerivers are the derivers of a Go API's server output (D146), its
@@ -436,6 +423,14 @@ type APIOutput struct {
 	// from. Both are nil in the output Generate returns.
 	GraphEndpoints []EndpointInfo
 	Graphs         *GraphsInfo
+
+	// RowFeatureEndpoints are the operations of the API's
+	// @rowFeatureOperations sets (#723), which rowfeatures.go serves through
+	// References() and Attachments() of the ORM of the API's database:
+	// ImplementedOutput moves them here from Endpoints, so the Go server
+	// mounts them on its handlers and implements none of them. Nil in the
+	// output Generate returns.
+	RowFeatureEndpoints []EndpointInfo
 
 	// graphOwner is the API's schema, which holds each @graphOperations
 	// set, and graphSchemas its dependencies, its database's among them,
@@ -529,6 +524,11 @@ type APIOutput struct {
 	// the dispatch layer before WriteAPI.
 	EnvConfig *envgen.ConfigOutput `json:"-"`
 
+	// MCP is the API's MCP endpoint with outputs.api.mcp on (D81, D116,
+	// #660), which mcp.go mounts; nil without it. The generator package
+	// sets it on the Go server's output (mcp_go.go).
+	MCP *GoMCP `json:"-"`
+
 	// Deps is what the generated Deps holds beside the config and the
 	// logger. Generate sets the upstream auth schema's ORM for a public
 	// API; the dispatch layer sets the rest with SetDeps before WriteAPI.
@@ -560,9 +560,6 @@ type APIOutput struct {
 	SchemaRuntimeReplacePath string
 	PtrReplacePath           string
 	VersionGraphReplacePath  string
-	// EngineReplacePath replaces the engine's Go binding, which Deps holds
-	// an engine of when the API has an engine database (D58).
-	EngineReplacePath string
 	// RulesReplacePath replaces the rules module, which the ORM of a
 	// database whose tables' fields are behaviors requires, and which
 	// behaviors.go imports (D103; Deps.Rules).
@@ -592,10 +589,10 @@ func (o *APIOutput) TypesModuleReplaces() []string {
 // TableEndpoints, in Generate's order (by path, then method). Without the
 // last three they are Endpoints.
 func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
-	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 {
+	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 && len(o.RowFeatureEndpoints) == 0 {
 		return o.Endpoints
 	}
-	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints)
+	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints, o.RowFeatureEndpoints)
 }
 
 // ManualEndpoints are the @manualRouteRegistration endpoints among
@@ -809,9 +806,9 @@ func (p Param) queryParamUsesTypes() bool {
 	case p.IsArray, strings.HasPrefix(p.GoType, "types."):
 		return true
 	case p.IsInt, p.IsFloat:
-		return p.ValidateMin != nil || p.ValidateMax != nil
+		return p.HasRange()
 	case p.IsString:
-		return p.ValidateMinLength != nil || p.ValidateMaxLength != nil || p.ValidatePattern != ""
+		return p.HasText()
 	}
 	return false
 }
@@ -827,7 +824,7 @@ func (p Param) queryArgUsesTypes() bool {
 	case p.IsArray:
 		return true
 	case p.IsInt, p.IsFloat:
-		return p.ValidateMin != nil || p.ValidateMax != nil
+		return p.HasRange()
 	case p.IsBool:
 		return false
 	}
@@ -940,11 +937,6 @@ type Options struct {
 	// operation needs it.
 	IdempotencyTable *ir.IdempotencyTable
 
-	// Engine is the API's engine database (D58), nil when its database
-	// holds no engine type. The generator package reads it from the
-	// database's IR and config.
-	Engine *EngineInfo
-
 	// TableDerivers are the API's derivers that fill tables that implement
 	// Derived (D146), which the generator package reads from the
 	// database's IR.
@@ -1008,7 +1000,6 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		Timestamp:           opts.Clock.RFC3339(),
 		SystemUserUUID:      "00000000-0000-4000-8000-000000000000",
 		UUIDTypeExpr:        resolveUUIDTypeExpr(schema),
-		Engine:              opts.Engine,
 		TableDerivers:       opts.TableDerivers,
 	}
 
@@ -1077,6 +1068,15 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		}
 		output.setTableDeps()
 	}
+	// A table's references and files run through References() and
+	// Attachments() of the ORM of the API's database (#723), which Deps
+	// holds too.
+	if db := rowFeatureDatabase(output.Endpoints); db != "" {
+		if output.Deps.Database == "" {
+			output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), Rules: DeclaresTableBehaviors(opts.Dependencies[db])}
+		}
+		output.setTableDeps()
+	}
 
 	if err := output.summarizeEndpoints(); err != nil {
 		return nil, err
@@ -1127,10 +1127,8 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 // permissionCatalog is the API's permissions.json, from every endpoint, the
 // user model's included, a behavior operation's with the permissions its
 // behavior's config names, which the core checks (D103), any other with
-// the permissions writes says the core checks on its writes (D104), and
-// from the engine its server mounts, whose permission policy asks
-// <Type>.<action> of each engine type (D58), or "" when none names a
-// permission.
+// the permissions writes says the core checks on its writes (D104), or ""
+// when none names a permission.
 func permissionCatalog(output *APIOutput, schema *ir.Schema, writes func(op *ir.FieldDef) []string) (string, error) {
 	operations := make([]permcatalog.Operation, len(output.Endpoints))
 	for i, endpoint := range output.Endpoints {
@@ -1150,15 +1148,7 @@ func permissionCatalog(output *APIOutput, schema *ir.Schema, writes func(op *ir.
 			Identity:    endpoint.IdentityOperation != "",
 		}
 	}
-	var engine []permcatalog.EnginePermission
-	if output.Engine.PermissionPolicy() {
-		for _, typ := range output.Engine.Types {
-			for _, action := range EnginePermissionActions {
-				engine = append(engine, permcatalog.EnginePermission{Database: output.Engine.Database, Namespace: output.Engine.Namespace, Schema: typ, Action: action})
-			}
-		}
-	}
-	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations, engine...)
+	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations)
 	if !ok {
 		return "", nil
 	}
@@ -1805,23 +1795,17 @@ func (m *typeMapper) isPathParamType(ref ir.TypeRef) bool {
 // parse strategy resolved.
 func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 	param := Param{
-		Name:              arg.Name,
-		GoName:            codegen.ToPascalCase(arg.Name),
-		Type:              arg.TypeRef.Name,
-		Required:          arg.Required,
-		IsArray:           arg.TypeRef.IsArray,
-		IsArrayOfArrays:   arg.TypeRef.IsArrayOfArrays,
-		IsMap:             arg.TypeRef.IsMap,
-		DefaultValue:      arg.Default,
-		ValidateMin:       arg.ValidateMin,
-		ValidateMax:       arg.ValidateMax,
-		ValidateMinLength: arg.ValidateMinLength,
-		ValidateMaxLength: arg.ValidateMaxLength,
-		ValidateListMin:   arg.ValidateListMin,
-		ValidateListMax:   arg.ValidateListMax,
-		ValidatePattern:   arg.ValidatePattern,
-		Reference:         resolveReference(m.schema, m.dependencies, arg.References),
-		Search:            arg.Search,
+		Name:            arg.Name,
+		GoName:          codegen.ToPascalCase(arg.Name),
+		Type:            arg.TypeRef.Name,
+		Required:        arg.Required,
+		IsArray:         arg.TypeRef.IsArray,
+		IsArrayOfArrays: arg.TypeRef.IsArrayOfArrays,
+		IsMap:           arg.TypeRef.IsMap,
+		DefaultValue:    arg.Default,
+		ValueRules:      arg.ValueRules,
+		Reference:       resolveReference(m.schema, m.dependencies, arg.References),
+		Search:          arg.Search,
 	}
 	m.applyGoMapping(&param, arg.TypeRef.Name)
 	return param, nil
@@ -1907,21 +1891,15 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
 		param := Param{
-			Name:              field.Name,
-			GoName:            codegen.ToPascalCase(field.Name),
-			Type:              field.TypeRef.Name,
-			Required:          field.Required,
-			IsArray:           field.TypeRef.IsArray,
-			IsArrayOfArrays:   field.TypeRef.IsArrayOfArrays,
-			IsMap:             field.TypeRef.IsMap,
-			ValidateMin:       field.ValidateMin,
-			ValidateMax:       field.ValidateMax,
-			ValidateMinLength: field.ValidateMinLength,
-			ValidateMaxLength: field.ValidateMaxLength,
-			ValidateListMin:   field.ValidateListMin,
-			ValidateListMax:   field.ValidateListMax,
-			ValidatePattern:   field.ValidatePattern,
-			Reference:         m.fieldReference(typeDef, field),
+			Name:            field.Name,
+			GoName:          codegen.ToPascalCase(field.Name),
+			Type:            field.TypeRef.Name,
+			Required:        field.Required,
+			IsArray:         field.TypeRef.IsArray,
+			IsArrayOfArrays: field.TypeRef.IsArrayOfArrays,
+			IsMap:           field.TypeRef.IsMap,
+			ValueRules:      field.ValueRules,
+			Reference:       m.fieldReference(typeDef, field),
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)

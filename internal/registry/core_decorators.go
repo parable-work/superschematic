@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -210,6 +211,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// The roles a UserRole table holds from its first migration on
 	// (core_seed_roles.go, D88).
 	specs = append(specs, seedRolesDecorator())
+	// The rows any DB table holds from its first migration on
+	// (core_seed_rows.go, #625).
+	specs = append(specs, seedRowsDecorator())
 
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).
@@ -250,7 +254,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 			if len(args) != 1 || !ok {
 				return ArgErrorf(0, "@decrypted takes no argument, or { permission }: the permission a caller holds to see the value")
 			}
-			for _, key := range sortedKeys(obj) {
+			for _, key := range slices.Sorted(maps.Keys(obj)) {
 				if key != "permission" {
 					return ArgErrorf(0, "@decrypted has no option %q; it takes permission", key)
 				}
@@ -372,6 +376,12 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// A version graph's operations (D138), on a class with no members
 	// (core_graph_operations.go), which takes the same clause.
 	specs = append(specs, graphOperationsDecorator())
+	// A table's references and files (#723, D154), on a class with no
+	// members (core_rowfeature_operations.go), which takes the same clause.
+	specs = append(specs, rowFeatureOperationsDecorator())
+	// The inbound path's triage (#746, D157), on a class with no members
+	// (core_triage_operations.go), which takes the same clause.
+	specs = append(specs, triageOperationsDecorator())
 	flag(TargetOperationSet, "auth", []string{pkgAPI}, func(n Node) { n.OperationSet.Auth = true })
 	flag(TargetOperationSet, "publicRoute", []string{pkgAPI}, func(n Node) { n.OperationSet.Public = true })
 	specs = append(specs, DecoratorSpec{
@@ -846,7 +856,7 @@ func httpBinaryStreamDef(args []any) (*ir.HTTPBinaryStreamDef, error) {
 		return nil, fmt.Errorf("@httpBinaryStream config must be an object literal")
 	}
 	stream := &ir.HTTPBinaryStreamDef{}
-	for _, key := range sortedKeys(cfg) {
+	for _, key := range slices.Sorted(maps.Keys(cfg)) {
 		switch value := cfg[key]; key {
 		case "contentType":
 			contentType, ok := value.(string)

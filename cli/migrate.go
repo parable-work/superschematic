@@ -39,6 +39,9 @@ type migratePlanFlags struct {
 	// documents takes the new version as the arguments, schema documents
 	// of one DB service, in place of a service directory (D117).
 	documents bool
+	// service names the DB service development mode's General documents
+	// lower into, with --documents (D117).
+	service string
 	// request names the file, or - for stdin, that holds a plan request
 	// (migrateplan.Request), which the command answers on stdout.
 	request string
@@ -70,10 +73,15 @@ hazards. superschematic-migrate (runtime/migrate) applies it.
 A plan starts from another version of the schema, with no database at
 hand, or from a SQLite file built by hand (--from-database). The new
 version is a service directory, or one DB service's schema documents as
-format --to=json writes them (--documents, --request).`,
+format --to=json writes them (--documents, --request).
+
+export writes a runtime database's schemas and the model it recorded as
+a compiled project's DB service, whose first plan from that model is
+empty (D117).`,
 		Args: cobra.NoArgs,
 	}
 	cmd.AddCommand(newMigratePlanCmd(a))
+	cmd.AddCommand(newMigrateExportCmd(a))
 	return cmd
 }
 
@@ -125,22 +133,27 @@ applied; --rename and --drop are given to both.
 --documents takes the new version as one DB service's schema documents,
 the JSON files format --to=json writes, in place of the service
 directory: every schema document of the service, and - reads more from
-stdin, one JSON value after another. There is no schemas root beside
-them, so the previous version is the model the database recorded (--from
-<model.json>) or an empty database, and nothing reads the database's
-tables. The documents name the service; they carry no config, so the
-plan takes the dialect from --dialect and the options a config with no
-outputs.sql options gives, and the naming from --naming, else the
-superschematic.toml found walking up from the first document, else the
-defaults. A Postgres plan of documents that declare queries (@query) is
-refused, since it would not prepare them.
+stdin, one JSON value after another. Development mode's General
+documents, each an instance type and its behaviors, lower to the tables
+of one DB service: --service names it, else the name they share. A
+Workflow on the type is the field status: Workflow<{ ... }>, and the
+type's other behaviors are ones its table implements. There is no
+schemas root beside them, so the previous version is the model the
+database recorded (--from <model.json>) or an empty database, and
+nothing reads the database's tables. The documents name the service;
+they carry no config, so the plan takes the dialect from --dialect and
+the options a config with no outputs.sql options gives, and the naming
+from --naming, else the superschematic.toml found walking up from the
+first document, else the defaults. A Postgres plan of documents that
+declare queries (@query) is refused, since it would not prepare them.
 
 --request answers a plan request for a library that runs this binary: a
 JSON object, in the file it names or on stdin (-), with version (1),
 dialect, documents, from (the recorded model, or null for an empty
-database), and optional renames, failOn and allow. It prints one line of
-JSON: version, plan, hazards and refused, the ids of the hazards of a
-failOn class that allow does not name; or, exiting 1, version and error.
+database), and optional service, renames, failOn and allow. It prints
+one line of JSON: version, plan, hazards and refused, the ids of the
+hazards of a failOn class that allow does not name; or, exiting 1,
+version and error.
 
 --out writes the plan JSON the runner applies. --format prints the plan
 as json, sql or markdown. --fail-on exits non-zero, after printing, when
@@ -202,8 +215,9 @@ Examples:
 	cmd.Flags().StringSliceVar(&flags.failOn, "fail-on", nil, "exit non-zero when the plan has a hazard of these classes that --allow does not name (comma-separated; all for every class)")
 	cmd.Flags().StringArrayVar(&flags.allow, "allow", nil, "a hazard id --fail-on lets pass (repeatable)")
 	cmd.Flags().BoolVar(&flags.printModel, "print-model", false, "print the new version's model, or with --from-database the file's, as canonical JSON and plan nothing")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml; with --documents, the one found walking up from the first document)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml; with --documents, the one found walking up from the first document)")
 	cmd.Flags().BoolVar(&flags.documents, "documents", false, "take the new version as the arguments: one DB service's schema documents as format --to=json writes them, or - for stdin")
+	cmd.Flags().StringVar(&flags.service, "service", "", "with --documents, the DB service development mode's General documents lower into (default: the name they share)")
 	cmd.Flags().StringVar(&flags.request, "request", "", "answer the plan request in this file, or - for stdin, with one line of JSON on stdout")
 	cmd.Flags().StringVar(&flags.databaseURL, "database-url", "", "a Postgres server whose role may create a database, which the new version's queries are prepared on (default $"+QueriesDatabaseEnv+", else Postgres in Docker)")
 	return cmd
@@ -280,30 +294,18 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 	if err != nil {
 		return err
 	}
-	absService, err := filepath.Abs(servicePath)
-	if err != nil {
-		return fmt.Errorf("resolving service path: %w", err)
-	}
-	if info, err := os.Stat(absService); err != nil || !info.IsDir() {
-		return fmt.Errorf("service directory not found: %s", servicePath)
-	}
 
 	// The new version resolves its naming file and registry as build does.
-	schemasRoot := filepath.Dir(filepath.Dir(absService))
-	names, err := resolveNaming(flags.namingPath, schemasRoot)
+	svc, err := a.openService(servicePath, flags.namingPath)
 	if err != nil {
 		return err
 	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return err
-	}
-	current, err := openSchemaVersion(filepath.Dir(absService), names, reg)
+	current, err := openSchemaVersion(filepath.Dir(svc.dir), svc.names, svc.reg)
 	if err != nil {
 		return err
 	}
 	defer current.close()
-	service, err := current.serviceAt(absService)
+	service, err := current.serviceAt(svc.dir)
 	if err != nil {
 		return err
 	}

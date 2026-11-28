@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -46,7 +48,7 @@ func stateMachineOf(typeName string, args []any) (*ir.StateMachine, error) {
 		return nil, ArgErrorf(0, "@stateMachine on %s names no field; name the enum field whose moves it declares, as field: \"status\"", typeName)
 	}
 	where := fmt.Sprintf("@stateMachine on %s.%s", typeName, field)
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		switch key {
 		case "field", "transitions", "terminal", "fromNull":
 		default:
@@ -59,7 +61,7 @@ func stateMachineOf(typeName string, args []any) (*ir.StateMachine, error) {
 	if !ok {
 		return nil, ArgErrorf(0, "%s: transitions maps each state to the states it may move to, as { [Status.Open]: [Status.Closed] }, and {} when no state moves", where)
 	}
-	for _, from := range sortedKeys(transitions) {
+	for _, from := range slices.Sorted(maps.Keys(transitions)) {
 		role := fmt.Sprintf("transitions[%q]", from)
 		to, toNull, err := stateList(transitions[from], role, true)
 		if err != nil {

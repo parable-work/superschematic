@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 	"reflect"
 	"regexp"
 	"strings"
@@ -578,6 +578,30 @@ func checkTemporalDurationText(text string) (string, []ValidationError) {
 	return canonical, nil
 }
 
+// validateFileMediaTypeValue validates one File.MediaType value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateFileMediaTypeValue(value FileMediaType, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(string(value)) > 255 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 255 characters"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // validateFinanceMoneyValue validates one Finance.Money value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -812,6 +836,30 @@ func validateTemporalHoursValue(value TemporalHours, required bool) (bool, []Val
 	return valid, coreErrs
 }
 
+// validateTemporalLocalDateTimeValue validates one Temporal.LocalDateTime value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalLocalDateTimeValue(value TemporalLocalDateTime, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(string(value)) > 40 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 40 characters"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // validateTemporalMillisecondsValue validates one Temporal.Milliseconds value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -866,6 +914,36 @@ func validateTemporalMinutesValue(value TemporalMinutes, required bool) (bool, [
 	return valid, coreErrs
 }
 
+// validateTemporalPeriodValue validates one Temporal.Period value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalPeriodValue(value TemporalPeriod, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(string(value)) > 64 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 64 characters"})
+	}
+	if utf8.RuneCountInString(string(value)) < 3 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 3 characters"})
+	}
+	if matched, err := regexp.MatchString("^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$", string(value)); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // validateTemporalSecondsValue validates one Temporal.Seconds value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -895,6 +973,8 @@ func validateTemporalSecondsValue(value TemporalSeconds, required bool) (bool, [
 
 // CustomParseScalars
 type CustomParseScalars struct {
+	FileMediaType FileMediaType `json:"fileMediaType"`
+
 	FinanceMoney FinanceMoney `json:"financeMoney"`
 
 	FinanceSignedMoney FinanceSignedMoney `json:"financeSignedMoney"`
@@ -919,9 +999,13 @@ type CustomParseScalars struct {
 
 	TemporalHours TemporalHours `json:"temporalHours"`
 
+	TemporalLocalDateTime TemporalLocalDateTime `json:"temporalLocalDateTime"`
+
 	TemporalMilliseconds TemporalMilliseconds `json:"temporalMilliseconds"`
 
 	TemporalMinutes TemporalMinutes `json:"temporalMinutes"`
+
+	TemporalPeriod TemporalPeriod `json:"temporalPeriod"`
 
 	TemporalSeconds TemporalSeconds `json:"temporalSeconds"`
 
@@ -944,6 +1028,8 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 	}
 
 	masked := &CustomParseScalars{}
+
+	masked.FileMediaType = t.FileMediaType
 
 	masked.FinanceMoney = t.FinanceMoney
 
@@ -969,9 +1055,13 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 
 	masked.TemporalHours = t.TemporalHours
 
+	masked.TemporalLocalDateTime = t.TemporalLocalDateTime
+
 	masked.TemporalMilliseconds = t.TemporalMilliseconds
 
 	masked.TemporalMinutes = t.TemporalMinutes
+
+	masked.TemporalPeriod = t.TemporalPeriod
 
 	masked.TemporalSeconds = t.TemporalSeconds
 
@@ -982,12 +1072,18 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*CustomParseScalars) JSONFieldNames() []string {
-	return []string{"financeMoney", "financeSignedMoney", "genericDecimal", "genericInt64", "genericStringMap", "geoLocation", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
+	return []string{"fileMediaType", "financeMoney", "financeSignedMoney", "genericDecimal", "genericInt64", "genericStringMap", "geoLocation", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalLocalDateTime", "temporalMilliseconds", "temporalMinutes", "temporalPeriod", "temporalSeconds"}
 }
 
 // Validate validates all fields in CustomParseScalars
 func (t *CustomParseScalars) Validate() ValidationErrors {
 	errors := NewValidationErrors()
+
+	// Validate fileMediaType (required)
+
+	if valid, fieldErrs := validateFileMediaTypeValue(t.FileMediaType, true); !valid {
+		errors.SetFieldErrors("fileMediaType", fieldErrs)
+	}
 
 	// Validate financeMoney (required)
 
@@ -1061,6 +1157,12 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("temporalHours", fieldErrs)
 	}
 
+	// Validate temporalLocalDateTime (required)
+
+	if valid, fieldErrs := validateTemporalLocalDateTimeValue(t.TemporalLocalDateTime, true); !valid {
+		errors.SetFieldErrors("temporalLocalDateTime", fieldErrs)
+	}
+
 	// Validate temporalMilliseconds (required)
 
 	if valid, fieldErrs := validateTemporalMillisecondsValue(t.TemporalMilliseconds, true); !valid {
@@ -1071,6 +1173,12 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 
 	if valid, fieldErrs := validateTemporalMinutesValue(t.TemporalMinutes, true); !valid {
 		errors.SetFieldErrors("temporalMinutes", fieldErrs)
+	}
+
+	// Validate temporalPeriod (required)
+
+	if valid, fieldErrs := validateTemporalPeriodValue(t.TemporalPeriod, true); !valid {
+		errors.SetFieldErrors("temporalPeriod", fieldErrs)
 	}
 
 	// Validate temporalSeconds (required)

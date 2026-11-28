@@ -108,8 +108,12 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
 		{Condition: output.HasBehaviorEndpoints() || output.HasBehaviorWorkers(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
 		{Condition: output.Tables != nil, Template: "tables.tmpl", Filename: "tables.go"},
+		{Condition: output.BuildsBehaviorCaller(), Template: "behavior_caller.tmpl", Filename: "behavior_caller.go"},
 		{Condition: output.Graphs != nil, Template: "graphs.tmpl", Filename: "graphs.go"},
+		{Condition: len(output.RowFeatureEndpoints) > 0, Template: "rowfeatures.tmpl", Filename: "rowfeatures.go"},
 		{Condition: output.Deps.Providers != nil, Template: "providers.tmpl", Filename: "providers.go"},
+		{Condition: output.HasWiring(), Template: "wiring.tmpl", Filename: "wiring.go"},
+		{Condition: output.HasMCP(), Template: "mcp.tmpl", Filename: MCPFile},
 	}
 	// A provider file with the name of a core file replaces it when its
 	// condition holds, and leaves the core's file alone when it does not
@@ -286,11 +290,6 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 			return fmt.Errorf("version-graph binding replace path: %w", err)
 		}
 	}
-	if output.HasEngine() {
-		if output.EngineReplacePath, err = naming.RelPath(outputDir, paths.EngineGo); err != nil {
-			return fmt.Errorf("engine binding replace path: %w", err)
-		}
-	}
 	if output.Deps.Rules {
 		if output.RulesReplacePath, err = naming.RelPath(outputDir, paths.RulesGo); err != nil {
 			return fmt.Errorf("rules module replace path: %w", err)
@@ -302,9 +301,8 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 // SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
 // modules the API module reaches: the HTTP runtime, the schema runtime it
 // builds on, the schema IR, the scalar library and, when the API reads a
-// version graph, the version-graph binding, when it has an engine
-// database, the engine's binding (D58), and, when its database's tables'
-// fields are behaviors, the rules module (D103). go.mod requires those it
+// version graph, the version-graph binding, and, when its database's
+// tables' fields are behaviors, the rules module (D103). go.mod requires those it
 // requires at their pins and replaces every version of each pinned module
 // with its pin.
 func SetReleasePins(output *APIOutput, pins naming.Pins) {
@@ -312,9 +310,6 @@ func SetReleasePins(output *APIOutput, pins naming.Pins) {
 	modules := []string{n.HTTPRuntimeGoModule, n.SchemaRuntimeGoModule, n.SchemaIRGoModule, n.ScalarGoModule}
 	if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 		modules = append(modules, n.VersionGraphGoModule)
-	}
-	if output.HasEngine() {
-		modules = append(modules, n.EngineGoModule)
 	}
 	if output.Deps.Rules {
 		modules = append(modules, n.RulesGoModule)

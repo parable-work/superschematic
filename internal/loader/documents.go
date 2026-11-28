@@ -12,9 +12,9 @@ import (
 	"slices"
 	"strings"
 
-	validator "github.com/santhosh-tekuri/jsonschema/v6"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	"github.com/parable-work/superschematic/internal/loader/executor"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -135,24 +135,11 @@ func decodeDataDocument(servicePath, file string, schema json.RawMessage) (json.
 
 // validateDocument checks one JSON payload against a JSON Schema.
 func validateDocument(raw, schema json.RawMessage, source string) error {
-	resource, err := validator.UnmarshalJSON(bytes.NewReader(schema))
+	compiled, err := jsonschemas.Compile("superschematic://documents/schema.json", schema)
 	if err != nil {
 		return fmt.Errorf("%s: document schema: %w", source, err)
 	}
-	compiler := validator.NewCompiler()
-	const url = "superschematic://documents/schema.json"
-	if err := compiler.AddResource(url, resource); err != nil {
-		return fmt.Errorf("%s: document schema: %w", source, err)
-	}
-	compiled, err := compiler.Compile(url)
-	if err != nil {
-		return fmt.Errorf("%s: document schema: %w", source, err)
-	}
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		return fmt.Errorf("%s: %w", source, err)
-	}
-	if err := compiled.Validate(instance); err != nil {
+	if err := jsonschemas.Validate(compiled, raw); err != nil {
 		return fmt.Errorf("%s: %w", source, err)
 	}
 	return nil

@@ -20,7 +20,7 @@ The extension adds one of each registration surface:
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
-| Behavior | `acme.Rating`, declared by a class whose `rules` the behaviors' core interprets on a table, with no crate (D103's step 5), its JSON declaration derived from the class, replayed from `testdata/rules`; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; the `acme-behaviors` crate implements it for the engine, over a copy of the declaration, which its registration names and the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.ts`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors`, `testdata/rules` |
+| Behavior | `acme.Rating`, declared by a class whose `rules` the behaviors' core interprets on a table, with no crate (D103's step 5), its JSON declaration derived from the class, replayed from `testdata/rules`; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation | `ext/behavior.go`, `ext/rating.behavior.ts`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `testdata/rules` |
 | Task section | `acme`, the part of a Tasks service's task file that acme's forge reads: the tiers, and each task's tier and timeout, with a `Verify` for what their schemas cannot say (D203) | `ext/tasks.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
@@ -101,7 +101,6 @@ examples/acme-schematic/
     testdata/services/returns-api  an API the tests load that declares confirm on @mcp
     testdata/services/shop-ratings  a General data-form service whose Product composes acme.Rating
     testdata/services/shop-ratings-ts  its TypeScript twin, with @behavior
-    testdata/golden/shop-ratings-engine  the project's engine crate a build writes for shop-ratings, with its ffi member
     tasks.go                  the acme task section: tiers, and each task's tier and timeout
     tasks_test.go             a forge in miniature: plans across commits and reuses work by key
     command.go                describe subcommand
@@ -109,10 +108,6 @@ examples/acme-schematic/
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf, @feedKey, @crossSell and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
   testdata/rules/acme-rating.json  acme.Rating's cases as a declarative behavior, which the core's test kit replays
-  crates/behaviors/           acme-behaviors, acme.Rating for the engine (D58), a Cargo workspace of its own
-    declarations/             acme.Rating.behavior.json, the copy `acme-schematic behaviors` writes
-    src/lib.rs                Rating, behaviors() and tools()
-    tests/rating.rs           the engine scenario, on SQLite and Postgres
   schemas/
     superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
@@ -126,6 +121,7 @@ examples/acme-schematic/
     services/shop-storefront  API on the TypeScript server: carts, a public probe, a manual event stream
     services/shop-tasks       Tasks: the example's build, vet and smoke as tasks, with acme's section
   ci/tasks.json               shop-tasks' task file, which build-all installs and `tasks --check` holds current
+  ci/workflows/shop-tasks.yml the GitHub Actions workflow the github renderer writes from it, a job per task
   storefront/                 app.ts implements the generated shop-storefront router; app.test.ts drives it
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
   scripts/smoke.sh            the end-to-end assertions
@@ -729,9 +725,9 @@ names the next stamp (D102).
 
 ## A behavior
 
-A behavior adds fields, operations, checks and storage to a type when an
-engine runs the schema. The compiler only declares, carries and checks
-behaviors. acme declares one, `acme.Rating`: shoppers rate a catalog item
+A behavior adds fields, operations, checks and storage to a type. The
+compiler declares, carries and checks behaviors, and the behaviors' core
+runs them (D103). acme declares one, `acme.Rating`: shoppers rate a catalog item
 from one star to a maximum each type sets. The declaration is one JSON file,
 `ext/rating.behavior.json`, which `ext/behavior.go` embeds and registers.
 `make behaviors` derives it from the behavior's class,
@@ -798,8 +794,7 @@ upserts the shopper's row; `ratingCount` and `ratingAverage` are owned
 columns derived from the rows, a count and an average that is 0 before the
 first; and a new version may raise `maxStars` and may not lower it
 (`configChange`). The fields carry a `type`, which a table's layout makes
-columns of, and the file declares the sub-table; the engine reads neither,
-nor `rules`.
+columns of, and the file declares the sub-table.
 
 `testdata/rules/acme-rating.json` holds its cases, written by hand in the
 recorded format, its `declarations` naming this file. The behaviors'
@@ -811,112 +806,13 @@ replay it on real tables, on SQLite and Postgres, and so do development
 mode and its wasm library, each handing its core the file first. Nothing
 of this is a core edit either.
 
-What moved: the rules `crates/behaviors` writes in Rust for the engine
-(the two totals columns and their migration, `rate`'s bound and handler,
-`ratingSummary`, the readers of the two fields and the config change
-rule) are the file's `rules` on a table. The engine's crate stays until
-engine types go (D103's step 7), and it counts every `rate` call, where
-the declarative one keeps one rating per shopper. `ext/behavior.go`, the
-registration, and `packages/schema/src/behaviors.ts`, the config's type,
-stay as they are.
-
-What the behavior does when the engine runs the schema is Rust (D58):
-`crates/behaviors`, the `acme-behaviors` crate, implements it. `Rating`
-implements the engine's `Behavior` trait over its own copy of the
-declaration, which the acme binary copies:
-
-```sh
-acme-schematic behaviors --extension acme --out crates/behaviors/declarations
-```
-
-The command writes one canonical `<name>.behavior.json` per behavior the
-binary registers, and with `--check` fails when a copy is stale, which the
-smoke runs. `Rating` gives the engine what the declaration names and no
-more: a migration that adds two columns (the number of ratings and their
-sum), a handler for `rate` and `ratingSummary`, and a reader for
-`ratingCount` and `ratingAverage`. A new version may raise `maxStars` and
-may not lower it; a rating above a type's `maxStars` is refused as an
-invalid argument. `behaviors()` is every behavior acme declares, and
-`tools()` the invocation policy and the vendor keys acme's binary
-registers (`ext/mcp.go`), which the engine writes its tools with: `rate`
-asks `confirm: "always"`, which an engine left with the core's policy
-refuses to register. A host opens the engine with them after the core's
-behaviors and with `acme-schematic json-schema`'s output as its
-meta-schema, which declares `acme.Rating`:
-
-```rust
-use superschematic_engine::{Engine, EngineOptions, MetaSchema, Policy};
-
-let mut options = EngineOptions::sqlite("shop.db");
-options.policy = Some(Policy::allow_all());
-options.meta_schema = Some(MetaSchema::Text(std::fs::read_to_string("acme-schema-file.json")?));
-options.behaviors = superschematic_engine_behaviors::core().extend(acme_behaviors::behaviors());
-options.tools = acme_behaviors::tools();
-let engine = Engine::open(options)?;
-```
-
-A read keeps the behavior's fields under its name, apart from the
-product's own fields in `data`, so `Product` could declare a
-`ratingCount` of its own without colliding.
-
-It is a Cargo workspace of its own, as a crate of a project is, with its
-own lock file, and reaches the engine by path at this checkout. Its
-tests, `tests/rating.rs`, are the engine scenario: an engine with the
-behavior publishes `shop-ratings`' `Product`, creates one, rates it and
-reads the rating fields and events, its tools carry acme's policy, and an
-engine without it refuses the schema, on SQLite and on Postgres when
-`SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one (`make
-acme-engine-rust` runs them with the acme binary's meta-schema). Nothing
-in this is a core edit: the engine runs any behavior a project's engine
-crate registers, and names none.
-
-`ext/behavior.go` names the crate in acme.Rating's registration:
-
-```go
-registry.BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating"}
-```
-
-so a build of a schema of this project whose types compose acme.Rating
-writes the project's engine crate, `dist/engine/rust/<service>`, named
-`acme-<service>-engine`: it depends on the engine's crates at the
-naming file's `engine_rust`, `engine_behaviors_rust`,
-`engine_workqueue_rust` and `engine_commerce_rust` (whichever the schema
-needs), and on `acme-behaviors`, and its `behaviors()`
-is the core's behaviors and `acme_behaviors::Rating`, under acme's tool
-options (`tools()`): the library a Rust server links. Its workspace's
-member `ffi/`, `acme-<service>-engine-ffi`, is the engine's C ABI over
-those behaviors, the archive a Go server links in place of the core's
-(`scripts/engine-archive.sh --crate dist/engine/rust/<service>/ffi --out
-<dir>`, at the checkout's root), at the naming file's `engine_abi_rust`,
-and its member `napi/`, `acme-<service>-engine-napi`, the engine's
-Node-API addon over them, which a TypeScript server loads in place of the
-core's (`scripts/engine-napi.sh --crate dist/engine/rust/<service>/napi
---out <dir>`, then `SUPERSCHEMATIC_ENGINE_ADDON` or the engine option
-`addon` names the file it prints), at the naming file's
-`engine_napi_rust`.
-`ext/testdata/golden/shop-ratings-engine` holds the crate for
-`shop-ratings` (`TestRatingProjectEngine`). The smoke's step 20 lints and
-tests the crate, builds `shop-ratings` as a service of this project (a
-copy under `schemas/dist`, since its own directory sits outside
-`schemas/`), and lints and tests the engine crate the binary writes,
-its members with it: the library's test opens the engine on SQLite and
-finds acme.Rating registered, and the archive's opens one through its own
-`eng_open`, as the Go binding does, and finds it too. It then builds the
-addon and loads it in Node.js, as `@superschematic/engine` loads a
-project's: an engine on it publishes `shop-ratings`' `Product`, creates
-one and rates it, acme.Rating running in Rust, and its `rate` tool asks
-acme's `confirm`. CI's acme job runs the crate's tests on Postgres as
-well.
-
-A TypeScript server of this project loads the same addon, the engine
-crate's `napi/` member, in place of the core's (the engine option
-`addon`, or `SUPERSCHEMATIC_ENGINE_ADDON`); a Go server links the `ffi/`
-member's archive, and a Rust server the library. A generated server in a
-stack needs none of it set by hand: its image's engine stage and `stack
-dev` build the member it takes and hand it over, the archive through the
-build's `CGO_LDFLAGS` and the addon through `SUPERSCHEMATIC_ENGINE_ADDON`
-(`TestStackDevBuildsTheProjectsEngine` runs a Go, a Rust and a
-TypeScript server on acme.Rating so).
+What moved: the rules the `acme-behaviors` crate wrote in Rust for the
+engine (the two totals columns and their migration, `rate`'s bound and
+handler, `ratingSummary`, the readers of the two fields and the config
+change rule) are the file's `rules` on a table, and the crate went with
+engine types (D103's step 7). Its registration names no crate:
+`ext/behavior.go` registers the declaration alone, and
+`packages/schema/src/behaviors.ts`, the config's type, is as it was.
 
 ## A task section
 
@@ -949,6 +845,18 @@ acme-schematic tasks plan HEAD --file examples/acme-schematic/ci/tasks.json
 acme-schematic tasks inputs schemas/services/shop-tasks    # after build-all
 ```
 
+The schema's config also names the core's `github` renderer
+(`outputs.tasks.ci.github`), which writes `ci/workflows/shop-tasks.yml`
+from the same file: a job per task, each needing the tasks its task uses
+and follows, with `schema-build`'s generated tree carried to `api-build`
+as an artifact. The renderer reads the `github` section beside acme's
+for the triggers and the repository the image is pulled from. The
+section also holds `reuse`, so the workflow's first job plans the commit
+with `acme-schematic tasks plan --keys`, and each task that has a key
+looks for a pass under it before it runs; `smoke`, which is not
+hermetic, runs every time. The workflow is installed in the example's
+own directory and not in `.github/workflows`, so GitHub does not run it.
+
 `ext/tasks_test.go` is a reader: a forge in miniature. It decodes the
 committed file with the public `tasks` package, reads acme's section to
 choose a tier's tasks, runs `tasks plan` across commits, and reuses each
@@ -960,8 +868,8 @@ no task reads runs nothing.
 
 `cli.New` returns the root cobra command with the core's commands:
 `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`,
-`format`, `behaviors`, `engine-client`, `stack`, `identity`, `env`,
-`catalog`, `init` and `new`. An extension that implements
+`format`, `behaviors`, `stack`, `identity`, `env`, `catalog`, `init`
+and `new`. An extension that implements
 `cli.CommandProvider` contributes more:
 
 ```go

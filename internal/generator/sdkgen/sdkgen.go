@@ -14,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/patterndialect"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -211,13 +212,7 @@ type QueryParam struct {
 	// comma-separated value (?name=a,b) cannot carry.
 	ItemIsText bool
 
-	ValidateMin       *float64 // Minimum numeric value allowed
-	ValidateMax       *float64 // Maximum numeric value allowed
-	ValidateMinLength *int     // Minimum character length
-	ValidateMaxLength *int     // Maximum character length
-	ValidateListMin   *int     // Minimum list cardinality
-	ValidateListMax   *int     // Maximum list cardinality
-	ValidatePattern   string   // Regex pattern validation
+	ir.ValueRules
 
 	Reference *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
 	Search    bool              // the operation's search argument (D62)
@@ -239,7 +234,7 @@ func (p QueryParam) ChecksItems() bool {
 	if p.ItemIsText {
 		return true
 	}
-	return p.ValidateMin != nil || p.ValidateMax != nil
+	return p.HasRange()
 }
 
 // ChecksListMin reports whether listMin bounds a value the SDK sends. A
@@ -265,13 +260,7 @@ func (p QueryParam) Validates() bool {
 	if p.IsArray {
 		return p.ChecksList() || p.ChecksItems()
 	}
-	return p.ValidateMin != nil ||
-		p.ValidateMax != nil ||
-		p.ValidateMinLength != nil ||
-		p.ValidateMaxLength != nil ||
-		p.ValidateListMin != nil ||
-		p.ValidateListMax != nil ||
-		p.ValidatePattern != ""
+	return p.Any()
 }
 
 // Validator is the types package's function the method checks the
@@ -581,13 +570,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 			IsMap:      param.IsMap,
 			ItemIsText: param.IsArray && sendsText(param),
 
-			ValidateMin:       param.ValidateMin,
-			ValidateMax:       param.ValidateMax,
-			ValidateMinLength: param.ValidateMinLength,
-			ValidateMaxLength: param.ValidateMaxLength,
-			ValidateListMin:   param.ValidateListMin,
-			ValidateListMax:   param.ValidateListMax,
-			ValidatePattern:   param.ValidatePattern,
+			ValueRules: param.ValueRules,
 
 			Reference: param.Reference,
 			Search:    param.Search,
@@ -952,25 +935,21 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 				return fmt.Errorf("failed to generate tools/index.ts: %w", err)
 			}
 
-			// Generate OpenAI format JSON
-			if err := generateFile(toolsRenderer, "tools-openai.tmpl", filepath.Join(outputDir, "tools", "openai.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/openai.json: %w", err)
-			}
-
-			// Generate Anthropic format JSON
-			if err := generateFile(toolsRenderer, "tools-anthropic.tmpl", filepath.Join(outputDir, "tools", "anthropic.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/anthropic.json: %w", err)
-			}
-
-			// Generate generic JSON Schema format
-			if err := generateFile(toolsRenderer, "tools-schema.tmpl", filepath.Join(outputDir, "tools", "schema.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/schema.json: %w", err)
-			}
-			if err := generateFile(toolsRenderer, "tools-mcp-audit.tmpl", filepath.Join(outputDir, "tools", "mcp-audit.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/mcp-audit.json: %w", err)
-			}
-			if err := generateFile(toolsRenderer, "tools-mcp-binding.tmpl", filepath.Join(outputDir, "tools", "mcp-binding.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/mcp-binding.json: %w", err)
+			// The JSON tool documents every SDK writes alike.
+			if err := toolsutil.WriteDocuments(
+				filepath.Join(outputDir, "tools"),
+				toolsOutput,
+				[]toolsutil.Document{
+					toolsutil.OpenAIDocument,
+					toolsutil.AnthropicDocument,
+					toolsutil.SchemaDocument,
+					toolsutil.MCPAuditDocument,
+					toolsutil.MCPBindingDocument,
+				},
+				codegen.WithProfiler(prof, suffixProfilePrefixes(phasePrefixes, "tools")...),
+				codegen.WithSkipFormat(skipFormat),
+			); err != nil {
+				return err
 			}
 		}
 	}
@@ -1077,10 +1056,11 @@ func customTemplateFuncs() template.FuncMap {
 		"has_query_params": func(params []QueryParam) bool {
 			return len(params) > 0
 		},
-		"escape_backslash": func(s string) string {
-			s = strings.ReplaceAll(s, "\\", "\\\\")
-			s = strings.ReplaceAll(s, "'", "\\'")
-			return s
+		// A schema pattern is RE2's syntax: the RegExp matches what RE2
+		// matches (patterndialect).
+		"js_regexp": func(pattern string) string {
+			source, flags := patterndialect.JavaScript(pattern)
+			return "new RegExp(" + tsutil.Quote(source) + ", '" + flags + "')"
 		},
 		"has_encrypted_body": func(method string, encrypted bool) bool {
 			return encrypted && apigen.EncryptedBodyMethod(method)
@@ -1124,31 +1104,11 @@ func isSDKValueImport(name string) bool {
 
 // toolsTemplateFuncs returns template functions specific to the tools generator
 func toolsTemplateFuncs() template.FuncMap {
-	return template.FuncMap{
-		"escapeJSON": toolsutil.EscapeJSON,
-		"schemaJSON": toolsutil.JSONSchemaPropertyLiteral,
-		"jsonValue":  toolsutil.JSONLiteral,
-		"sortedKeys": func(m map[string]JSONSchemaProperty) []string {
-			keys := make([]string, 0, len(m))
-			for k := range m {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			return keys
-		},
-		"escapeBacktick": func(s string) string {
-			// Escape backticks for TypeScript template literals
-			return strings.ReplaceAll(s, "`", "\\`")
-		},
-		"escapeBackslash": func(s string) string {
-			// Double-escape backslashes for TypeScript string literals containing regex
-			s = strings.ReplaceAll(s, "\\", "\\\\")
-			// Escape single quotes for single-quoted string literals
-			s = strings.ReplaceAll(s, "'", "\\'")
-			return s
-		},
-		"formatToolName": formatToolNameForTS,
-		"toPascalCase":   toPascalCaseToolName,
+	return codegen.MergeTemplateFuncs(toolsutil.TemplateFuncs(), template.FuncMap{
+		"escapeBacktick":  tsutil.EscapeTemplateLiteral,
+		"escapeBackslash": tsutil.EscapeSingleQuoted,
+		"formatToolName":  formatToolNameForTS,
+		"toolTypeName":    toPascalCaseToolName,
 		"contains": func(slice []string, item string) bool {
 			for _, s := range slice {
 				if s == item {
@@ -1158,7 +1118,7 @@ func toolsTemplateFuncs() template.FuncMap {
 			return false
 		},
 		"buildInvocationArgs": buildInvocationArgs,
-	}
+	})
 }
 
 // buildInvocationArgs is the argument list invokeTool passes to a tool's

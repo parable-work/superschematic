@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
@@ -41,9 +42,9 @@ func newBehaviorsCmd(a *app) *cobra.Command {
 		Short: "Write each registered behavior's declaration for the crate that implements it",
 		Long: `behaviors writes the declaration of every behavior this binary registers,
 the JSON file its Go package embeds, into a directory of the crate that
-implements it: one <name>.behavior.json per behavior. An engine
-implementation carries that copy (a Rust behavior embeds it with
-include_str!), so the engine and the compiler read one declaration.
+implements it: one <name>.behavior.json per behavior. An implementation
+carries that copy (a Rust behavior embeds it with include_str!), so the
+crate and the compiler read one declaration.
 
 A copy is canonical: the declaration's keys in their documented order,
 each JSON Schema's object keys sorted, two-space indents and a final
@@ -56,7 +57,9 @@ package ships are written: the core's behaviors ship in
 @superschematic/rules (runtime/engine/rust/rules-behaviors/declarations,
 the behaviors the behaviors' core alone implements, on a table, D104), and
 each crate carries only its own. With --extension, only the behaviors that
-extension registered are written. Given both, a behavior must match both.
+extension registered are written, into the crate whose hooks run them
+on the behaviors' core (its registration's Rules crate). Given both, a
+behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when
 a copy differs, is missing, or has no registered behavior. CI runs it so a
@@ -67,8 +70,8 @@ Examples:
   superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
   superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
   superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
-  acme-schematic behaviors --extension acme --out crates/behaviors/declarations
-  acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check`,
+  my-schematic behaviors --extension my --out crates/my-rules/declarations
+  my-schematic behaviors --extension my --out crates/my-rules/declarations --check`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runBehaviors(cmd, a, flags)
@@ -78,20 +81,13 @@ Examples:
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the directory's copies are not what would be written")
 	cmd.Flags().StringVar(&flags.extension, "extension", "", "only the behaviors this extension registered (its Name())")
 	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors this npm package ships (@superschematic/engine, @superschematic/engine-workqueue, @superschematic/engine-commerce, @superschematic/rules)")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; behaviors has no service directory to find superschematic.toml from)")
+	addNamingFlag(cmd, &flags.namingPath, "(default: built-in names; behaviors has no service directory to find superschematic.toml from)")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd
 }
 
 func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
-	names := naming.Default()
-	if flags.namingPath != "" {
-		var err error
-		if names, err = resolveNaming(flags.namingPath, ""); err != nil {
-			return err
-		}
-	}
-	reg, err := a.resolveRegistry(names)
+	reg, err := a.flagRegistry(flags.namingPath)
 	if err != nil {
 		return err
 	}
@@ -127,7 +123,7 @@ func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
 	if err := os.MkdirAll(flags.out, 0o755); err != nil {
 		return err
 	}
-	for _, name := range sortedKeys(want) {
+	for _, name := range slices.Sorted(maps.Keys(want)) {
 		if bytes.Equal(have[name], want[name]) {
 			continue
 		}
@@ -148,7 +144,7 @@ func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
 
 func checkBehaviorFiles(cmd *cobra.Command, flags *behaviorsFlags, want, have map[string][]byte) error {
 	var problems []string
-	for _, name := range sortedKeys(want) {
+	for _, name := range slices.Sorted(maps.Keys(want)) {
 		existing, ok := have[name]
 		switch {
 		case !ok:
@@ -157,7 +153,7 @@ func checkBehaviorFiles(cmd *cobra.Command, flags *behaviorsFlags, want, have ma
 			problems = append(problems, name+" differs from the registered declaration")
 		}
 	}
-	for _, name := range sortedKeys(have) {
+	for _, name := range slices.Sorted(maps.Keys(have)) {
 		if _, ok := want[name]; !ok {
 			problems = append(problems, name+" is no registered behavior's declaration")
 		}
@@ -242,13 +238,4 @@ func extensionClause(extension string) string {
 		return ""
 	}
 	return " for extension " + extension
-}
-
-func sortedKeys(m map[string][]byte) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

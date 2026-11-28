@@ -77,48 +77,22 @@ type DepsInfo struct {
 	DatabaseTypesCrate string
 	DatabaseTypesPath  string
 
-	// Engine is the engine of the API's engine database (D58), which Deps
-	// holds when the database's types compose behaviors; nil otherwise.
-	Engine *DepsEngine
+	// FileProcessing is whether the API's @envVars class names a files
+	// slot and Database declares @attachments (D159, #614): the crate then
+	// writes src/files.rs, the file processor's pass over the database's
+	// attachments.
+	FileProcessing bool
 
 	// Behaviors is what the crate runs its behavior operations with
 	// (D103), when its @behaviorOperations sets serve tables of Database
 	// whose fields are behaviors: the layout of Database's tables and the
 	// paths of the adapter's and the behaviors' crates. Nil otherwise.
 	Behaviors *DepsBehaviors
-}
 
-// DepsEngine is the engine Deps holds: the engine database's, opened in
-// the background by the entrypoint, a superschematic_engine::background::
-// Background from the engine's crate, Crate, at Path relative to the API
-// crate's directory ([paths] engine_rust).
-type DepsEngine struct {
-	Database  string
-	Namespace string
-	Crate     string
-	Path      string
-
-	// Policy is the access policy's JSON (outputs.engine.policy of the
-	// database's config, "permission" unless set), and Project the
-	// project's engine crate whose behaviors the engine runs, nil for the
-	// core's: what a host that opens the engine itself reads, as the
-	// Topcoat extension's crate does.
-	Policy  string
-	Project *DepsProject
-}
-
-// DepsProject is the project's engine crate of the engine database (D58;
-// projectengine): its package name, its name in Rust source, and its
-// directory relative to the API crate's.
-type DepsProject struct {
-	Crate string
-	Ident string
-	Path  string
-}
-
-// CrateIdent is Crate as Rust source spells it.
-func (e DepsEngine) CrateIdent() string {
-	return strings.ReplaceAll(e.Crate, "-", "_")
+	// Wiring is the runtime parts of Database the server builds (#620,
+	// #622, #617, #610), which SetDeps reads from its schema: nil for a
+	// database on SQLite or with none of them.
+	Wiring *DepsWiring
 }
 
 // DatabaseTypesCrateIdent is DatabaseTypesCrate as Rust source spells it.
@@ -245,6 +219,12 @@ type WorkerInfo struct {
 	// deadlines, then changes, then events.
 	Behavior       *apigen.BehaviorWorkerInfo
 	BehaviorQueues []BehaviorQueue
+
+	// Runtime is the runtime part that handles the worker's queue, one of
+	// RuntimeNotifier, RuntimeAgents, RuntimeRuns and RuntimeSearch, for a
+	// worker of APIOutput.RuntimeWorkers (#620, #622, #617); empty for one
+	// the implementation's Workers handle.
+	Runtime string
 }
 
 // BehaviorQueue is a queue a behavior worker runs (D103), as
@@ -437,7 +417,7 @@ func (o *APIOutput) ManualSignature(endpoint EndpointInfo) string {
 // Handlers, and Jobs, Workers and BoxError for an API with either.
 func (o *APIOutput) DepsExports() string {
 	names := []string{"Deps", "Handlers"}
-	if o.HasTraits() {
+	if o.HasTraits() || o.HasWiring() {
 		names = append(names, "BoxError")
 	}
 	if o.HasJobs() {
@@ -452,9 +432,11 @@ func (o *APIOutput) DepsExports() string {
 
 // HasDatabaseTypes reports whether the crate re-exports its database's
 // Rust types as database_types: for its workers' messages and queues,
-// a behavior worker's among them (D65, D103).
+// a behavior worker's among them (D65, D103), and for the repositories its
+// table operations, graph operations and, on a database whose rows keep
+// to a caller, behavior operations read through (D106, D138, D181).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations())
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasFileProcessing() || o.BehaviorsHeld() || o.HasWiring())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
@@ -476,12 +458,14 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // on the crate name: for the database's Rust types of an API with table
 // operations, graph operations or a deriver of tables, the feature of the
 // database's dialect, which the repositories they are served from, or
-// pulled and settled through, are behind (D116, D138, D146), and of an API
+// pulled and settled through, are behind (D116, D138, D146), of an API
 // whose database has a calendar source or a @searchable table, whose
-// calendar and search read the repositories' definition (D188); empty for
-// any other crate.
+// calendar and search read the repositories' definition (D188), and of an
+// API whose behavior operations check the caller's reach of a row through
+// the repositories (BehaviorsHeld, D181), or that builds its database's
+// runtime parts (HasWiring); empty for any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasTableDerivers() && !o.ReadsAcrossTables) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasRowFeatureOperations() && !o.HasFileProcessing() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld() && !o.HasWiring()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -513,11 +497,14 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
-	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0) && deps.DatabaseTypesCrate == "" {
+	if err := o.setWiring(&deps); err != nil {
+		return err
+	}
+	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || len(o.RuntimeWorkers) > 0) && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
-	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || (deps.Engine == nil && !slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return d.Tables }))) {
-		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
+	if len(o.Derivers) > 0 && deps.DatabaseTypesCrate == "" {
+		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type, and its Deps names none", o.SchemaName)
 	}
 	if err := o.checkBehaviorDeps(&deps); err != nil {
 		return err
@@ -536,6 +523,18 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		return err
 	}
 	if err := o.checkGraphDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkRowFeatureDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkFileProcessingDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkFileProcessingDeps(); err != nil {
 		o.Deps = nil
 		return err
 	}
@@ -615,6 +614,17 @@ func (o *APIOutput) DepsUses() []string {
 	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
 		runtime = append(runtime, "memorystore::MemoryStore")
 	}
+	if w := o.Wiring(); w != nil {
+		if w.Agents() {
+			runtime = append(runtime, "orm::agents::Agents")
+		}
+		if w.Inbound {
+			runtime = append(runtime, "orm::inbound::Inbound")
+		}
+		if w.Notifier() {
+			runtime = append(runtime, "orm::notify::Notifier")
+		}
+	}
 	if o.Providers != nil {
 		runtime = append(runtime, "providers::Providers")
 	}
@@ -636,22 +646,12 @@ func (o *APIOutput) DepsUses() []string {
 	if o.HasJobs() {
 		runtime = append(runtime, "Shutdown")
 	}
-	engine := ""
-	if o.HasTableDerivers() {
-		// A deriver of tables answers the HTTP runtime's loop (D146).
+	if o.HasDerivers() {
+		// A deriver answers the HTTP runtime's loop (D146).
 		runtime = append(runtime, "deriver::{DerivationAnswer, DerivationItem}")
-	} else if o.HasDerivers() {
-		engine = rustutil.UseLine(o.Deps.Engine.CrateIdent()+"::derive", []string{"DerivationAnswer", "DerivationItem"})
-	}
-	if engine != "" && o.Deps.Engine.CrateIdent() < o.RuntimeCrateIdent {
-		uses = append(uses, engine)
-		engine = ""
 	}
 	if len(runtime) > 0 {
 		uses = append(uses, rustutil.UseLine(o.RuntimeCrateIdent, runtime))
-	}
-	if engine != "" {
-		uses = append(uses, engine)
 	}
 	return uses
 }
@@ -660,9 +660,11 @@ func (o *APIOutput) DepsUses() []string {
 // method of an impl: the handlers, the identity runtime's authenticator for
 // an API over the user model (D50), the service authenticator for an API
 // with a service clause (D37), the pool of its database for an API with
-// behavior operations (D103) or table operations (D106), and the keyring
-// of the database's Encrypted<T> fields for table operations over one
-// (D85), on one line when it fits.
+// behavior operations (D103), table operations (D106), graph operations
+// (D138) or row feature operations (#723), the keyring of the database's
+// Encrypted<T> fields for table operations over one (D85), and the bucket
+// the row feature operations sign a file's URLs of (#723), on one line
+// when it fits.
 func (o *APIOutput) NewSignature() string {
 	params := []string{"handlers: Handlers"}
 	if o.Identity != nil {
@@ -671,11 +673,14 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() || o.HasIdempotent() {
+	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasIdempotent() {
 		params = append(params, "db: "+o.DatabaseType())
 	}
 	if o.TableFieldKeys() {
 		params = append(params, "field_keys: Arc<crate::runtime::orm::FieldKeyring>")
+	}
+	if o.RowFeatureBucket() != "" {
+		params = append(params, "attachments: Arc<dyn Bucket>")
 	}
 	return rustFn("    ", "pub fn new", params, "Self")
 }
@@ -905,11 +910,14 @@ func (s ImplementationScaffold) APIUse() string {
 			names = append(names, endpoint.ArgsName)
 		}
 	}
-	if s.HasTraits() {
+	if s.HasTraits() || s.HasWiring() {
 		names = append(names, "BoxError")
 	}
 	if s.HasJobs() {
 		names = append(names, "Jobs")
+	}
+	if s.HasWiring() {
+		names = append(names, "Wire", "WiringDeps")
 	}
 	if s.HasWorkers() {
 		names = append(names, "Workers")

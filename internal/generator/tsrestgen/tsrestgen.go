@@ -21,6 +21,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -206,6 +207,16 @@ type EndpointInfo struct {
 	// operation, over RouterOptions.orm and the graph's facade in
 	// RouterOptions.graphs, and the implementation has no method for it.
 	Graph *GraphRoute
+	// RowFeature is the row feature operation the endpoint runs (#723),
+	// nil for every other: the router mounts it with the runtime's
+	// rowFeatureOperation over RouterOptions.orm, and the implementation
+	// has no method for it.
+	RowFeature *RowFeatureRoute
+	// Triage is the triage operation the endpoint runs (#746), nil for
+	// every other: the router mounts it with the runtime's triageOperation
+	// over RouterOptions.inbound, and the implementation has no method for
+	// it.
+	Triage *TriageRoute
 }
 
 // TableRoute is a table operation (D106) as the router mounts it: the
@@ -611,6 +622,33 @@ type IdentityInfo struct {
 	// admits users (D81), when the API's @userSessions declares
 	// approval, default roles or a first administrator; empty otherwise.
 	Registration string
+	// OAuth is the OAuthOptions literal of the API's OAuth authorization
+	// server (#695), when its @userSessions({ oauth }) turns it on; empty
+	// otherwise. OAuthAdministration is @userAdministration({ oauth }).
+	OAuth               string
+	OAuthAdministration bool
+}
+
+// oauthLiteral renders cfg's oauth as the identity runtime's
+// OAuthOptions, or "" when it has none: every lifetime and kind of
+// client, the consent page when the schema names one, and the session
+// set's path, under which the consent routes are.
+func oauthLiteral(cfg *ir.UserSessionsConfig) string {
+	if cfg == nil || cfg.OAuth == nil {
+		return ""
+	}
+	o := cfg.OAuth
+	members := []string{
+		fmt.Sprintf("accessTokenTtlSeconds: %d", o.AccessTokenTTL()),
+		fmt.Sprintf("refreshTokenTtlSeconds: %d", o.RefreshTokenTTL()),
+		fmt.Sprintf("grantMaxTtlSeconds: %d", o.GrantMaxTTL()),
+		fmt.Sprintf("clients: { metadataDocuments: %t, registration: %t }", o.MetadataDocuments(), o.Registration()),
+	}
+	if o.ConsentPath != "" {
+		members = append(members, "consentPath: "+tsString(o.ConsentPath))
+	}
+	members = append(members, "sessionsPath: "+tsString(cfg.UserSessionsPath()))
+	return "{ " + strings.Join(members, ", ") + " }"
 }
 
 // registrationLiteral renders cfg as the identity runtime's
@@ -860,16 +898,16 @@ func (o *APIOutput) TableHandlers() []string {
 	for _, route := range o.TableRoutes() {
 		handlers[route.Handler()] = struct{}{}
 	}
-	return sortedKeys(handlers)
+	return slices.Sorted(maps.Keys(handlers))
 }
 
 // RouterNeedsORM reports whether the router runs operations through
 // RouterOptions.orm, the repositories of the API's database: a table's
 // behavior operations (D103), the table operations (D106) and a version
 // graph's operations (D138), which read the root and the graph's refs
-// through them.
+// through them, and a table's references and files (#723).
 func (o *APIOutput) RouterNeedsORM() bool {
-	return o.HasBehaviors() || o.HasTableOperations() || o.HasGraphs()
+	return o.HasBehaviors() || o.HasTableOperations() || o.HasGraphs() || o.HasRowFeatures()
 }
 
 // ORMOperations names what the router runs through RouterOptions.orm, with
@@ -884,6 +922,9 @@ func (o *APIOutput) ORMOperations() (what, decisions string) {
 	}
 	if o.HasGraphs() {
 		names, ids = append(names, "the graph operations"), append(ids, "D138")
+	}
+	if o.HasRowFeatures() {
+		names, ids = append(names, "the references and files"), append(ids, "#723")
 	}
 	switch len(names) {
 	case 0:
@@ -985,7 +1026,7 @@ func (o *APIOutput) FilterTypeNames() []string {
 	for _, endpoint := range o.FilteredEndpoints() {
 		names[endpoint.Filter.TypeName] = struct{}{}
 	}
-	return sortedKeys(names)
+	return slices.Sorted(maps.Keys(names))
 }
 
 // InterfaceRuntimeTypes are the types interfaces.ts imports from the
@@ -1006,7 +1047,7 @@ func (o *APIOutput) InterfaceRuntimeTypes() []string {
 			types[field.Shape+"Filter"] = struct{}{}
 		}
 	}
-	return sortedKeys(types)
+	return slices.Sorted(maps.Keys(types))
 }
 
 // OperationTableType is the type router.ts holds its operation table to:
@@ -1057,8 +1098,17 @@ func (o *APIOutput) RuntimeImport() string {
 	if o.HasPages {
 		values = append(values, "readPage")
 	}
+	if o.HasRowFeatures() {
+		values = append(values, "rowFeatureOperation")
+	}
 	values = append(values, o.TableHandlers()...)
+	if o.HasTriage() {
+		values = append(values, "triageOperation")
+	}
 	var types []string
+	if o.RowFeatureBucket() != "" {
+		types = append(types, "Bucket")
+	}
 	if o.HasFilters {
 		types = append(types, "FilterSpec")
 	}
@@ -1072,8 +1122,14 @@ func (o *APIOutput) RuntimeImport() string {
 	if o.HasPrincipalRateLimit {
 		types = append(types, "PrincipalRateLimitStore")
 	}
+	if o.HasRowFeatures() {
+		types = append(types, "RowFeatureOperation")
+	}
 	if o.HasTableOperations() {
 		types = append(types, "TableOperation")
+	}
+	if o.HasTriage() {
+		types = append(types, "TriageInbound", "TriageOperation")
 	}
 	if len(values) == 0 {
 		return "import type { " + strings.Join(types, ", ") + " } from " + tsString(o.RuntimePackage) + ";"
@@ -1165,6 +1221,10 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 			HasRoles:         opts.AuthDB.UserRoleTable() != nil,
 			Registration:     registrationLiteral(apiOutput.Registration),
 		}
+		if cfg := apigen.IdentityOAuth(schema); cfg != nil {
+			output.Identity.OAuth = oauthLiteral(cfg)
+			output.Identity.OAuthAdministration = apigen.IdentityOAuthAdministration(schema)
+		}
 	}
 
 	output.TableBehaviors = databaseHasTableBehaviors(schema, opts)
@@ -1221,6 +1281,33 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 			output.Endpoints = append(output.Endpoints, endpoint)
 			continue
 		}
+		// A row feature operation runs through the database's references
+		// and attachments (#723), with the runtime's handler and no
+		// implementation method: the interfaces leave it out, and the
+		// router mounts it over RouterOptions.orm.
+		if ep.Operation != nil && ep.Operation.RowFeatureOperation != nil {
+			endpoint, err := b.rowFeatureEndpoint(ep, ep.Operation.RowFeatureOperation)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			continue
+		}
+		// A triage operation runs through the inbound path (#746), with
+		// the runtime's handler and no implementation method: the
+		// interfaces leave it out, and the router mounts it over
+		// RouterOptions.inbound.
+		if ep.Operation != nil && ep.Operation.TriageOperation != nil {
+			endpoint, err := b.triageEndpoint(ep, ep.Operation.TriageOperation)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			output.HasPages = output.HasPages || endpoint.Page != nil
+			continue
+		}
 		if ep.Operation != nil && ep.Operation.TableOperation != nil {
 			endpoint, err := b.tableEndpoint(ep, ep.Operation.TableOperation)
 			if err != nil {
@@ -1261,10 +1348,10 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		}
 		ns.Endpoints = append(ns.Endpoints, endpoint)
 	}
-	for _, name := range sortedKeys(byNamespace) {
+	for _, name := range slices.Sorted(maps.Keys(byNamespace)) {
 		output.Namespaces = append(output.Namespaces, *byNamespace[name])
 	}
-	output.WebhookProviders = sortedKeys(webhookProviders)
+	output.WebhookProviders = slices.Sorted(maps.Keys(webhookProviders))
 
 	output.TypeImports = b.packageImports(b.typeImports)
 	output.RouterTypeImports = b.packageImports(b.routerTypeImports)
@@ -1276,8 +1363,8 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	for symbol := range b.filterScalarImports {
 		b.scalarImports[symbol] = struct{}{}
 	}
-	output.ScalarImports = sortedKeys(b.scalarImports)
-	output.RouterScalarImports = sortedKeys(b.routerScalarImports)
+	output.ScalarImports = slices.Sorted(maps.Keys(b.scalarImports))
+	output.RouterScalarImports = slices.Sorted(maps.Keys(b.routerScalarImports))
 	peers := map[string]struct{}{}
 	for pkg := range b.typeImports {
 		peers[pkg] = struct{}{}
@@ -1286,7 +1373,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		peers[pkg] = struct{}{}
 	}
 	peers[output.TypesPackage] = struct{}{}
-	output.PeerPackages = sortedKeys(peers)
+	output.PeerPackages = slices.Sorted(maps.Keys(peers))
 
 	if opts.MCP {
 		mcp, err := mcpInfo(output, apiOutput, opts.Clock)
@@ -2236,19 +2323,10 @@ func (b *builder) addImport(set map[string]map[string]struct{}, pkg, symbol stri
 
 func (b *builder) packageImports(set map[string]map[string]struct{}) []PackageImport {
 	imports := make([]PackageImport, 0, len(set))
-	for _, pkg := range sortedKeys(set) {
-		imports = append(imports, PackageImport{Package: pkg, Symbols: sortedKeys(set[pkg])})
+	for _, pkg := range slices.Sorted(maps.Keys(set)) {
+		imports = append(imports, PackageImport{Package: pkg, Symbols: slices.Sorted(maps.Keys(set[pkg]))})
 	}
 	return imports
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // docLines assembles the JSDoc body of an implementation method.
@@ -2326,8 +2404,7 @@ func docLines(ep EndpointInfo) []string {
 
 // tsString renders a single-quoted TypeScript string literal.
 func tsString(s string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`, "\r", `\r`)
-	return "'" + replacer.Replace(s) + "'"
+	return tsutil.Quote(s)
 }
 
 // PageSpecLiteral is the operation table's page, its PageSpec: { defaultLimit:
@@ -2396,14 +2473,29 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 	} else if err := os.Remove(filepath.Join(outputDir, BehaviorWorkersFile)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale %s: %w", BehaviorWorkersFile, err)
 	}
-	// agents.ts builds Deps.agents (D183); one an earlier build wrote for a
-	// database that no longer uses the agent orchestration is removed.
-	if output.HasAgents() {
-		if err := generateFile("agents.tmpl", filepath.Join(outputDir, AgentsFile), output); err != nil {
-			return fmt.Errorf("generate %s: %w", AgentsFile, err)
-		}
-	} else if err := os.Remove(filepath.Join(outputDir, AgentsFile)); err != nil && !os.IsNotExist(err) {
+	// providers.ts reads the runtime providers (D159), and runtime.ts
+	// builds Deps' runtime pieces and their routes; one an earlier build
+	// wrote for what the API no longer has is removed, and so is agents.ts,
+	// which runtime.ts replaces.
+	if err := os.Remove(filepath.Join(outputDir, AgentsFile)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale %s: %w", AgentsFile, err)
+	}
+	for _, file := range []struct {
+		write    bool
+		template string
+		name     string
+	}{
+		{output.HasProviders(), "providers.tmpl", ProvidersFile},
+		{output.HasRuntime(), "runtime.tmpl", RuntimeFile},
+		{output.HasAudienceQueues(), "audience.tmpl", AudienceFile},
+	} {
+		if file.write {
+			if err := generateFile(file.template, filepath.Join(outputDir, file.name), output); err != nil {
+				return fmt.Errorf("generate %s: %w", file.name, err)
+			}
+		} else if err := os.Remove(filepath.Join(outputDir, file.name)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove stale %s: %w", file.name, err)
+		}
 	}
 	// config.ts is envgen's, written after this when the API has a
 	// configuration; one an earlier build wrote would import what no

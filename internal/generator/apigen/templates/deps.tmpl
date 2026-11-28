@@ -64,11 +64,17 @@ import (
 {{- if .Deps.MemoryStores }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/memorystore"
 {{- end }}
-{{- if .Engine }}
-	engine "{{ $.Naming.EngineGoModule }}"
-{{- end }}
 {{- if .Deps.Providers }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/providers"
+{{- end }}
+{{- if .Deps.Wiring.Builds }}
+{{- if .Deps.Wiring.Agents }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/agents"
+{{- end }}
+{{- if .Deps.Wiring.Inbound }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/inbound"
+{{- end }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/notify"
 {{- end }}
 	"go.uber.org/zap"
 )
@@ -119,14 +125,6 @@ type Deps struct {
 	// until it reconnects.
 	{{ .Field }} memorystore.Store
 {{ end }}
-{{- if .Engine }}
-	// Engine is the engine of {{ .Engine.Database }}, the API's engine database
-	// (D58), which the entrypoint opens in the background, so it starts while
-	// the database is not up yet: Engine.Wait(ctx) returns it once it opens,
-	// and Engine.Engine() at once, or why it is not open. Its types'
-	// instances are the engine's, in namespace {{ .Engine.Namespace }}.
-	Engine *engine.Background
-{{ end }}
 {{- if .Deps.Providers }}
 	// Providers are the runtime providers the environment's config names
 	// in the API's provider slots (D159, D184), which ProvidersOf reads:
@@ -134,6 +132,28 @@ type Deps struct {
 	// Each call into one runs as the provider's own principal.
 	Providers *providers.Providers
 {{ end }}
+{{- with .Deps.Wiring }}
+{{- if .Builds }}
+	// Notifier is the notifier of {{ $.Deps.Database }} (D153, D190), over its
+	// Notifications() and Deps.Providers' channel slots, which Wire builds
+	// with the options the implementation's NewWiring answers: Raise an
+	// event in the transaction of the change, and its worker routes and
+	// delivers it.
+	Notifier *notify.Notifier
+{{ end }}
+{{- if .Agents }}
+	// Agents is the agent dispatcher of {{ $.Deps.Database }} (D158, D192), over
+	// its Orchestration() and its queue {{ .Agents }}, which Wire builds first
+	// and gives the notifier{{ if .Inbound }} and the inbound path{{ end }}.
+	Agents *agents.Agents
+{{ end }}
+{{- if .Inbound }}
+	// Inbound is the inbound path of {{ $.Deps.Database }} (D157, D192): every
+	// message a channel adapter receives takes it, and a send to a party
+	// goes through it{{ if .Agents }}, held to the dispatcher's approval{{ end }}.
+	Inbound *inbound.Inbound
+{{ end }}
+{{- end }}
 	// Logger is the API's logger.
 	Logger *zap.Logger
 }

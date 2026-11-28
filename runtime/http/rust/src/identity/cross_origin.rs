@@ -106,6 +106,8 @@ pub(crate) struct OriginParts {
     pub path: bool,
     /// The URL is opaque: a scheme and no `/` after it (`mailto:x`).
     pub opaque: bool,
+    /// The URL's path, percent-decoded, ends with `/`.
+    pub path_slash: bool,
 }
 
 /// Reads a URL as Go's `url.Parse` does, or `None` where it fails.
@@ -126,6 +128,7 @@ pub(crate) fn origin_parts(raw: &str) -> Option<OriginParts> {
         user: false,
         path: false,
         opaque: false,
+        path_slash: false,
     };
     if url == "*" {
         parts.path = true;
@@ -172,8 +175,9 @@ pub(crate) fn origin_parts(raw: &str) -> Option<OriginParts> {
             parts.user = true;
         }
     }
-    percent_decode(path.as_bytes(), Mode::Other)?;
+    let decoded = percent_decode(path.as_bytes(), Mode::Other)?;
     parts.path = !path.is_empty();
+    parts.path_slash = decoded.ends_with(b"/");
     Some(parts)
 }
 

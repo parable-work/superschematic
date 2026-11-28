@@ -68,7 +68,10 @@ interface ResolveParams {
 }
 
 interface ResolveResult {
-  /** The row that holds the name; null when none does. */
+  /**
+   * The row that holds the name; null when none does, and to a caller held to
+   * per-record access who may not read the row that does (D156).
+   */
   row: {
     /** The row's key, in its wire form. */
     key: string;
@@ -86,8 +89,9 @@ interface ResolveResult {
 enum AliasedVeto {
   /**
    * A create, a rename or an addAlias of a name another row holds, as its
-   * name or an alias, in its normalized form; details give the name, its
-   * normalized form and the key of the row that holds it (holder).
+   * name or an alias, in its normalized form; details give the name and its
+   * normalized form, and nothing of the row that holds it, which the caller
+   * may not be allowed to see (D156): resolve answers it to one who may.
    */
   name_taken,
   /**
@@ -104,8 +108,9 @@ enum AliasedVeto {
  * of white space ignored; slug reads only its letters and digits, in lower
  * case. A create gives the name. rename keeps the old name as an alias;
  * addAlias and removeAlias keep the others; resolve, on the table, finds the
- * row a name or an alias names. A name another row holds is refused with that
- * row's key, the veto name_taken. A delete frees the row's names, and a
+ * row a name or an alias names, to a caller who may read it. A name another
+ * row holds is refused, the veto name_taken, which names nothing of that row.
+ * A delete frees the row's names, and a
  * removed alias frees its own. The behaviors' core alone implements it, on a
  * table; no engine type composes it.
  */
@@ -144,7 +149,8 @@ export abstract class Aliased<C extends AliasedConfig> {
 
   /**
    * Finds the row whose name or alias a name names, in its normalized form: a
-   * read of the table as a whole that writes nothing.
+   * read of the table as a whole that writes nothing. A row the caller may not
+   * read is none (D156).
    * @scope schema
    */
   abstract resolve(params: ResolveParams): ResolveResult;

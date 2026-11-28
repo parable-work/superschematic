@@ -2,6 +2,7 @@ package rustgen
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -11,11 +12,12 @@ import (
 
 // The calendar (D152) and search across tables (D155) as the Rust
 // repositories read them (D188): a table's @calendarSource declarations
-// and its @searchable index, members of the table in the Postgres
-// definition (orm::Table's calendar and searchable), which the runtime's
-// orm::calendar and orm::search_tables read. They hold what tsgen's
-// calendar.go and searchable.go write into orm.ts, member for member, so
-// the two runtimes read the same tables and columns.
+// and its @searchable index, members of the table in the Postgres and the
+// SQLite definitions (orm::Table's calendar and searchable), which the
+// runtime's orm::calendar and orm::search_tables read, on SQLite through
+// their sqlite modules (#615). They hold what tsgen's calendar.go and
+// searchable.go write into orm.ts and orm-sqlite.ts, member for member,
+// so the two runtimes read the same tables and columns.
 
 // rustCalendarSource is orm::calendar::CalendarSource.
 type rustCalendarSource struct {
@@ -26,6 +28,7 @@ type rustCalendarSource struct {
 	Field       string                   `json:"field,omitempty"`
 	End         string                   `json:"end,omitempty"`
 	Owner       string                   `json:"owner,omitempty"`
+	Permission  string                   `json:"permission,omitempty"`
 	Occurrences *rustCalendarOccurrences `json:"occurrences,omitempty"`
 }
 
@@ -57,6 +60,8 @@ func calendarOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel) 
 			Field: source.Field,
 			End:   source.End,
 			Owner: source.Owner,
+			// Permission is the schema's (#601).
+			Permission: source.Permission,
 		}
 		if source.Occurrences {
 			occurrences, err := occurrencesOf(schema, td, tables)
@@ -73,7 +78,7 @@ func calendarOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel) 
 // occurrencesOf is the occurrences sub-table of td's Recurrence.
 func occurrencesOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel) (*rustCalendarOccurrences, error) {
 	var sub *ir.TypeDef
-	for _, name := range sortedNames(schema) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		if m := schema.Types[name].BehaviorTable; m != nil && m.Row == td.Name && m.Use == "Recurrence" && m.Table == "occurrences" {
 			sub = schema.Types[name]
 		}
@@ -117,8 +122,12 @@ const searchIndexAlias = "si"
 
 // rustSearchable is orm::search_tables::SearchableDefinition.
 type rustSearchable struct {
-	Index     string              `json:"index"`
-	Document  string              `json:"document"`
+	Index    string `json:"index"`
+	Document string `json:"document"`
+	// Config is the text search configuration the index's words are in
+	// on Postgres, when it is not simple: search_unaccent, which folds
+	// diacritics (#740).
+	Config    string              `json:"config,omitempty"`
 	Table     string              `json:"table"`
 	Key       string              `json:"key"`
 	KeyType   string              `json:"keyType"`
@@ -130,6 +139,25 @@ type rustSearchable struct {
 	Audience  *rustSearchAudience `json:"audience,omitempty"`
 	Comments  *rustSearchComments `json:"comments,omitempty"`
 	Files     *rustSearchFiles    `json:"files,omitempty"`
+	// FTS is the FTS5 table of the index's words on SQLite (D186), which
+	// a search there matches and ranks in place of Document.
+	FTS string `json:"fts,omitempty"`
+}
+
+// sqliteSearchable is a @searchable table's index on SQLite (D186), as
+// tsgen's sqliteSearchable writes it: Postgres's, its words the FTS5 table
+// beside the index in place of the weighed document, and its key's type
+// SQLite's. Nil for nil.
+func sqliteSearchable(postgres *rustSearchable) *rustSearchable {
+	if postgres == nil {
+		return nil
+	}
+	s := *postgres
+	s.Document = ""
+	s.Config = ""
+	s.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
+	s.KeyType = "text"
+	return &s
 }
 
 type rustSearchAudience struct {
@@ -189,7 +217,8 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 	key := table.KeyColumn()
 	out := &rustSearchable{
 		Index:    index.Quoted,
-		Document: ir.SearchDocument(searchIndexAlias),
+		Document: ir.SearchDocumentIn(schema.SearchConfig(), searchIndexAlias),
+		Config:   searchConfigOf(schema),
 		Table:    table.Quoted,
 		Key:      key.Quoted,
 		KeyType:  strings.ToLower(key.Type),
@@ -228,7 +257,7 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 		out.Audience = a
 	}
 	if s.IndexesComments() {
-		for _, name := range sortedNames(schema) {
+		for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 			m := schema.Types[name].BehaviorTable
 			if m == nil || m.Row != td.Name || m.Behavior != "Comments" || m.Table != "messages" || byType[name] == nil {
 				continue
@@ -257,12 +286,11 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 	return out, nil
 }
 
-// sortedNames are the schema's type names in order.
-func sortedNames(schema *ir.Schema) []string {
-	names := make([]string, 0, len(schema.Types))
-	for name := range schema.Types {
-		names = append(names, name)
+// searchConfigOf is the schema's search index's text search configuration
+// when it is not simple (#740), "" when it is.
+func searchConfigOf(schema *ir.Schema) string {
+	if config := schema.SearchConfig(); config != ir.SearchTextConfig {
+		return config
 	}
-	slices.Sort(names)
-	return names
+	return ""
 }

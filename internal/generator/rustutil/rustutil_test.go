@@ -159,3 +159,21 @@ func TestUseLine(t *testing.T) {
 		}
 	}
 }
+
+func TestQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		`plain`:         `"plain"`,
+		`a"b\c`:         `"a\"b\\c"`,
+		"tab\tnl\n":     `"tab\tnl\n"`,
+		"bell\x07":      `"bell\u{7}"`,
+		`^\w+@é$`:       `"^\\w+@é$"`,
+		"nul\x00":       `"nul\0"`,
+		"del\x7f":       `"del\u{7f}"`,
+		`{"k":["v"]}`:   `"{\"k\":[\"v\"]}"`,
+		"emoji 😀 stays": `"emoji 😀 stays"`,
+	} {
+		if got := Quote(in); got != want {
+			t.Errorf("Quote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

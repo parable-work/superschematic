@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -92,7 +93,7 @@ Examples:
 	cmd.Flags().BoolVar(&flags.json, "json", false, "write the result as one JSON document (with --watch, one per line)")
 	cmd.Flags().BoolVar(&flags.watch, "watch", false, "check, then re-check the services each edit affects until interrupted")
 	cmd.Flags().DurationVar(&flags.interval, "interval", 200*time.Millisecond, "with --watch, how often to look for edits")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <services-root>/../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <services-root>/../superschematic.toml)")
 	return cmd
 }
 
@@ -148,14 +149,11 @@ func isDir(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// isServiceDir reports whether dir holds a schema.config in any form.
+// isServiceDir reports whether dir holds a schema.config in any form. A
+// directory Locate refuses (two forms) is one, so its load reports why.
 func isServiceDir(dir string) bool {
-	for _, name := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			return true
-		}
-	}
-	return false
+	_, _, ok, err := schemaconfig.Locate(dir)
+	return ok || err != nil
 }
 
 // checkDiagnostic is one finding of a check. File is absolute until a
@@ -469,11 +467,7 @@ func (c *checker) run(changed []string) checkReport {
 // before it loads any.
 func (c *checker) discover() error {
 	buildcache.SetSchemasRoot(c.schemasRoot)
-	names, err := resolveNaming(c.namingPath, c.schemasRoot)
-	if err != nil {
-		return err
-	}
-	reg, err := c.app.resolveRegistry(names)
+	names, reg, err := c.app.openNaming(c.namingPath, c.schemasRoot)
 	if err != nil {
 		return err
 	}
@@ -544,7 +538,7 @@ func (c *checker) fill(report *checkReport, scope []buildplan.Service) {
 			entry.Status = "error"
 		case result.failed:
 			entry.Status = "blocked"
-			for _, dep := range sortedNames(result.blockedBy) {
+			for _, dep := range slices.Sorted(maps.Keys(result.blockedBy)) {
 				if dep != service.Name {
 					entry.BlockedBy = append(entry.BlockedBy, dep)
 				}
@@ -770,14 +764,4 @@ func writeCheckReport(w io.Writer, report checkReport, asJSON, watching bool) er
 	}
 	_, err := fmt.Fprintln(w, summary)
 	return err
-}
-
-// sortedNames returns the names set holds, sorted.
-func sortedNames(set map[string]bool) []string {
-	names := make([]string, 0, len(set))
-	for name := range set {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }

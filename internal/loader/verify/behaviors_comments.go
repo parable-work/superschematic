@@ -30,15 +30,3 @@ func checkCommentsConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
 		}
 	}
 }
-
-// checkEngineCommentsConfig refuses, on an engine type, events, which a
-// table's Comments alone takes (#713): its mentioned and replied events
-// reach the notifier through the table's event queue, and the engine's
-// Comments records its operation events in its log. The declaration is
-// shared, so the configSchema accepts it; the engine's Comments refuses it
-// too, and the build says so first, naming the table form.
-func checkEngineCommentsConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	if configNames(ref.Config, "events") {
-		r.errorf(td.Owner, "type %s: @behavior Comments names events, which a table's Comments takes (implements Comments<%s, { events: true }>, #713); an engine type's Comments records its operation events in the engine's log, so leave it out", td.Name, td.Name)
-	}
-}

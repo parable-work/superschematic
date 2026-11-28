@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"slices"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -231,8 +230,4 @@ func stepName(step *ir.DeployStep) string {
 		return fmt.Sprintf("%s %d", step.Step, step.Wave)
 	}
 	return string(step.Step)
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	return slices.Sorted(maps.Keys(m))
 }

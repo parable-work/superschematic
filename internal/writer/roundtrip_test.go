@@ -57,7 +57,7 @@ var corpus = []roundtripFixture{
 	{name: "fixture-queue-db", dir: tsFixtures + "/fixture-queue-db", native: FormatTS},
 	{name: "fixture-queue-api", dir: tsFixtures + "/fixture-queue-api", native: FormatTS},
 	// An API's @deriver classes (D74), which every form writes as the
-	// schema's derivers, each naming the engine types it imports.
+	// schema's derivers, each naming the tables it fills.
 	{name: "fixture-derived-api", dir: tsFixtures + "/fixture-derived-api", native: FormatTS},
 	// An API's @app classes (D78), which every form writes as the schema's
 	// apps, each with the extensions it names.

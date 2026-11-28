@@ -1,8 +1,6 @@
 package rustgen
 
 import (
-	"fmt"
-
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -55,16 +53,6 @@ func notifierOfTable(td *ir.TypeDef) string {
 		return td.Notifier.Part
 	}
 	return ""
-}
-
-// refuseNotifierOnSQLite refuses the notifier for a crate that lists the
-// sqlite dialect, as the loader refuses it for every language (D153): its
-// worker enqueues and claims through the Postgres queue client alone.
-func refuseNotifierOnSQLite(schema *ir.Schema, sqlite bool) error {
-	if !sqlite || schema == nil || !schema.UsesNotifications() {
-		return nil
-	}
-	return fmt.Errorf("rustgen: %s lists the sqlite dialect, and the notifier (D153) runs on Postgres alone so far; build it for postgres alone (D191)", schema.Name)
 }
 
 // rustParty is orm::PartyDefinition: the field a @party table's parties

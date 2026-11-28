@@ -44,6 +44,11 @@ func (db *Database) Notifications() notifications.Host {
 type notifierHost struct {
 	db *Database
 	tx TxInterface
+{{- if .SQLite }}
+	// lite is the SQLite database the host runs on (notifications_sqlite.go),
+	// tx then a *SQLiteTx of it; nil on Postgres.
+	lite *SQLiteDatabase
+{{- end }}
 }
 
 // notifierRepositories are the repositories the notifier reads a record
@@ -58,10 +63,20 @@ func (h notifierHost) repositories() notifierRepositories {
 	if h.tx != nil {
 		return h.tx
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite
+	}
+{{- end }}
 	return h.db
 }
 
 func (h notifierHost) Query(ctx context.Context, sql string, args ...any) ([]notifications.Row, error) {
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.sqliteQuery(ctx, sql, args...)
+	}
+{{- end }}
 	var rows pgx.Rows
 	var err error
 	if h.tx != nil {
@@ -90,6 +105,11 @@ func (h notifierHost) Query(ctx context.Context, sql string, args ...any) ([]not
 }
 
 func (h notifierHost) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.sqliteExec(ctx, sql, args...)
+	}
+{{- end }}
 	if h.tx != nil {
 		tag, err := h.tx.Exec(ctx, sql, args...)
 		return tag.RowsAffected(), err
@@ -99,14 +119,27 @@ func (h notifierHost) Exec(ctx context.Context, sql string, args ...any) (int64,
 }
 
 func (h notifierHost) Transaction(ctx context.Context, fn func(notifications.Host) error) error {
-	run := func(tx TxInterface) error { return fn(notifierHost{db: h.db, tx: tx}) }
+	run := func(tx TxInterface) error { return fn(notifierHost{db: h.db, tx: tx{{ if .SQLite }}, lite: h.lite{{ end }}}) }
 	if h.tx != nil {
 		return h.tx.Transaction(ctx, run)
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite.Transaction(ctx, run)
+	}
+{{- end }}
 	return h.db.Transaction(ctx, run)
 }
 
 func (h notifierHost) In(tx any) (notifications.Host, error) {
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.sqliteIn(tx)
+	}
+	if _, lite := tx.(*SQLiteTx); lite {
+		return nil, fmt.Errorf("orm: the notifier on Postgres writes in a transaction of its database, not a *SQLiteTx")
+	}
+{{- end }}
 	in, ok := tx.(TxInterface)
 	if !ok || in == nil {
 		return nil, fmt.Errorf("orm: the notifier writes in a transaction of this database (a TxInterface), not %T", tx)
@@ -152,6 +185,11 @@ func (h notifierHost) Enqueue(ctx context.Context, work notifications.Work, dela
 	if err != nil {
 		return err
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.sqliteEnqueue(ctx, msg, delay)
+	}
+{{- end }}
 	if h.tx != nil {
 		return Enqueue{{ .Notifications.Dispatch }}In(ctx, h.tx, msg, delay)
 	}
@@ -203,11 +241,32 @@ func notifierWork(msg types.{{ .Notifications.Dispatch }}) notifications.Work {
 }
 
 func (h notifierHost) Dispatch() notifications.Queue {
+{{- if .SQLite }}
+	if h.lite != nil {
+		return notifierQueue{queue: sqliteClaims[{{ .Notifications.Dispatch }}Claim]{queue: New{{ .Notifications.Dispatch }}SQLiteQueue(h.lite.SQL())}}
+	}
+{{- end }}
 	return notifierQueue{queue: h.db.{{ .Notifications.Dispatch }}Queue()}
 }
 
+// notifierClaims is a generated queue whose claims are C, as the
+// notifier's and the orchestration's workers claim it: its Postgres
+// queue, or on SQLite its claims there.
+type notifierClaims[C any] interface {
+	Claim(ctx context.Context, n int, lease time.Duration) ([]C, error)
+	Complete(ctx context.Context, id, token string) error
+	Fail(ctx context.Context, id, token, cause string) (bool, error)
+	Extend(ctx context.Context, id, token string, lease time.Duration) error
+	Release(ctx context.Context, id, token string) error
+	Prune(ctx context.Context, limit int) (int, error)
+	Slot(ctx context.Context, slots int) (release func(), ok bool, err error)
+	NextDue(ctx context.Context) (time.Duration, bool, error)
+}
+
 // notifierQueue is {{ .Notifications.Dispatch }} as the notifier's worker claims it.
-type notifierQueue struct{ queue *{{ .Notifications.Dispatch }}Queue }
+type notifierQueue struct {
+	queue notifierClaims[{{ .Notifications.Dispatch }}Claim]
+}
 
 func (q notifierQueue) Name() string { return {{ printf "%q" .Notifications.Dispatch }} }
 
@@ -462,6 +521,11 @@ func (h notifierHost) RoleHolders(ctx context.Context, role string) ([]string, e
 func (h notifierHost) ActiveGrants(ctx context.Context, holder string, now time.Time) ([]access.GrantReach, error) {
 {{- if and .Access .Access.Grants }}
 	var repositories grantRepositories = h.db
+{{- if .SQLite }}
+	if h.lite != nil {
+		repositories = h.lite
+	}
+{{- end }}
 	if h.tx != nil {
 		repositories = h.tx
 	}

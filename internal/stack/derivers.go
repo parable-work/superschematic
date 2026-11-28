@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -14,9 +15,9 @@ import (
 // identity are its API's, as a worker's are: the resolver treats a deriver
 // as it treats a worker wherever a deployable runs code
 // (ir.DeployableKind.RunsCode). What is its own is decided here: the
-// types whose Derived fields it fills, which must be types of the database
-// its API connects to that compose Derived, engine types or tables (D146),
-// and whether its one instance runs. It claims from no queue.
+// tables whose Derived fields it fills, which must be tables of the
+// database its API connects to that implement Derived (D146), and whether
+// its one instance runs. It claims from no queue.
 
 // Derivers returns the derivers of in.Stack, which no environment
 // changes: a deriver per `@deriver` of every API service the stack
@@ -40,7 +41,7 @@ func Derivers(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.resolveCalls()
 	r.runDerivers()
 	var derivers []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableDeriver {
 			continue
@@ -60,7 +61,7 @@ func (r *resolver) defaultDerivers() {
 	if r.byDeriver == nil {
 		r.byDeriver = map[string]string{}
 	}
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		svc := r.services[name]
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
@@ -172,20 +173,16 @@ func (r *resolver) applyDeriverSettings(where, env string, d *deployable, entry 
 }
 
 // runDerivers decides what each deriver runs in the environment (D74,
-// D146): the database its API connects to, one whose types compose
-// Derived; the types whose Derived fields it fills, those its decorator
-// names, each an engine type or a table of that database that composes
-// Derived, or every such type when it names none, and at least one; its
+// D146): the database its API connects to, one with a table that
+// implements Derived; the tables whose Derived fields it fills, those its
+// decorator names, each a table of that database that implements Derived,
+// or every such table when it names none, and at least one; its
 // concurrency and batch size, the decorator's unless the settings change
 // the concurrency; and its instances, one unless the settings turn it off.
-// A deriver fills engine types through the engine, or tables through
-// their repositories, not both: one whose schemas are of both kinds is
-// refused, and so is one that names none over a database that has both. A
-// deriver of tables runs on a TypeScript, Rust or Go API (D146), and one of
-// engine types on a TypeScript or Rust API: a Go API's deriver of engine
-// types is refused.
+// It fills them through their repositories, on a TypeScript, Rust or Go
+// API (D146).
 func (r *resolver) runDerivers() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableDeriver || d.deriver == nil {
 			continue
@@ -195,18 +192,13 @@ func (r *resolver) runDerivers() {
 			r.fail(CodeInvalidStack, "deriver %s of %s: %v", d.deriver.Name, run.API, err)
 			continue
 		}
-		lang := r.services[run.API].Language
-		if lang == "" {
-			lang = registry.APILanguageGo
-		}
 		db, ok := r.connectsQuietly(r.services[run.API])
-		if !ok || (!r.services[db].Engine && len(r.services[db].DerivedTables) == 0) {
-			r.fail(CodeInvalidStack, "deriver %s of %s fills Derived fields, and %s connects to no database whose types compose Derived; a deriver's schemas are engine types or tables of its API's database, its authDb or its one DB dependency", d.deriver.Name, run.API, run.API)
+		if !ok || len(r.services[db].DerivedTables) == 0 {
+			r.fail(CodeInvalidStack, "deriver %s of %s fills Derived fields, and %s connects to no database with a table that implements Derived; a deriver's schemas are tables of its API's database, its authDb or its one DB dependency", d.deriver.Name, run.API, run.API)
 			continue
 		}
 		run.Database = db
-		engineTypes, tables := r.services[db].Derived, r.services[db].DerivedTables
-		derived := slices.Concat(engineTypes, tables)
+		derived := slices.Clone(r.services[db].DerivedTables)
 		slices.Sort(derived)
 		run.Schemas = nil
 		unknown := false
@@ -216,7 +208,7 @@ func (r *resolver) runDerivers() {
 				if len(derived) > 0 {
 					declared = strings.Join(derived, ", ")
 				}
-				r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, which is no engine type or table of %s that composes Derived (its types that do: %s)", d.deriver.Name, run.API, schema, db, declared)
+				r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, which is no table of %s that implements Derived (its tables that do: %s)", d.deriver.Name, run.API, schema, db, declared)
 				unknown = true
 				continue
 			}
@@ -228,25 +220,9 @@ func (r *resolver) runDerivers() {
 		if len(d.deriver.Schemas) == 0 {
 			run.Schemas = slices.Clone(derived)
 			if len(run.Schemas) == 0 {
-				r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, and no type of %s composes Derived; compose Derived on a type, or remove the deriver", d.deriver.Name, run.API, db, db)
+				r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, and no table of %s implements Derived; implement Derived on a table, or remove the deriver", d.deriver.Name, run.API, db, db)
 				continue
 			}
-		}
-		var ofEngine, ofTables []string
-		for _, schema := range run.Schemas {
-			if slices.Contains(tables, schema) {
-				ofTables = append(ofTables, schema)
-			} else {
-				ofEngine = append(ofEngine, schema)
-			}
-		}
-		if len(ofEngine) > 0 && len(ofTables) > 0 {
-			r.fail(CodeInvalidStack, "deriver %s of %s fills the derived fields of %s, engine types of %s, and of %s, tables of it; a deriver fills engine types through the engine or tables through their repositories, so declare a deriver for each and name its schemas (D146)", d.deriver.Name, run.API, strings.Join(ofEngine, ", "), db, strings.Join(ofTables, ", "))
-			continue
-		}
-		if len(ofEngine) > 0 && lang == registry.APILanguageGo {
-			r.fail(CodeUnrealizable, "deriver %s of %s fills the derived fields of %s, engine types of %s, and %s is a Go API; %s; write the API in TypeScript or Rust", d.deriver.Name, run.API, strings.Join(ofEngine, ", "), db, run.API, DeriverLanguages)
-			continue
 		}
 		run.Concurrency = registry.DeriverConcurrency(d.deriver)
 		if s.concurrency != nil {
@@ -263,6 +239,20 @@ func (r *resolver) runDerivers() {
 	}
 }
 
-// DeriverLanguages says which languages a deriver runs in (D74, D146), for
-// the refusals of a Go API's deriver of engine types.
-const DeriverLanguages = "a deriver of engine types runs on a TypeScript or Rust API, and a Go API's deriver fills tables alone (D146)"
+// connectsQuietly is databaseOf without its failure, which the server of
+// the API reports: the DB service an API connects to.
+func (r *resolver) connectsQuietly(svc *Service) (string, bool) {
+	if svc.AuthDB != nil {
+		return svc.AuthDB.Name, true
+	}
+	var dbs []string
+	for _, dep := range svc.Dependencies {
+		if db, ok := r.services[dep.Name]; ok && dep.Kind == ir.SchemaKindDB && db.Kind == ir.SchemaKindDB {
+			dbs = append(dbs, dep.Name)
+		}
+	}
+	if len(dbs) != 1 {
+		return "", false
+	}
+	return dbs[0], true
+}

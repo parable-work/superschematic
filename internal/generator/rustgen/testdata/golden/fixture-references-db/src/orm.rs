@@ -15,6 +15,10 @@
 //! `with_keys` seals and opens with: a server's keys are the
 //! [`FieldKeyring`] of the DB service's key secret.
 //!
+//! With the crate's `sqlite` feature, `sqlite::Repositories::new` opens them
+//! over a `rusqlite::Connection` its caller holds, synchronously: a write in
+//! a transaction the caller opened with `TransactionBehavior::Immediate`.
+//!
 //! With its `postgres` feature, `postgres::Repositories::new` opens them
 //! over a tokio-postgres client, asynchronously.
 //!
@@ -889,7 +893,16 @@ pub const POSTGRES: &str = r#"{
       },
       "behaviors": {
         "owned": [],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "comments": [
+            "listMessages",
+            "getMessage",
+            "listEdits",
+            "listReactions",
+            "listPinned"
+          ]
+        }
       }
     }
   ],
@@ -1320,6 +1333,725 @@ pub mod postgres {
         /// The operations of `Ticket`'s `comments`, a typed method
         /// each ([`TicketCommentsOperations`]).
         pub fn ticket_comments(&self) -> Result<TicketCommentsOperations<'_, C>, orm::Error> {
+            self.ticket().map(TicketCommentsOperations)
+        }
+    }
+}
+
+/// The tables of `fixture-references-db` and the clauses their statements are written
+/// with, on SQLite.
+#[cfg(feature = "sqlite")]
+pub const SQLITE: &str = r#"{
+  "dialect": "sqlite",
+  "clauses": {
+    "eq": "%s = ?%d",
+    "ne": "%s IS DISTINCT FROM ?%d",
+    "gt": "%s > ?%d",
+    "gte": "%s >= ?%d",
+    "lt": "%s < ?%d",
+    "lte": "%s <= ?%d",
+    "ilike": "%s LIKE ?%d ESCAPE '\\'",
+    "in": "%s IN (%s)",
+    "noneOf": "(%s IN (%s)) IS NOT TRUE",
+    "isNull": "%s IS NULL",
+    "isNotNull": "%s IS NOT NULL",
+    "search": "%s LIKE ?%d ESCAPE '\\'",
+    "exists": "EXISTS (%s)",
+    "notExists": "NOT EXISTS (%s)",
+    "set": "%s = ?%d",
+    "setNull": "%s = NULL",
+    "pageKey": "page_key.%s",
+    "placeholder": "?%d",
+    "default": "",
+    "or": " OR ",
+    "group": "(%s)",
+    "where": " WHERE ",
+    "and": " AND ",
+    "orderBy": " ORDER BY ",
+    "orderTerm": "%s %s",
+    "limit": " LIMIT %d",
+    "offset": " OFFSET %d",
+    "changed": "(%s) IS DISTINCT FROM (%s)",
+    "never": "FALSE",
+    "null": "NULL",
+    "setExcluded": "%s = EXCLUDED.%s",
+    "excluded": "EXCLUDED.%s"
+  },
+  "jsonClauses": {
+    "eq": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    "ne": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    "in": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
+    "noneOf": "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
+    "value": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))"
+  },
+  "defaultLimit": 100,
+  "maxParameters": 32766,
+  "tables": [
+    {
+      "name": "Note",
+      "table": "note",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "note.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "title",
+          "column": "title",
+          "field": "title",
+          "qualified": "note.title",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "owner",
+          "column": "\"owner\"",
+          "field": "owner",
+          "qualified": "note.\"owner\"",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "note.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "audience",
+          "column": "audience",
+          "field": "audience",
+          "qualified": "note.audience",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "audienceNamed",
+          "column": "audience_named",
+          "field": "audienceNamed",
+          "qualified": "note.audience_named",
+          "list": true,
+          "uuid": true
+        },
+        {
+          "name": "agentAccess",
+          "column": "agent_access",
+          "field": "agentAccess",
+          "qualified": "note.agent_access",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "effectiveAudience",
+          "column": "effective_audience",
+          "field": "effectiveAudience",
+          "qualified": "note.effective_audience",
+          "list": true,
+          "uuid": true
+        },
+        {
+          "name": "effectiveAgents",
+          "column": "effective_agents",
+          "field": "effectiveAgents",
+          "qualified": "note.effective_agents",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"title\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "qualifiedColumns": "\"note\".\"id\", \"note\".\"title\", \"note\".\"owner\", \"note\".\"created_at\", \"note\".\"audience\", \"note\".\"audience_named\", \"note\".\"agent_access\", \"note\".\"effective_audience\", \"note\".\"effective_agents\"",
+        "getOne": "SELECT \"id\", \"title\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\" FROM note WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM note%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM note%s%s%s",
+        "count": "SELECT COUNT(*) FROM note%s",
+        "page": "SELECT %s FROM note%s%s LIMIT %d",
+        "pageAfterKey": "note.id %s %s",
+        "pageAfter": "(%s, note.id) %s ((SELECT %s FROM note AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM note AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", note.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM note WHERE note.id = ?1)",
+        "insert": "INSERT INTO note (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO note (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE note SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"title\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "updateMany": "UPDATE note SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"title\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM note WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM note WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM note WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = note.id",
+          "rows": "SELECT \"id\", \"title\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\" FROM note WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "audience": {
+        "effective": "note.effective_audience",
+        "agents": "note.effective_agents"
+      }
+    },
+    {
+      "name": "Ticket",
+      "table": "ticket",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "ticket.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "title",
+          "column": "title",
+          "field": "title",
+          "qualified": "ticket.title",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "_version",
+          "column": "_version",
+          "field": "_version",
+          "qualified": "ticket._version",
+          "auto": true,
+          "required": true,
+          "internal": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"title\", \"_version\"",
+        "qualifiedColumns": "\"ticket\".\"id\", \"ticket\".\"title\", \"ticket\".\"_version\"",
+        "getOne": "SELECT \"id\", \"title\", \"_version\" FROM ticket WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM ticket%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM ticket%s%s%s",
+        "count": "SELECT COUNT(*) FROM ticket%s",
+        "page": "SELECT %s FROM ticket%s%s LIMIT %d",
+        "pageAfterKey": "ticket.id %s %s",
+        "pageAfter": "(%s, ticket.id) %s ((SELECT %s FROM ticket AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM ticket AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", ticket.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ?1)",
+        "insert": "INSERT INTO ticket (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO ticket (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE ticket SET %s, _version = _version + 1 WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"title\", \"_version\"",
+        "updateMany": "UPDATE ticket SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO ticket (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s, _version = _version + 1%s RETURNING \"id\", \"title\", \"_version\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM ticket WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM ticket WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM ticket WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = ticket.id",
+          "rows": "SELECT \"id\", \"title\", \"_version\" FROM ticket WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "behaviors": {
+        "owned": [],
+        "noUpsert": true,
+        "reads": {
+          "comments": [
+            "listMessages",
+            "getMessage",
+            "listEdits",
+            "listReactions",
+            "listPinned"
+          ]
+        }
+      }
+    }
+  ],
+  "references": {
+    "holders": {
+      "Note": {
+        "table": "note_references",
+        "row": "note_id",
+        "uuid": true,
+        "tables": [
+          "Ticket",
+          "Note"
+        ],
+        "maxPerRow": 1000
+      },
+      "Ticket": {
+        "table": "ticket_references",
+        "row": "ticket_id",
+        "uuid": true,
+        "maxPerRow": 1000
+      }
+    },
+    "targets": {
+      "Note": {
+        "table": "note",
+        "key": "id",
+        "uuid": true,
+        "owner": "\"owner\"",
+        "restricted": "effective_audience"
+      },
+      "Ticket": {
+        "table": "ticket",
+        "key": "id",
+        "uuid": true
+      }
+    },
+    "comments": {
+      "Ticket": {
+        "table": "ticket_comments_messages",
+        "row": "ticket_id",
+        "uuid": true,
+        "blocks": "blocks",
+        "state": "state",
+        "id": "message"
+      }
+    }
+  },
+  "attachments": {
+    "holders": {
+      "Note": {
+        "table": "note_attachments",
+        "row": "note_id",
+        "uuid": true,
+        "maxFileBytes": 104857600,
+        "maxRowBytes": 1073741824,
+        "maxFiles": 100,
+        "mediaTypes": [
+          "text/*",
+          "image/*",
+          "application/pdf"
+        ],
+        "released": "attachment_released_queue"
+      },
+      "Ticket": {
+        "table": "ticket_attachments",
+        "row": "ticket_id",
+        "uuid": true,
+        "maxFileBytes": 1048576,
+        "maxRowBytes": 4194304,
+        "maxFiles": 10,
+        "released": "attachment_released_queue"
+      }
+    }
+  }
+}"#;
+
+/// The definition [`SQLITE`] holds, read once.
+#[cfg(feature = "sqlite")]
+pub fn sqlite_definition() -> Result<&'static orm::Definition, orm::Error> {
+    static DEFINITION: std::sync::OnceLock<Result<orm::Definition, String>> =
+        std::sync::OnceLock::new();
+    DEFINITION
+        .get_or_init(|| orm::Definition::parse(SQLITE).map_err(|err| err.to_string()))
+        .as_ref()
+        .map_err(|err| orm::Error::Definition(err.clone()))
+}
+
+/// The repositories on a SQLite file.
+#[cfg(feature = "sqlite")]
+pub mod sqlite {
+    use super::*;
+
+    pub use orm::sqlite::rusqlite;
+    // What the references and attachments of the database's rows read and
+    // answer (D154, #611).
+    pub use orm::rowfeatures;
+
+    /// The repository of `Note` on a SQLite connection.
+    pub type NoteRepository<'a> =
+        orm::sqlite::Typed<'a, NoteRow, NoteCreate, NoteUpdate, NoteFilter, IdentityUUID>;
+
+    /// The repository of `Ticket` on a SQLite connection.
+    pub type TicketRepository<'a> =
+        orm::sqlite::Typed<'a, TicketRow, TicketCreate, TicketUpdate, TicketFilter, IdentityUUID>;
+
+    /// The operations of the Comments `Ticket` implements, under `comments` (D103), each run through the behaviors' core in the transaction the repositories were opened over: on the row whose key it takes, or on the table as a whole (D104).
+    pub struct TicketCommentsOperations<'a>(TicketRepository<'a>);
+
+    impl TicketCommentsOperations<'_> {
+        /// Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, each block's kind one the config allows, and an attachment's uri scheme, media type and size ones the config's attachments allow. A caller acting for someone records that subject as the message's for. A retry with the clientId of a message the caller posted or began returns that message and posts nothing.
+        pub fn post(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsPostParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "post", key, params, options)
+        }
+
+        /// Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read, and an attachment not on it before must be one the config's attachments allow; a code block equal to the one at its place before keeps its moves. Acting for the author is not being it: only the author's own subject, or moderatePermission, may edit.
+        pub fn edit(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsEditParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "edit", key, params, options)
+        }
+
+        /// Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept.
+        pub fn delete_message(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsDeleteMessageParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "deleteMessage", key, params, options)
+        }
+
+        /// Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them.
+        pub fn purge(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsPurgeParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsPurgeResult, orm::Error> {
+            self.0.operation("comments", "purge", key, params, options)
+        }
+
+        /// Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji.
+        pub fn react(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsReactParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "react", key, params, options)
+        }
+
+        /// Removes the caller's reaction from a posted or interrupted message.
+        pub fn unreact(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsUnreactParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "unreact", key, params, options)
+        }
+
+        /// Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one.
+        pub fn pin(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsPinParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "pin", key, params, options)
+        }
+
+        /// Unpins a pinned message. Needs pinPermission when the config names one.
+        pub fn unpin(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsUnpinParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "unpin", key, params, options)
+        }
+
+        /// Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it.
+        pub fn resolve(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsResolveParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "resolve", key, params, options)
+        }
+
+        /// Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission.
+        pub fn reopen(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsReopenParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "reopen", key, params, options)
+        }
+
+        /// Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.
+        pub fn list_messages(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsListMessagesParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsListMessagesResult, orm::Error> {
+            self.0.operation("comments", "listMessages", key, params, options)
+        }
+
+        /// Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals.
+        pub fn get_message(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsGetMessageParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "getMessage", key, params, options)
+        }
+
+        /// Lists what a message held before each of its edits, oldest first, one page at a time.
+        pub fn list_edits(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsListEditsParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsListEditsResult, orm::Error> {
+            self.0.operation("comments", "listEdits", key, params, options)
+        }
+
+        /// Lists who reacted to a message with an emoji, in the order they reacted, one page at a time.
+        pub fn list_reactions(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsListReactionsParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsListReactionsResult, orm::Error> {
+            self.0.operation("comments", "listReactions", key, params, options)
+        }
+
+        /// Lists the conversation's pinned messages, top-level and replies, in ascending id order, one page at a time. Only a posted or interrupted message is pinned: a deleted one loses its pin, and a composing one cannot take one.
+        pub fn list_pinned(
+            &self,
+            key: &IdentityUUID,
+            params: &TicketCommentsListPinnedParams,
+            options: &WriteOptions,
+        ) -> Result<TicketCommentsListPinnedResult, orm::Error> {
+            self.0.operation("comments", "listPinned", key, params, options)
+        }
+    }
+
+    /// The tables of `fixture-references-db` in the file `database` holds, as a
+    /// generated router serves its table operations from them (D106).
+    pub fn tables(database: std::sync::Arc<orm::sqlite::Database>) -> orm::sqlite::Tables {
+        orm::sqlite::Tables::new(database, sqlite_definition)
+    }
+
+    /// The repositories of `fixture-references-db` on a SQLite connection, acting as
+    /// a user or as no one.
+    pub struct Repositories<'a>(orm::sqlite::Repositories<'a>);
+
+    impl<'a> Repositories<'a> {
+        /// The repositories over `connection`, the caller's: a
+        /// `rusqlite::Transaction` it opened, for a write. They act as no
+        /// one until `acting` names a user.
+        pub fn new(connection: &'a rusqlite::Connection) -> Result<Self, orm::Error> {
+            orm::sqlite::Repositories::new(connection, sqlite_definition()?).map(Self)
+        }
+
+        /// The repositories acting as `user` (D87); `None` acts as no one.
+        #[must_use]
+        pub fn acting(self, user: Option<String>) -> Self {
+            Self(self.0.acting(user))
+        }
+
+        /// The repositories acting as the database's system actor (D87).
+        #[must_use]
+        pub fn as_system(self) -> Self {
+            Self(self.0.as_system())
+        }
+
+        /// The repositories with the keys of the database's `Encrypted<T>`
+        /// fields (D85).
+        #[must_use]
+        pub fn with_keys(self, keys: &'a dyn orm::FieldKeys) -> Self {
+            Self(self.0.with_keys(keys))
+        }
+
+        /// The repositories with what runs the behaviors of the tables that
+        /// compose them (D103).
+        #[must_use]
+        pub fn with_rules(self, rules: &'a dyn orm::sqlite::Rules) -> Self {
+            Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories running each behavior's command as `caller`,
+        /// whose permissions the core's guards read (D103); the acting
+        /// user, holding none, unless set.
+        #[must_use]
+        pub fn with_caller(self, caller: orm::Caller) -> Self {
+            Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
+        }
+
+        /// The runtime's repositories these are, over JSON objects.
+        pub fn untyped(&self) -> &orm::sqlite::Repositories<'a> {
+            &self.0
+        }
+
+        /// The references of the database's rows, and the rows that point at a
+        /// row, each held to what the repositories' caller reads (D154, #611):
+        /// `add`, `remove`, `of` and `referenced_by`. `add` runs in a
+        /// transaction.
+        pub fn references(&self) -> Result<rowfeatures::sqlite::References<'_, 'a>, orm::Error> {
+            self.0.references()
+        }
+
+        /// The files of the database's rows (D154, #611): a direct upload
+        /// `begin` signs and `complete` checks, `list`, `get`, `download`,
+        /// `caption`, `detach`, `file` onto another row, `release`, and a file
+        /// processor's `pending` and `processed`. `begin`, `file` and `release`
+        /// run in a transaction; those that reach the bucket are async.
+        pub fn attachments(&self) -> Result<rowfeatures::sqlite::Attachments<'_, 'a>, orm::Error> {
+            self.0.attachments()
+        }
+
+        /// The repository of `Note`.
+        pub fn note(&self) -> Result<NoteRepository<'_>, orm::Error> {
+            self.0.typed("Note")
+        }
+
+        /// The repository of `Ticket`.
+        pub fn ticket(&self) -> Result<TicketRepository<'_>, orm::Error> {
+            self.0.typed("Ticket")
+        }
+
+        /// The operations of `Ticket`'s `comments`, a typed method
+        /// each ([`TicketCommentsOperations`]).
+        pub fn ticket_comments(&self) -> Result<TicketCommentsOperations<'_>, orm::Error> {
             self.ticket().map(TicketCommentsOperations)
         }
     }

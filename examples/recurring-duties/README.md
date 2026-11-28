@@ -12,7 +12,7 @@ section covers it in full.
 |---|---|
 | `schemas/services/duties-db` | DB, Postgres: `Duty` implements `Recurrence` and is an `@audience` table its owner sees; `Holiday`, the rows of the holiday calendars the app fills; `Agreement`, whose end a duty may count back from; both `Duty` (its occurrences) and `Agreement` (its end date) are `@calendarSource`s; `Account`, `Role` and `Grant`, which a feed's token is one of |
 | `schemas/services/duties-api` | API over `duties-db`: `DutyActions` serves `setRecurrence`, `complete`, `skip`, `moveOne` and `listOccurrences`; `DutyDeadlines` is the behavior worker that fires each occurrence's open, remind, overdue and plan deadlines |
-| `server/server.ts` | the server's wiring: the generated router, and `calendarRoutes` for the calendar read, the feed, and the feeds' issue, rotation and revocation |
+| `server/server.ts` | what the implementation adds to the generated server, which mounts `calendarRoutes` for the calendar read, the feed, and the feeds' issue, rotation and revocation; each source's permission is the schema's, and `createRuntimeOptions` may name another |
 
 ## What it shows
 
@@ -43,6 +43,9 @@ The same scenario, under the fixture names `fixture-recurrence-db` and
 `TestGeneratedRecurrenceEndToEnd` (`internal/generator/tsrestgen`), and the
 feed's access in `TestGeneratedAccessEndToEnd`.
 
-The calendar read and its feed are the TypeScript runtime's, on Postgres:
-the Go and Rust servers do not serve them yet, and the generated router
-does not mount `calendarRoutes`, which `server/server.ts` wires.
+The calendar read and its feed are the TypeScript runtime's. The generated
+TypeScript server of an API over a Postgres database with a
+`@calendarSource` mounts `calendarRoutes` at `/api/calendar` beside its
+router, serves the `calendar` tool on its MCP endpoint, and puts
+`grantAuthenticator` in front of the implementation's authenticator, so a
+feed's token reads its feed alone.

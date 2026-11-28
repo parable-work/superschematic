@@ -63,31 +63,15 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 	if got := rustFindings(db, Input{RustOutput: "outputs.types.rust", Dialects: []string{"postgres"}}); len(got) != 0 {
 		t.Fatalf("the Rust types on Postgres have findings:\n%s", strings.Join(got, "\n"))
 	}
-	// On SQLite, D157's and D158's tables are refused: their queues are
-	// claimed through the Postgres queue client alone.
-	got := rustFindings(db, Input{RustOutput: "outputs.types.rust", Dialects: []string{"postgres", "sqlite"}})
-	want := []string{
-		"type Agent: @agents (D158) on SQLite",
-		"type RunRequest: @runRequests (D157) on SQLite",
-		"type Tenant: @party (D157) on SQLite",
-		"type Thread: @conversations (D157) on SQLite",
+	// On SQLite too since #618: D157's and D158's tables, whose queues
+	// the Rust runtime claims on the file.
+	if got := rustFindings(db, Input{RustOutput: "outputs.types.rust", Dialects: []string{"postgres", "sqlite"}}); len(got) != 0 {
+		t.Fatalf("the Rust types on SQLite have findings:\n%s", strings.Join(got, "\n"))
 	}
-	if len(got) != len(want) {
-		t.Fatalf("the Rust types' findings on SQLite are %d, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
-	}
-	for i, prefix := range want {
-		if !strings.Contains(got[i], prefix+" is served by the TypeScript runtime alone so far, and platform-db builds Rust (outputs.types.rust)") {
-			t.Errorf("finding %d = %q, want %s", i, got[i], prefix)
+	for _, sqlite := range []bool{false, true} {
+		if err := RefuseRustTypes(db, sqlite); err != nil {
+			t.Errorf("RefuseRustTypes (sqlite %v) = %v, want nothing refused", sqlite, err)
 		}
-		if !strings.HasPrefix(got[i], "src/platform.schema.ts: ") {
-			t.Errorf("finding %d = %q names no schema file", i, got[i])
-		}
-	}
-	if err := RefuseRustTypes(db, false); err != nil {
-		t.Errorf("RefuseRustTypes on Postgres = %v, want nothing refused", err)
-	}
-	if err := RefuseRustTypes(db, true); err == nil || !strings.Contains(err.Error(), "type Tenant: @party (D157) on SQLite") {
-		t.Errorf("RefuseRustTypes on SQLite = %v, want the party refused", err)
 	}
 
 	// A Rust server: a provider of no Rust crate. Its slots and a provider

@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript or a Rust API serves them at, and how an extension adds its rules, vendor keys and policy.
+description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript, a Rust or a Go API serves them at, and how an extension adds its rules, vendor keys and policy.
 sidebar:
   order: 4
 ---
@@ -195,6 +195,24 @@ read, a `GET`, replays as `read_only`. A set whose `@requireService`
 admits only calling services hides them with that reason, as above. A
 handle that another tool of the API takes, or one longer than 48
 characters, fails the load.
+
+An operation the build adds for a `@rowFeatureOperations` set
+([A table's references and files](/superschematic/guides/api-routes/#a-tables-references-and-files))
+is a visible tool when it reads, or adds a reference (#723): `Issue`'s
+`references`, `backlinks`, `attachments` and `addReference` are the tools
+`issue_references`, `issue_backlinks`, `issue_attachments` and
+`issue_add_reference`, each run as its caller, so an agent's reads keep to
+what it may read. The rest, a reference's removal and a file's upload,
+completion, download, filing and removal, stay routes: their `@mcp` is
+hidden with the reason, since a file's bytes go to and from the bucket
+through a signed URL, which no tool call carries.
+
+An operation the build adds for a `@triageOperations` set
+([Serve triage as routes](/superschematic/guides/parties/#serve-triage-as-routes))
+is a visible tool when it reads (#746): `triage`, the held messages, and
+`triage_message`, one of them, each run as its caller, who holds the
+triage permission. The settle and the dismiss stay routes, their `@mcp`
+hidden with the reason: each decides who a sender is.
 
 A `@tableOperation` that declares no `@mcp` is a visible tool whose handle
 is its method's name in snake case, `list_issues`, and one that declares
@@ -603,7 +621,13 @@ The endpoint authenticates as the API's other routes do: the identity
 service of the user model, or the router's `authenticate`, from a
 `Bearer` session or a cookie. It needs a caller when a route of the API
 does, so without a session it answers 401 with the problem document; an
-API whose routes are all public serves it to anyone. Each caller's list
+API whose routes are all public serves it to anyone. An API that is its
+own OAuth authorization server (`@userSessions({ oauth })`, TypeScript,
+[#695](https://github.com/parable-work/superschematic/issues/695)) also
+takes an OAuth access token, and its 401 carries `WWW-Authenticate:
+Bearer resource_metadata="..."`, so Claude's connectors sign in from the
+endpoint's URL alone
+([OAuth](/superschematic/guides/users-and-sessions/#oauth-connecting-claude-and-other-clients)). Each caller's list
 holds the tools whose routes it may call: a tool whose operation needs a
 permission the caller lacks is not listed, and a call of it is the
 invalid-params error. Each call goes through its route's authenticator,
@@ -786,9 +810,22 @@ The APIs of one server share its paths, so a server serves one API with
 `mcp` on, and the stack's build refuses a second:
 `stack shop-stack: server Web serves shop-api and shop-admin, which both turn on outputs.api.mcp, and one server answers POST /api/mcp for one API; serve them from two servers, or turn mcp off in one (D81)`.
 
-The Go server serves no MCP endpoint yet. Its config fails to load with
-`mcp` on:
-`outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)`.
+A Go API serves the same endpoint (#660). The API package's `mcp.go`
+holds the tool table, each tool with its route's method and path, and
+`RegisterRoutes` mounts the HTTP runtime's `mcp` endpoint at
+`POST /api/mcp`, its options in `Config.MCP`: `ConfirmationKey`, which a
+stack's server reads from the API's config; `CallGate`, the dispatcher's
+`MCPCallGate` when `Deps` holds one; and `Tools`, the calendar's and
+search's tools when the database has them. A call is a request to the
+tool's route through the router `RegisterRoutes` was given, as the
+caller the endpoint's request authenticated; `tools/list` offers a tool
+whose route's permission check lets the caller through; and a tool that
+asks is checked through its route's steps and decoding, stopped before
+the implementation, before anyone is asked (D98). The route of a
+`@manualRouteRegistration` operation and of the user model's is not
+checked before the confirmation, since its handler is not the generated
+one. The Go endpoint is held to the engine's recorded exchanges and to
+the TypeScript runtime's confirmation tokens, as the Rust one is.
 
 ### A key for a call that runs once
 
@@ -965,54 +1002,20 @@ A deployment sets a policy the declarations leave out through the
 engine's `tools.invocation`: a built-in tool's by its name (`delete`,
 `defineSchema`), and a behavior operation's by
 `<Behavior>.<operation>` (`Payments.capturePayment`,
-`acme.Rating.rate`), which takes the place of its declaration's. A
-generated server's engine takes them from the engine database's
-`outputs.engine.tools.invocation`:
-
-```yaml
-outputs:
-  engine:
-    tools:
-      invocation:
-        Payments.openPayment: ask
-        Payments.capturePayment: ask
-        Payments.voidPayment: ask
-        Payments.refundPayment: ask
-        Payments.refundFor: ask
-        Stock.receiveStock: ask
-        Stock.adjustStock: ask
-        Stock.countStock: ask
-      hidden:
-        - Stock.listStockMovements
-```
-
-The build refuses a name that is neither an engine tool nor an operation
-a behavior the engine types compose declares, and a value the binary's
-policy does not hold, naming each; the engine document carries the map,
-and an engine refuses at open a behavior operation it does not run. D70
-leaves the commerce operations that move money or stock unmarked in the
-core's declarations, so that they register under any distribution's
-policy, and requires the deployment to mark them: a build whose engine
-types compose `Payments` or `Stock` is refused unless `invocation` names
-a policy for each of `Payments.openPayment`, `capturePayment`,
-`voidPayment`, `refundPayment` and `refundFor`, and `Stock.receiveStock`,
-`adjustStock` and `countStock`, naming each it lacks.
+`acme.Rating.rate`), which takes the place of its declaration's, given
+when the engine opens (`EngineOptions.tools.invocation`). No generated
+server opens the engine: a schema config's `outputs.engine`, which set
+these for an engine database, is refused (D103), and a table's behavior
+operations are an API's tools, whose `@mcp` sets each one's
+`invocationPolicy`
+([Selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)).
 
 `tools.hidden` lists behavior operations the tools leave out: a service
 calls them through the API or in-process, and no agent is offered them.
 A hidden tool reads `hidden: true` with its reason, and a call by its
 MCP handle is a tool the namespace does not have; the operation itself
-still runs through the engine's API. The build refuses a name no
-composed behavior declares, and the engine document adds, wherever
-`Payments` is composed, its service operations: `listPaymentActions` and
-`recordPaymentEvent`, which a provider's adapter calls, and
-`settleRefundFor`, which a refunded instance calls on its refund. An
-engine opened by hand (`EngineOptions.tools.hidden`) hides only what it
-is given. Three generated servers, in Go, Rust and TypeScript, list the
-same tools with the same policies over one commerce database
-(`TestCommerceServersAnswerOneScriptAlike`), and
-[selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
-says why each of these operations asks.
+still runs through the engine's API. An engine hides only what it is
+given (`EngineOptions.tools.hidden`).
 
 The engine's hidden record adds `hiddenBy` after `hiddenReason`, which
 the generators' `tools/schema.json` does not write: each cause the

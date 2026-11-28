@@ -246,14 +246,3 @@ func checkConstantsConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef,
 func movesOneWay(column behaviorlayout.Column) bool {
 	return slices.Contains(oneWayBooleans, column.Type) || slices.Contains(oneWayNumbers, column.Type) || column.Convert == behaviorlayout.ConvertEpochMillis
 }
-
-// checkEngineConstantsConfig refuses, on an engine type, oneWay, which a
-// table's Constants alone takes (D104). The declaration is shared, so the
-// configSchema accepts it; the engine's Constants refuses it too, and the
-// build says so first, naming the table form. A config the configSchema
-// refuses is reported by checkTypeBehaviors and left alone here.
-func checkEngineConstantsConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	if configNames(ref.Config, "oneWay") {
-		r.errorf(td.Owner, "type %s: @behavior Constants names oneWay, which a table's Constants takes (implements Constants<%s, C>, D104); an engine type's Constants takes fields and permission alone, so leave it out", td.Name, td.Name)
-	}
-}

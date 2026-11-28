@@ -10,7 +10,7 @@ section covers it in full.
 |---|---|
 | `schemas/services/records-db` | DB, Postgres: `Person`, the user table; `Workspace` and `Page` are `@audience` tables, a page inheriting its workspace's audience; `Agreement`, `AgreementMember`, `Site` and `Ticket`; `Role`, whose `reaches` say what a grant of the role reaches; `Grant`, the `@accessGrants` table; and `AccessEntry`, the `@accessLog` table |
 | `schemas/services/records-api` | API over `records-db`, every operation served by the build (`@tableOperation`): workspaces and pages, which keep to the caller's audience; `listMyTickets`, whose row rule is the path `site.agreement.members.member`, beside `listTickets` and `openTicket`; `getAgreement`, whose `terms` open only for a holder of `agreements.reveal`; and `listGrants` and `listAccessLog`, over views of `Grant` and `AccessEntry`, for a holder of `access.admin` |
-| `server/server.ts` | the server's wiring: `grantAuthenticator` in front of the project's authenticator, and `accessLogOf` as the router's access log; and `inviteParty`, which gives a party a grant on one agreement until a date |
+| `server/server.ts` | `inviteParty`, which gives a party a grant on one agreement until a date; the generated server puts `grantAuthenticator` in front of the implementation's authenticator and gives the router `accessLogOf` itself |
 
 ## What it shows
 

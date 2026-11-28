@@ -3,6 +3,7 @@ package tswriter
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -86,7 +87,7 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 		e.failf("type %s: descriptions have no TypeScript authoring form", def.Name)
 	}
 	if len(def.Extensions) > 0 {
-		e.failf("type %s: extension data (%s) has no TypeScript authoring form in this writer", def.Name, strings.Join(sortedKeys(def.Extensions), ", "))
+		e.failf("type %s: extension data (%s) has no TypeScript authoring form in this writer", def.Name, strings.Join(slices.Sorted(maps.Keys(def.Extensions)), ", "))
 	}
 
 	switch def.Role {
@@ -284,6 +285,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if len(def.SeedRoles) > 0 {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}
+	if def.SeedRows != nil {
+		fmt.Fprintf(&e.body, "@%s<%s>(%s)\n", e.use("seedRows"), def.Name, seedRowsArgs(def.SeedRows))
+	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), e.versionGraphArgs(def.VersionGraph))
 	}
@@ -293,6 +297,7 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.EnvVars {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("envVars"))
 	}
+	e.emitTableFeatureDecorators(def)
 	// A use anchored on a field is written as that field's type, below
 	// (D103).
 	for _, ref := range def.TypeBehaviors() {
@@ -374,6 +379,14 @@ func (e *emitter) behaviorFieldType(typeName string, ref ir.BehaviorRef) string 
 			e.failf("%s: behavior %s config: %v", owner, ref.Name, err)
 		}
 	}
+	if e.valueFromCreate(ref.Name) {
+		// A value a create gives is typed by the field, a name, before
+		// its config, which it leaves out when it sets nothing (D147).
+		if len(ref.Config) == 0 {
+			return carrier + "<string>"
+		}
+		return carrier + "<string, " + literalType(config) + ">"
+	}
 	return carrier + "<" + literalType(config) + ">"
 }
 
@@ -388,7 +401,7 @@ func literalType(value any) string {
 			return "{}"
 		}
 		parts := make([]string, 0, len(v))
-		for _, key := range sortedKeys(v) {
+		for _, key := range slices.Sorted(maps.Keys(v)) {
 			parts = append(parts, propertyName(key)+": "+literalType(v[key]))
 		}
 		return "{ " + strings.Join(parts, "; ") + " }"
@@ -440,7 +453,7 @@ func displayArgs(d *ir.TypeDisplay) string {
 	}
 	if len(d.States) > 0 {
 		states := make([]string, 0, len(d.States))
-		for _, name := range sortedKeys(d.States) {
+		for _, name := range slices.Sorted(maps.Keys(d.States)) {
 			state := d.States[name]
 			var members []string
 			if state.Label != "" {
@@ -458,9 +471,9 @@ func displayArgs(d *ir.TypeDisplay) string {
 	}
 	if len(d.Transitions) > 0 {
 		froms := make([]string, 0, len(d.Transitions))
-		for _, from := range sortedKeys(d.Transitions) {
+		for _, from := range slices.Sorted(maps.Keys(d.Transitions)) {
 			tos := make([]string, 0, len(d.Transitions[from]))
-			for _, to := range sortedKeys(d.Transitions[from]) {
+			for _, to := range slices.Sorted(maps.Keys(d.Transitions[from])) {
 				tos = append(tos, propertyName(to)+": "+quote(d.Transitions[from][to]))
 			}
 			froms = append(froms, propertyName(from)+": { "+strings.Join(tos, ", ")+" }")
@@ -781,7 +794,12 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 		out = append(out, e.use("virtual"))
 	}
 	if fd.Decrypted {
-		out = append(out, e.use("decrypted"))
+		// Reveal is its own permission when the field names one (D156).
+		if fd.RevealPermission != "" {
+			out = append(out, e.use("decrypted")+"({ permission: "+quote(fd.RevealPermission)+" })")
+		} else {
+			out = append(out, e.use("decrypted"))
+		}
 	}
 	if fd.SQLName != "" {
 		out = append(out, e.use("column")+fmt.Sprintf("(%s)", quote(fd.SQLName)))
@@ -844,6 +862,9 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.RequiredNull = false
 	rest.UIHidden, rest.Virtual, rest.Encrypted = false, false, false
 	rest.EncryptedAtRest, rest.Decrypted, rest.SQLName = false, false, ""
+	if fd.Decrypted {
+		rest.RevealPermission = ""
+	}
 	rest.UIControl = ""
 	rest.SourceMustProject = false
 	rest.TemporalFormat = ""

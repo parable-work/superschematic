@@ -2,6 +2,8 @@ package ir
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -22,7 +24,7 @@ func (s *Schema) EnvVarsType() (*TypeDef, error) {
 		return nil, nil
 	}
 	var classes []*TypeDef
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		if td := s.Types[name]; td != nil && td.EnvVars {
 			classes = append(classes, td)
 		}

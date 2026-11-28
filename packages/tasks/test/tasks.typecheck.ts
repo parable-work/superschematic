@@ -22,7 +22,16 @@ declare module "../src/index" {
 @tasks({
   image: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   platform: "linux/amd64",
-  sections: { forge: { tiers: ["pr", "nightly"] }, other: { anything: true } }
+  sections: {
+    forge: { tiers: ["pr", "nightly"] },
+    other: { anything: true },
+    github: {
+      on: { pull_request: { branches: ["main"] } },
+      imageRepository: "ghcr.io/acme/ci",
+      permissions: { contents: "read" },
+      reuse: { command: ["acme-schematic"] }
+    }
+  }
 })
 export abstract class Repo {}
 
@@ -33,6 +42,7 @@ export abstract class Repo {}
     { kind: "schema", spec: { service: "shop-db", root: "schemas" } },
     { kind: "rust-crate", spec: { dir: "crates/shop" } },
     { kind: "js-package", spec: { dir: "web/shop" } },
+    { kind: "js-package", spec: { dir: "typescript/shop-cart", workspace: "schemas/dist" } },
     { kind: "image", spec: { dockerfile: "docker/api.Dockerfile", context: "." } },
     { kind: "bazel-target", spec: { label: "//shop:api" } }
   ],
@@ -53,9 +63,21 @@ export abstract class Lint {}
   services: [{ name: "postgres", image: "postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111" }],
   env: { CGO_ENABLED: "1" },
   hermetic: false,
-  sections: { forge: { tier: "pr", timeoutSeconds: 600 } }
+  sections: { forge: { tier: "pr", timeoutSeconds: 600 }, github: { runsOn: "ubuntu-24.04", timeoutMinutes: 20, if: "github.event_name == 'push'" } }
 })
 export abstract class GoTest {}
+
+// @ts-expect-error the github section's part of the file names the workflow's triggers
+@tasks({ sections: { github: { imageRepository: "ghcr.io/acme/ci" } } })
+export abstract class NoTriggers {}
+
+// @ts-expect-error the plan command is an argument list with at least one word
+@tasks({ sections: { github: { on: { push: {} }, reuse: { command: [] } } } })
+export abstract class NoPlanCommand {}
+
+// @ts-expect-error a job's timeout is a number of minutes
+@task({ run: ["true"], sections: { github: { timeoutMinutes: "20" } } })
+export abstract class BadTimeout {}
 
 // @ts-expect-error a command is an argument list with at least one argument
 @task({ run: [] })

@@ -29,8 +29,8 @@ func buildUnionReads(model *codegen.ReadModel, scalars []ScalarInfo) *UnionReads
 	reads := &UnionReads{}
 	var imports []NestedImport
 	for _, name := range model.ScalarNames() {
-		if s, ok := byName[name]; ok && strings.TrimSpace(s.Symbol) != "" {
-			imports = append(imports, NestedImport{Name: "validate" + strings.TrimSpace(s.Symbol), Module: "./scalars/" + s.Module})
+		if s, ok := byName[name]; ok && strings.TrimSpace(s.Symbol()) != "" {
+			imports = append(imports, NestedImport{Name: "validate" + strings.TrimSpace(s.Symbol()), Module: "./scalars/" + s.Module()})
 		}
 	}
 	reads.ScalarImports = groupImports(imports)
@@ -54,8 +54,8 @@ func buildUnionReads(model *codegen.ReadModel, scalars []ScalarInfo) *UnionReads
 				parts = append(parts, "values: "+tsStringArray(f.Values))
 			case codegen.ReadScalar:
 				parts = append(parts, "json: "+strconv.Quote(f.ScalarJSON))
-				if s, ok := byName[f.Scalar]; ok && strings.TrimSpace(s.Symbol) != "" {
-					parts = append(parts, "scalar: (value: unknown) => validate"+strings.TrimSpace(s.Symbol)+"(value as never)[0]")
+				if s, ok := byName[f.Scalar]; ok && strings.TrimSpace(s.Symbol()) != "" {
+					parts = append(parts, "scalar: (value: unknown) => validate"+strings.TrimSpace(s.Symbol())+"(value as never)[0]")
 				}
 			case codegen.ReadObject, codegen.ReadUnionKind:
 				parts = append(parts, "ref: "+strconv.Quote(f.Ref))

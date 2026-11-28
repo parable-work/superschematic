@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/parable-work/superschematic/internal/registry"
@@ -36,7 +37,6 @@ func Images(in Input) (map[string]*ir.ResolvedImage, error) {
 	r.defaultWorkers()
 	r.defaultDerivers()
 	r.defaultApps()
-	r.defaultRunners()
 	r.resolveImages()
 	if r.failed() {
 		return nil, r.errs
@@ -65,7 +65,7 @@ func (r *resolver) resolveImages() {
 			continue
 		}
 		if !d.res.Kind.RunsCode() {
-			r.fail(CodeInvalidStack, "%s names %s %s, which runs no image; a server, a job, a worker, a deriver, an app or an engine's runner has one", where, d.res.Kind, d.res.Name)
+			r.fail(CodeInvalidStack, "%s names %s %s, which runs no image; a server, a job, a worker, a deriver or an app has one", where, d.res.Kind, d.res.Name)
 			continue
 		}
 		if first, dup := seen[d.res.Name]; dup {
@@ -90,7 +90,7 @@ func (r *resolver) resolveImages() {
 // Ignoring the setting would deploy a workload without the program it
 // asked for.
 func (r *resolver) checkImages() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Image == nil || d.res.Platform == "" || d.res.HasImage() {
 			continue

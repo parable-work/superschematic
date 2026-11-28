@@ -57,22 +57,30 @@
 //! The parts here are pure and shared with the TypeScript runtime through
 //! `runtime/http/testdata/notify_parity.json`: an address normalised by its
 //! kind, a reply's words read, quiet hours, a channel's trust over a
-//! principal's permissions, and a code's hash. The notifier itself is
-//! Postgres's alone, as the loader holds it to.
+//! principal's permissions, and a code's hash. The notifier itself runs
+//! over [`Store`](super::store::Store): a Postgres pool's repositories, or
+//! a SQLite file's (#618), where a transaction is a held write of the file
+//! and the zone database a recipient's wall time is read from is the one
+//! the runtime bundles. A caller's own rusqlite transaction raises through
+//! [`Notifier::raise_sqlite`].
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod notifier;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod replies;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod routes;
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub use notifier::{
     AddIdentity, ChannelHealthOf, Clock, Expand, NoticeWork, Notifier, NotifierError,
     NotifierQueue, PasswordReset, PermissionsOf, RaiseInput, RecipientRef, Render, ReplyInput,
     ReplyOutcome, ResetIdentity, SendDirect,
 };
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub use replies::{approval_replies, ReplyAction, ReplyContext};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use routes::NotifierRoutes;
 
 use crate::auth::covers;
 use crate::uuid62::{parse_uuid, uuid_to_base62};

@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -54,7 +56,7 @@ func behaviorWorkerOf(td *ir.TypeDef, args []any) (*ir.Worker, error) {
 		if !ok {
 			return nil, ArgErrorf(1, "@behaviorWorker takes the table and an optional options object: { concurrency, grace, permissions }")
 		}
-		for _, key := range sortedKeys(obj) {
+		for _, key := range slices.Sorted(maps.Keys(obj)) {
 			value := obj[key]
 			switch key {
 			case "concurrency":

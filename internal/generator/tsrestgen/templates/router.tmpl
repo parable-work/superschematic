@@ -100,6 +100,30 @@
 // not_found, and so is a change set the set's row rule keeps from the
 // caller; a refusal of the graph's engine is the problem of its code.
 {{- end }}
+{{- if .HasRowFeatures }}
+//
+// The operations of its @rowFeatureOperations sets (#723) are each an
+// operation of a table's references, backlinks or files of {{ .Deps.Database }} and
+// have no implementation method: the route runs the runtime's
+// rowFeatureOperation, with its entry of rowFeatureOperations, through
+// the references and attachments of options.orm, the
+// database's repositories, as the request's caller (orm.as), so every read
+// keeps to the rows the caller may read{{ if .RowFeatureBucket }}, and a file's upload and download
+// sign a URL of options.attachmentsBucket{{ end }}. A row the caller cannot read, and a
+// file of another row, is 404 not_found; a refusal of the declaration's
+// rules is the 422 of its code.
+{{- end }}
+{{- if .HasTriage }}
+//
+// The operations of its @triageOperations set (#746) are each an operation
+// of the inbound path's triage over {{ .Deps.Database }}'s conversations and have no
+// implementation method: the route runs the runtime's triageOperation, with
+// its entry of triageOperations, through options.inbound, the inbound path
+// (Deps.inbound), as the request's caller, who holds the set's permission
+// and the inbound path's triage permission. A message the path names that
+// was never held in triage is 404 not_found, and a settle or dismiss of one
+// no longer held 409.
+{{- end }}
 {{- if .Identity }}
 //
 // The API's authDb, {{ .Identity.AuthDB }}, has a User table (D50): the identity
@@ -140,8 +164,17 @@ import {
   identityHandler,
 {{- end }}
   identityRouterOptions,
+{{- if .Identity.OAuth }}
+  mountOAuthRoutes,
+{{- if .MCP }}
+  oauthChallenge,
+{{- end }}
+{{- end }}
   routesOf,
   type IdentityServiceOptions,
+{{- if .Identity.OAuth }}
+  type OAuthOptions,
+{{- end }}
 {{- if .Identity.Registration }}
   type RegistrationOptions,
 {{- end }}
@@ -300,6 +333,36 @@ export const graphOperations = {
 {{- end }}
 } as const satisfies Partial<Record<OperationName, GraphOperation>>;
 {{- end }}
+{{- if .HasRowFeatures }}
+
+/**
+ * What each row feature operation runs (#723): the table, the path
+ * parameter that holds its row's key, and the operation of its references
+ * and files.
+ */
+export const rowFeatureOperations = {
+{{- range .Endpoints }}
+{{- if .RowFeature }}
+  {{ .Key }}: {{ .RowFeature.Literal }},
+{{- end }}
+{{- end }}
+} as const satisfies Partial<Record<OperationName, RowFeatureOperation>>;
+{{- end }}
+{{- if .HasTriage }}
+
+/**
+ * What each triage operation runs (#746): the messages table, the party
+ * table a settle settles a message onto, and the operation of the inbound
+ * path's triage.
+ */
+export const triageOperations = {
+{{- range .Endpoints }}
+{{- if .Triage }}
+  {{ .Key }}: {{ .Triage.Literal }},
+{{- end }}
+{{- end }}
+} as const satisfies Partial<Record<OperationName, TriageOperation>>;
+{{- end }}
 
 {{ if .Identity -}}
 export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'>, OpenAPIOptions {
@@ -351,6 +414,28 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
    * operations (D138) read the root and the graph's refs and commits.
    */
   orm: {{ .Deps.ORM }};
+{{- else if .HasRowFeatures }}
+  /**
+   * The repositories of {{ .Deps.Database }} (Deps.orm), whose references and
+   * attachments run the references and files (#723), as the request's
+   * caller.
+   */
+  orm: {{ .Deps.ORM }};
+{{- end }}
+{{- if .RowFeatureBucket }}
+  /**
+   * The bucket that holds the files (#723), {{ .RowFeatureBucket }} (Deps.{{ .RowFeatureBucketField }}): an
+   * upload's begin and a download sign a URL of it, and an upload's
+   * completion reads the object back.
+   */
+  attachmentsBucket: Bucket;
+{{- end }}
+{{- if .HasTriage }}
+  /**
+   * The inbound path of {{ .Deps.Database }} (Deps.inbound, #746), whose triage
+   * the triage operations run, as the request's caller.
+   */
+  inbound: TriageInbound;
 {{- end }}
 {{- if .HasGraphs }}
   /**
@@ -409,14 +494,36 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
  *
  * register admits users as identityRegistration says.
 {{- end }}
+{{- if .Identity.OAuth }}
+ *
+ * The API is its own OAuth authorization server, as identityOAuth says
+ * (#695); options.oauth adds to it, a metadata fetcher for one.
+{{- end }}
  */
 export function identityService(options: Omit<IdentityServiceOptions, 'routes'{{ if .Identity.Registration }} | 'registration'{{ end }}>): IdentityService {
-  return new IdentityService({ ...options, routes: routesOf(operationSpecs){{ if .Identity.Registration }}, registration: identityRegistration{{ end }} });
+  return new IdentityService({
+    ...options,
+    routes: routesOf(operationSpecs),
+{{- if .Identity.Registration }}
+    registration: identityRegistration,
+{{- end }}
+{{- if .Identity.OAuth }}
+    oauth: { ...identityOAuth, ...options.oauth },
+{{- if .Identity.OAuthAdministration }}
+    oauthAdministration: true,
+{{- end }}
+{{- end }}
+  });
 }
 {{- if .Identity.Registration }}
 
 /** How register admits users, as the API's @userSessions declares it (D81). */
 export const identityRegistration: RegistrationOptions = {{ .Identity.Registration }};
+{{- end }}
+{{- if .Identity.OAuth }}
+
+/** The API's OAuth authorization server, as its @userSessions({ oauth }) declares it (#695). */
+export const identityOAuth: OAuthOptions = {{ .Identity.OAuth }};
 {{- end }}
 
 /**
@@ -464,7 +571,7 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
 {{ $runtime = "runtime" -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
-{{- else if or .RouterNeedsORM .HasPrincipalRateLimit -}}
+{{- else if or .RouterNeedsORM .HasPrincipalRateLimit .HasTriage -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
 {{- else -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
@@ -472,6 +579,11 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- if .RouterNeedsORM }}
   if (!options.orm) {
     throw new Error({{ tsString (printf "RouterOptions.orm is required: it runs %s of %s (%s)" .ORMRuns .SchemaName .ORMDecisions) }});
+  }
+{{- end }}
+{{- if .HasTriage }}
+  if (!options.inbound) {
+    throw new Error({{ tsString (printf "RouterOptions.inbound is required: it runs the triage operations of %s (#746), Deps.inbound" .SchemaName) }});
   }
 {{- end }}
 {{- range .GraphSets }}
@@ -513,6 +625,11 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
   for (const spec of Object.values(operationSpecs)) cors(spec);
 {{- if .MCP }}
   cors({ method: 'POST', path: MCP_PATH });
+{{- end }}
+{{- if .Identity.OAuth }}
+  // The OAuth authorization server's discovery documents and protocol
+  // endpoints (#695), when the service has one.
+  if (runtime.identity.oauth) mountOAuthRoutes(router, runtime.identity, runtime);
 {{- end }}
 {{- end }}
 {{- range .Endpoints }}
@@ -583,6 +700,38 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
+    }
+  );
+{{- else if .RowFeature }}
+  // {{ .RowFeature.Type }}'s {{ .RowFeature.Operation }} (#723): the runtime's handler runs it through the
+  // repositories' references and attachments, as the request's caller.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+    (ctx, request) => rowFeatureOperation(options.orm, rowFeatureOperations.{{ .Key }}, ctx, request{{ if .RowFeature.TakesBucket }}, options.attachmentsBucket{{ end }}),
+    {{ $runtime }},
+    {
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
+    }
+  );
+{{- else if .Triage }}
+  // {{ .Triage.Operation }}, of the inbound path's triage (#746): the runtime's handler runs it through the
+  // inbound path, as the request's caller.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+{{- if .Page }}
+    (ctx, request) => triageOperation(options.inbound, triageOperations.{{ .Key }}, ctx, request, readPage(ctx.query, operationSpecs.{{ .Key }}.page)),
+{{- else }}
+    (ctx, request) => triageOperation(options.inbound, triageOperations.{{ .Key }}, ctx, request),
+{{- end }}
+    {{ $runtime }},
+    {
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
     }
   );
 {{- else if .Graph }}
@@ -739,7 +888,12 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     mcpTools,
     {{ $runtime }},
     { api: {{ tsString .SchemaName }}, version: options.openAPIVersion || DEFAULT_OPENAPI_VERSION, requiresAuth: {{ .MCP.RequiresAuth }} },
+{{- if and .Identity .Identity.OAuth }}
+    // The 401 names where a client signs in (#695).
+    { ...options.mcp, challenge: options.mcp?.challenge ?? oauthChallenge(runtime.identity) }
+{{- else }}
     options.mcp
+{{- end }}
   );
 {{- end }}
   return router;

@@ -29,6 +29,7 @@ var recurrenceRustCases = []string{
 	"setRecurrence plans the occurrences up to the horizon, moved off the row calendar holidays, and arms the open, remind and overdue deadlines",
 	"a rule change leaves the open occurrence untouched and replans the ones that have not opened",
 	"the remind deadline fires on the worker, records the reminder and emits the opening and the reminder",
+	"the due deadline fires on the worker at an occurrence due, records it and emits due (#601)",
 	"complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it",
 	"without filings.manage setRecurrence is 403 and a rule that is no RRULE is 400",
 	"the calendar merges a contract end date and a filing occurrences, each dated as its source says",
@@ -146,13 +147,13 @@ func TestRustRecurrenceEndToEnd(t *testing.T) {
 	}
 }
 
-// TestARustServerOnSQLiteRefusesRecurrenceAndTheCalendar: with sqlite
+// TestARustServerOnSQLiteServesRecurrenceAndTheCalendar: with sqlite
 // listed first in fixture-recurrence-db's dialects, the API's Rust server
-// would run on the database's SQLite file, and Recurrence's operations and
-// worker and the calendar are served on Postgres alone (D188), so the
-// build is refused, naming both, rather than serving them on a file the
-// Rust adapter and orm::calendar do not read.
-func TestARustServerOnSQLiteRefusesRecurrenceAndTheCalendar(t *testing.T) {
+// runs on the database's SQLite file, where the Rust adapter runs
+// Recurrence's operations and worker and orm::calendar::sqlite reads the
+// calendar (#615), so the build is no longer refused, and the server's
+// crate, its behaviors on the file, lints clean.
+func TestARustServerOnSQLiteServesRecurrenceAndTheCalendar(t *testing.T) {
 	const db, api = "fixture-recurrence-db", "fixture-recurrence-api"
 	paths := testpaths.Local(t)
 	outputRoot := testpaths.TempDir(t)
@@ -176,10 +177,9 @@ func TestARustServerOnSQLiteRefusesRecurrenceAndTheCalendar(t *testing.T) {
 		}
 		return schema, cfg
 	}
-	var err error
 	for _, service := range []string{db, api} {
 		schema, cfg := load(service)
-		_, err = Run(schema, cfg, Options{
+		if _, err := Run(schema, cfg, Options{
 			OutputRoot: outputRoot,
 			Paths:      paths,
 			Naming:     naming.Default(),
@@ -192,18 +192,35 @@ func TestARustServerOnSQLiteRefusesRecurrenceAndTheCalendar(t *testing.T) {
 				_, cfg := load(name)
 				return cfg, true
 			},
-		})
-		if service == db && err != nil {
-			t.Fatalf("run %s: %v", db, err)
+		}); err != nil {
+			t.Fatalf("run %s: %v", service, err)
 		}
 	}
-	if err == nil {
-		t.Fatal("the Rust server on SQLite was built")
+	apiDir := APIDir(outputRoot, api)
+	behaviors, err := os.ReadFile(filepath.Join(apiDir, "src", "behaviors.rs"))
+	if err != nil {
+		t.Fatalf("the server's behaviors: %v", err)
 	}
-	for _, want := range []string{"lists sqlite first", "Contract: @calendarSource", "Filing: Recurrence", "Filing: @calendarSource", "D188"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal lacks %q: %v", want, err)
+	for _, want := range []string{"sqlite::run_operation(", "orm::sqlite::Database"} {
+		if !strings.Contains(string(behaviors), want) {
+			t.Errorf("src/behaviors.rs does not run on the SQLite file: it lacks %q", want)
 		}
+	}
+	if testing.Short() {
+		return
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo not found, skipping the lint of the Rust server on SQLite")
+	}
+	target := os.Getenv("CARGO_TARGET_DIR")
+	if target == "" {
+		target = filepath.Join(outputRoot, "target")
+	}
+	cmd := exec.Command(cargo, "clippy", "--quiet", "--manifest-path", filepath.Join(apiDir, "Cargo.toml"), "--", "-D", "warnings")
+	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("cargo clippy of the Rust server on SQLite: %v\n%s", err, out)
 	}
 }
 

@@ -91,7 +91,7 @@ func TestRepositoryMembersAreTheRuntimes(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(source)
-	start := strings.Index(text, "\nclass TableRepository {")
+	start := strings.Index(text, "\nclass TableRepository ")
 	if start < 0 {
 		t.Fatal("orm.ts declares no class TableRepository")
 	}

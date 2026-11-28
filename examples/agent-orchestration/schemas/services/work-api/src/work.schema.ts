@@ -2,7 +2,7 @@ import { Generic, Identity } from "superscalar";
 import { Nullable, Secret } from "@superschematic/schema";
 import { Authenticated, HttpMethod, autonomy, behaviorWorker, requirePermission, rest, worker } from "@superschematic/api";
 import { envVars, providers } from "@superschematic/schema-config";
-import { AgentRun, AgentRunRequest, NoticeWork, RunRequest, Task } from "@schemas/work-db";
+import { AgentRun, AgentRunRequest, NoticeWork, RunRequest, SearchIndexing, Task } from "@schemas/work-db";
 
 // The API's config (D159). An agent's run needs a sandbox and a model
 // (D158), so an environment that fills no SANDBOX or no MODEL slot is
@@ -88,9 +88,16 @@ export abstract class Dispatch {}
 export abstract class InboundRuns {}
 
 // The notifier (D153), which routes a schedule's run to an agent and an
-// approval's request to those who may give it.
+// approval's request to those who may give it. Its queue is the
+// notifier's, so the generated worker hands each message to the notifier
+// in the API's Deps.
 @worker({ queue: NoticeWork, concurrency: 4 })
 export abstract class Notify {}
+
+// Search's indexing queue (D155): the generated worker rebuilds the index
+// row of each task and note a write changed.
+@worker({ queue: SearchIndexing, concurrency: 2 })
+export abstract class Indexing {}
 
 // Fires each task's schedules and hands their runs to the notifier.
 @behaviorWorker(Task, { permissions: [] })

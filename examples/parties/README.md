@@ -7,9 +7,9 @@ guide covers it in full.
 
 | Path | What it is |
 |---|---|
-| `schemas/services/jobs-db` | DB, Postgres: `Contact` is a `@party`, a principal that acts through its grants (`Grant`, D156); `Job` is what a grant names and `Report` what a contractor writes on one, with its files; `Conversation` and `Message` are the conversations, a message holding references and files; `RunRequest` is the queue a granted contact's message puts a run request on; the notifier's tables (D153) and `ChannelIdentity`, the addresses everyone is reached at and writes from |
-| `schemas/services/jobs-api` | API over `jobs-db`: `JobsApiConfig` names two channel slots, `SMS` and `MAIL`, and the deployment's `INBOUND_ADDRESS`; `Notify` drains the notifier's queue and `Runs` the run requests |
-| `server/server.ts` | The wiring: the inbound path over the providers the config names, the relays' callbacks, sending to a contact, the timeline and triage, and the workers' handlers |
+| `schemas/services/jobs-db` | DB, Postgres: `Contact` is a `@party`, a principal that acts through its grants (`Grant`, D156); `Job` is what a grant names and `Report` what a contractor writes on one, with its files; `Conversation` and `Message` are the conversations, a message holding references and files; `RunRequest` is the queue a granted contact's message puts a run request on; the notifier's tables (D153) and `ChannelIdentity`, the addresses everyone is reached at and writes from; the roles and each channel kind's trust are seed rows (`@seedRows`) |
+| `schemas/services/jobs-api` | API over `jobs-db`: `JobsApiConfig` names two channel slots, `SMS` and `MAIL`, and the deployment's `INBOUND_ADDRESS`; `Notify` drains the notifier's queue and `Runs` the run requests; `Triage` serves the office's triage as routes (`@triageOperations`, #746): the held messages, one with its photos, settling one onto a contact and dismissing one, each held to `parties.triage` |
+| `server/server.ts` | What the implementation adds to the generated server: the inbound path's address and send policy (`createRuntimeOptions`), sending to a contact and the timeline, and the `Runs` worker's handler |
 
 The channels are the SMS relay and the mail relay of
 `examples/runtime-providers`. The SMS relay fetches a text's photo and
@@ -50,7 +50,11 @@ runs end to end against Postgres in `TestPartiesEndToEnd`
 (`internal/generator/tsgen`), through the two relays over stand-in
 services.
 
-The inbound path is the TypeScript runtime's, on Postgres: the Go and
-Rust servers have no inbound path or party principals yet, and the
-generated server does not build the inbound path into its `Deps`, which
-`server/server.ts` wires.
+The inbound path is the TypeScript runtime's. The generated TypeScript
+server of an API over a Postgres database with conversations and a run
+requests queue builds it into `Deps` beside the notifier, and mounts each
+channel slot's relay callback at `/webhooks/<slot>/inbound`, which hands
+every message down the path. A worker of the run requests is the agent
+dispatcher's where the database uses the orchestration, and the
+implementation's here. On SQLite and D1 an app builds the path over the
+runtime's `./d1` entry (D189).

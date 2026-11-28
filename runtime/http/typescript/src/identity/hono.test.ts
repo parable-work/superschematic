@@ -529,7 +529,12 @@ describe('identity routes', () => {
     // The API key operations are routed only when turned on (D114).
     const apiKeyOperations = identityOperations.filter(op => op.apiKeys).length;
     expect(apiKeyOperations).toBe(5);
-    expect(identityRoutes(service, { sessions: { register: true }, administration: {} })).toHaveLength(identityOperations.length - apiKeyOperations);
+    // And the OAuth operations only with an OAuth server (#695).
+    const oauthOperations = identityOperations.filter(op => op.oauth).length;
+    expect(oauthOperations).toBe(7);
+    expect(identityRoutes(service, { sessions: { register: true }, administration: {} })).toHaveLength(
+      identityOperations.length - apiKeyOperations - oauthOperations
+    );
     expect(paths(identityRoutes(service, { administration: { path: '/staff/' } }))).toStartWith('POST /staff/users, GET /staff/users');
     expect(identityOperations.find(op => op.name === 'grantRole')!.path).toBe('users/{id}/roles/{roleId}');
   });
@@ -663,9 +668,15 @@ describe('identity routes', () => {
     const context = (headers: Record<string, string>) =>
       ({ method: 'GET', headers: new Headers(headers), raw: new Request('http://api.example.com/x', { headers }) }) as never;
     expect(await authenticate(context({}))).toBeNull();
+    const signedIn = h.clock.now.getTime();
     const token = await h.login('admin@example.com', ADMIN_PASSWORD);
+    h.clock.advance(60_000);
     const principal = await authenticate(context({ authorization: `Bearer ${token}` }));
     expect(principal).toMatchObject({ subject: h.adminId, permissions: ['identity', 'orders'] });
+    // The assurance a session's principal carries (D200): when the session
+    // signed in, not when it was last used, which an Approvals
+    // requirement's recent-sign-in reads; no passkey verified the call.
+    expect(principal!.assurance).toEqual({ signedInAt: signedIn });
     expect(principal!.claims).toMatchObject({ login: 'admin@example.com', name: 'Admin', transport: 'bearer' });
     expect(identityPrincipalOf(principal)).toMatchObject({ id: h.adminId, transport: 'bearer' });
     expect(identityPrincipalOf({ subject: h.adminId, permissions: [] })).toBeUndefined();

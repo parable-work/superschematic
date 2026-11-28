@@ -25,7 +25,7 @@ import (
 var coreBehaviorFiles embed.FS
 
 // The npm packages that ship the core's behaviors, which name them in a
-// behavior's spec and the engine document (enginedoc).
+// behavior's spec.
 const (
 	// EnginePackage is @superschematic/engine, whose engine registers its
 	// behaviors when it opens.
@@ -157,6 +157,31 @@ var tableCreatesRows = map[string]string{
 // creates rows of another table when a row is created (tableCreatesRows).
 func TableCreatesRows(name string) bool {
 	return tableCreatesRows[name] != ""
+}
+
+// tableOperationRows are the operations of a table as a whole whose answer
+// names one of the table's rows, by behavior and operation: the member of
+// the answer that holds it, an object whose key is the row's key in its
+// wire form, or null for none. The behaviors' core reads every row, so it
+// is each ORM that keeps such an answer to its caller under per-record
+// access (D156): it answers null there to a caller who may not read the
+// row, as for one no row answers. Aliased's resolve answers the row a name
+// names (D147), and Pool's pick the member it picks (D104), which is then
+// no member: pick does not choose again among the members the caller
+// sees. An answer that lists rows (Calendar's findAvailability, Derived's
+// pulls, Payments' listPaymentActions, Lease's expireHolder) is none of
+// these. Per-behavior code, as tableCreatesRows is, until step 5 derives
+// it from the behavior's class (D103).
+var tableOperationRows = map[string]map[string]string{
+	"Aliased": {"resolve": "row"},
+	"Pool":    {"pick": "member"},
+}
+
+// TableOperationRow is the member of the answer of the behavior name's
+// table operation that names one of the table's rows
+// (tableOperationRows), "" for an operation whose answer names none.
+func TableOperationRow(name, operation string) string {
+	return tableOperationRows[name][operation]
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a

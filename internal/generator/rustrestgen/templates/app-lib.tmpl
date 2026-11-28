@@ -17,7 +17,7 @@ use {{ .APICrateIdent }}::apps::{{ .App.Parts }};
 const NOT_IMPLEMENTED: &str = "app {{ .App.Name }} of {{ .SchemaName }} does not serve yet: write its serve\n";
 
 /// Serves the app on `parts.addr` until it stops, with the API's Deps and
-/// implementations{{ if .AppsEngine }}, and its engine{{ end }}, in `parts`. Return when the process
+/// implementations, in `parts`. Return when the process
 /// should exit: an error fails it.
 ///
 /// It serves nothing yet: it listens on `parts.addr` and answers every

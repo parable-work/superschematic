@@ -145,21 +145,6 @@ exactly as a server does.
 		return fmt.Errorf("identity store of {{ .Service }}: %w", err)
 	}
 {{- end }}
-{{- if .Engine }}
-	// The engine of {{ .Service }}, an engine database (D58), opened on the same
-	// database in the background, as the pool connects when first used
-{{- if $.Background }}: the
-	// {{ $.Kind }} deploys nothing, which the servers do.
-{{- else }}, so
-	// /readyz reports it until it opens and deploys the database's engine
-	// document.
-{{- end }}
-	{{ .Engine.Var }}, err := openEngine(ctx, logger, {{ quote .Service }}, {{ quote .Field }}, {{ .From }}, {{ .Types }}.EngineDocument, {{ .Engine.PolicyLiteral }}, {{ .Engine.RetentionLiteral }}, nil, {{ if $.Background }}nil{{ else }}deployEngine{{ end }})
-	if err != nil {
-		return fmt.Errorf("engine of {{ .Service }}: %w", err)
-	}
-	defer {{ .Engine.Var }}.Close()
-{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -240,14 +225,31 @@ exactly as a server does.
 {{- range .MemoryStores }}
 		{{ .Field }}: {{ .Store.Var }},
 {{- end }}
-{{- if .Engine }}
-		Engine: {{ .Engine.Var }}.Background,
-{{- end }}
 {{- if .Providers }}
 		Providers: {{ .Var }}Providers,
 {{- end }}
 		Logger: {{ .Var }}Logger,
 	}
+{{- with .Wiring }}
+{{- if .Constructs }}
+	// The options the runtime of {{ $.Database.Service }} is built with (D190, D192,
+	// D187), which the implementation answers from its Deps.
+	{{ $.WiringVar }}, err := {{ $.Impl }}.NewWiring({{ $.Var }}Deps)
+	if err != nil {
+		return fmt.Errorf("wiring of {{ $.Service }}: %w", err)
+	}
+{{- else }}
+	{{ $.WiringVar }} := {{ $.Package }}.Wiring{}
+{{- end }}
+{{- if .Builds }}
+	// Its notifier{{ if .Agents }}, agent dispatcher{{ end }}{{ if .Inbound }} and inbound path{{ end }}, over the ORM of
+	// {{ $.Database.Service }} and its providers (D190, D192).
+	{{ $.Var }}Deps, err = {{ $.Package }}.Wire({{ $.Var }}Deps, {{ $.Database.Var }}, {{ $.WiringVar }})
+	if err != nil {
+		return fmt.Errorf("runtime of {{ $.Service }}: %w", err)
+	}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{- define "functions" }}

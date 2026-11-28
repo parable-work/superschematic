@@ -10,6 +10,7 @@ import (
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	"github.com/parable-work/superschematic/tasks"
 )
 
@@ -63,6 +64,22 @@ type TaskResolution struct {
 	// holds. The plan requires each to be covered by an output the task
 	// uses, and fails with the path and its manifest when one is not.
 	Generated []TaskGeneratedPath
+	// Values are the parts of the input that are no file's bytes: what a
+	// tracked file says, as the resolver reads it. Each enters the
+	// input's digest by its name and the SHA-256 of its data, so a file
+	// read by value changes the digest when what it says changes, and not
+	// when its comments or its layout do. A resolver that gives a file's
+	// value leaves the file out of Paths. As a path's, a value is a
+	// function of the commit alone.
+	Values []TaskValue
+}
+
+// TaskValue is one value of an input: a name that says what it is the
+// value of, unique among the input's values and of one line, and the
+// bytes that stand for it.
+type TaskValue struct {
+	Name string
+	Data []byte
 }
 
 // TaskGeneratedPath is a path a manifest of the commit names and the
@@ -207,7 +224,7 @@ func (r *Registry) CheckTaskInput(kind string, spec json.RawMessage) error {
 	if len(bytes.TrimSpace(spec)) == 0 {
 		spec = json.RawMessage("null")
 	}
-	if err := validateRaw(resolver.compiledSpec, spec); err != nil {
+	if err := jsonschemas.Validate(resolver.compiledSpec, spec); err != nil {
 		return fmt.Errorf("input kind %q spec: %w", kind, err)
 	}
 	return nil
@@ -282,19 +299,10 @@ func (r *Registry) checkTaskSection(name, part string, value json.RawMessage) er
 	if compiled == nil {
 		return fmt.Errorf("section %q has no part %s", name, where)
 	}
-	if err := validateRaw(compiled, value); err != nil {
+	if err := jsonschemas.Validate(compiled, value); err != nil {
 		return fmt.Errorf("section %q: %w", name, err)
 	}
 	return nil
-}
-
-// validateRaw checks a JSON value against a compiled schema.
-func validateRaw(schema *validator.Schema, value json.RawMessage) error {
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(value))
-	if err != nil {
-		return err
-	}
-	return schema.Validate(instance)
 }
 
 // TaskEntriesUnder returns the entries of a tree's sorted list that are

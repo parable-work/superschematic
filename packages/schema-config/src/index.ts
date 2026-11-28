@@ -109,7 +109,7 @@ export type ApiOutputConfig = {
   readonly language?: ApiLanguage;
   readonly scaffoldsOutputDir?: string;
   /**
-   * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API and a Rust API serve it; the build refuses it on a Go API, where support follows. Unset is off.
+   * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript, a Rust and a Go API serve it (#660). Unset is off.
    */
   readonly mcp?: boolean;
   /**
@@ -169,6 +169,20 @@ export type SqlOutputConfig = {
    * An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.
    */
   readonly requireUpdatedBy?: boolean;
+  /**
+   * The database's search index (#740): how the words of its @searchable tables are read.
+   */
+  readonly search?: SqlSearchConfig;
+};
+
+/**
+ * The search index of a DB service (D155, #740).
+ */
+export type SqlSearchConfig = {
+  /**
+   * Fold diacritics, so a word finds its accented forms: on Postgres the index's words and a search's query go through the unaccent dictionary (the migrations make a text search configuration, search_unaccent, and the unaccent extension where the database lacks it), and on SQLite the FTS5 table removes diacritics. Turning it on or off migrates the index: its GIN index is built again on Postgres, and its FTS5 table on SQLite. Unset is false.
+   */
+  readonly foldDiacritics?: boolean;
 };
 
 /**
@@ -200,107 +214,6 @@ export type SqlEncryptionConfig = {
 };
 
 /**
- * A DB service's engine document (D58), which the build writes when a type of the schema composes a behavior: an engine type, whose instances the engine keeps, which sql and orm leave out.
- */
-export type EngineOutputConfig = {
-  /**
-   * The engine namespace the schema's engine types are defined, published and instantiated in: lowercase letters, digits and hyphens, starting with a letter, at most 63 characters. Unset is the service's name.
-   */
-  readonly namespace?: string;
-  /**
-   * The path a server of an API on this database mounts the engine's routes at, its event stream and its MCP endpoint under it: one or more segments, each of letters, digits and . _ ~ -. Unset is /engine/<service>.
-   */
-  readonly mount?: string;
-  /**
-   * The access policy the servers open the engine with: "permission", which allows an action on a type to a caller holding <Type>.<action> (Ticket.read, Ticket.write, Ticket.define, Ticket.publish); "allowAll", for tests and local use; or ordered rules, the first that matches a question deciding it. Unset is "permission".
-   */
-  readonly policy?: EnginePolicy;
-  /**
-   * How long the engine's event log keeps events: an age, a count or both, as the engine reads them. Every server, job, worker and runner on this database opens the engine with it, and the database's runner prunes the log, never past an event a reaction has yet to handle. Unset keeps every event.
-   */
-  readonly retention?: EngineRetention;
-  /**
-   * The engine's tool options the deployment sets beside the binary's invocation policy and vendor keys (D70).
-   */
-  readonly tools?: EngineToolsConfig;
-};
-
-/**
- * What a deployment sets of the engine's tool options (D11, D70).
- */
-export type EngineToolsConfig = {
-  /**
-   * The MCP invocation policy of an engine tool or operation, by the name the engine's tools.invocation takes: a built-in tool's (create, delete, defineSchema), or a behavior operation's, <Behavior>.<operation> (Payments.capturePayment), in place of its declaration's. Each value is one of the binary's invocation policy's values (auto or ask in the core). The build refuses a name no engine type's behavior declares, and where the engine types compose Payments or Stock it refuses a map that does not name each of their operations that move money or stock (Payments' openPayment, capturePayment, voidPayment, refundPayment and refundFor; Stock's receiveStock, adjustStock and countStock). Every server, job, worker and runner on this database opens the engine with it, so an agent's MCP client asks before it runs an operation marked ask.
-   */
-  readonly invocation?: { readonly [name: string]: string };
-  /**
-   * Behavior operations, by <Behavior>.<operation>, that the engine's MCP tools leave out: a service calls them through the API or in-process, and no agent is offered them. The build refuses a name no engine type's behavior declares, and the engine document adds the service operations of the core's commerce behaviors (Payments' listPaymentActions, recordPaymentEvent and settleRefundFor) wherever they are composed.
-   */
-  readonly hidden?: readonly string[];
-};
-
-/**
- * The event log's retention (D58): maxAgeMs, maxEvents or both; an event goes when either lets it go. A stream or read that resumes from a cursor retention has pruned past is 410 cursor_expired.
- */
-export type EngineRetention = (EngineRetentionOptions & { readonly maxAgeMs: number }) | (EngineRetentionOptions & { readonly maxEvents: number });
-
-/**
- * The members of an engine's retention, each an integer in the engine's range.
- */
-export type EngineRetentionOptions = {
-  /**
-   * Events older than this many milliseconds, by when they were written, are pruned.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 9007199254740991
-   */
-  readonly maxAgeMs?: number;
-  /**
-   * A namespace's events past its newest this many are pruned.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 9007199254740991
-   */
-  readonly maxEvents?: number;
-  /**
-   * The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine does not run) holds events retention lets go, in milliseconds. Unset, one that has run holds them until it advances, and one that has not holds none.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 9007199254740991
-   */
-  readonly maxHoldMs?: number;
-  /**
-   * How often the runner prunes, in milliseconds. Unset is 60000.
-   *
-   * @asType integer
-   * @minimum 1000
-   * @maximum 9007199254740991
-   */
-  readonly everyMs?: number;
-  /**
-   * Events pruned in one transaction. Unset is 1000.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 10000
-   */
-  readonly batchSize?: number;
-};
-
-/**
- * An engine's access policy (D58): a shorthand, or ordered rules, each matching on the question's action, operation, schema and namespace and the caller's subject and service, and either naming a permission the principal must hold or allowing or refusing outright. The engine checks the rules when a server opens it.
- */
-export type EnginePolicy = "permission" | "allowAll" | { readonly rules: readonly EngineAccessRule[] };
-
-/**
- * One rule of an engine's access policy, as the engine reads it.
- */
-export type EngineAccessRule = { readonly [member: string]: unknown };
-
-/**
  * One CI renderer's options for a Stack service's generated workflow.
  */
 export type CiRendererConfig = {
@@ -323,11 +236,33 @@ export type CiOutputConfig = {
 };
 
 /**
- * The task file a Tasks service's build writes. Only a Tasks service sets it. The build writes the file under <out>/tasks/<service>/.
+ * The task file a Tasks service's build writes, and the workflow of each CI its tasks run on. Only a Tasks service sets it. The build writes the files under <out>/tasks/<service>/.
  */
 export type TasksOutputConfig = {
   /**
    * The path the task file is committed at, from the repository root, as ci/tasks.json. Its directory must exist. Every build-all installs the file there, and tasks --check fails when the committed file is not what the schema gives. Unset, the file is written under the output root alone.
+   */
+  readonly install?: string;
+  /**
+   * The CI the tasks run on, keyed by the renderer that writes its workflow: github for GitHub Actions, which reads the github section of the task file, or a renderer an extension registers. Each task is a job. Every build-all installs the workflow, and tasks --check holds it current as it holds the task file.
+   */
+  readonly ci?: TasksCiOutputConfig;
+};
+
+/**
+ * The CI renderers of a Tasks service, by name.
+ */
+export type TasksCiOutputConfig = {
+  readonly github?: TasksCiRendererConfig;
+  readonly [renderer: string]: TasksCiRendererConfig | undefined;
+};
+
+/**
+ * One CI renderer of a Tasks service.
+ */
+export type TasksCiRendererConfig = {
+  /**
+   * The directory the workflow is committed in, from the repository root. Its default is the renderer's own, .github/workflows for github. It must exist.
    */
   readonly install?: string;
 };
@@ -338,7 +273,6 @@ export type SchemaOutputs = {
   readonly sdk?: SdkOutputConfig;
   readonly sql?: SqlOutputConfig;
   readonly ci?: CiOutputConfig;
-  readonly engine?: EngineOutputConfig;
   readonly tasks?: TasksOutputConfig;
 };
 
@@ -424,7 +358,7 @@ export type SchemaConfig = {
    */
   readonly maxBytes?: number;
   /**
-   * The runtime provider packages this API may use (D159): each a directory, relative to the service's directory, whose package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
+   * The runtime provider packages this API may use (D159): each its directory, relative to the service's directory and starting with "./" or "../", or its npm name ("@scope/name" or "name"), which resolves from the node_modules of the service's directory or one above it (#608). The package's package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
    */
   readonly providers?: readonly string[];
   /**
@@ -493,7 +427,7 @@ export type SchemaConfigDocument = {
    */
   readonly maxBytes?: number;
   /**
-   * The runtime provider packages this API may use (D159): each a directory, relative to the service's directory, whose package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
+   * The runtime provider packages this API may use (D159): each its directory, relative to the service's directory and starting with "./" or "../", or its npm name ("@scope/name" or "name"), which resolves from the node_modules of the service's directory or one above it (#608). The package's package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
    */
   readonly providers?: readonly string[];
   /**

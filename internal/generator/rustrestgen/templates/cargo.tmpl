@@ -20,7 +20,7 @@ http = "1"
 serde = { version = "1.0.228", features = ["derive"] }
 {{- else if .HasBehaviors }}
 serde = "{{ rulesSerdeVersion }}"
-{{- else if .HasGraphOperations }}
+{{- else if or .HasGraphOperations .HasRowFeatureOperations }}
 serde = "1.0.228"
 {{- end }}
 serde_json = "1.0.149"
@@ -67,9 +67,6 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- with .Deps }}
 {{- range .Calls }}
 {{ .Crate }} = { path = "{{ .Path }}" }
-{{- end }}
-{{- with .Engine }}
-{{ .Crate }} = { path = "{{ .Path }}", default-features = false, features = ["background"] }
 {{- end }}
 {{- with .Behaviors }}
 {{ rulesAdapterCrate }} = { path = "{{ .AdapterPath }}", features = ["{{ $.DatabaseDialect }}"] }

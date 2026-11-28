@@ -181,8 +181,8 @@ table whole, with no `_queue`, and `@column` its message's columns; an
 The fields keep their names in the row types, the filters and the API.
 
 Two tables, or two columns of a table, a column the generator adds among
-them, may not take one name, and the load says which. A table the engine,
-a version graph or a projection view names itself takes no override, nor
+them, may not take one name, and the load says which. A table a version
+graph or a projection view names itself takes no override, nor
 do the tables the user model adds (`Session`, `UserCredential`,
 `UserRoleGrant`), though the `User` and `UserRole` tables do, and neither
 does a list relation, whose foreign key is a column of the other table. Adding, changing or removing an override of a
@@ -300,8 +300,7 @@ no field fails the build. The other options shape the index:
 `where` and `expression` are SQL, written once for every dialect the
 service lists, and hold one expression each. SQLite takes an expression
 and a predicate, and refuses a method other than BTREE and an operator
-class. An engine type's index is the engine's, over its fields alone, so
-it takes none of these options.
+class.
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="Review" />
 
@@ -556,12 +555,51 @@ const { items, total, more } = await searchTables(orm, principal, { q: "walnut d
 // items: [{ table: "Task", key, title, matched: "body", snippet: [{ text: "a " }, { text: "walnut", match: true }, ...], place: 1 }, ...]
 ```
 
-A row matches when it holds every word of `q`, folded to lower case, and
+A row matches when it holds every term of `q`, folded to lower case, and
 the hits come best first: Postgres's `ts_rank_cd` over the weighed words,
 then table and key, as the engine's Search ranks. `tables` keeps to some
 tables, and `scope` to the rows whose scope field holds one of its values.
 A snippet comes in parts, each match marked, so no markup in a row reaches
 a page.
+
+`q` reads as a search box does (#740), the same in TypeScript, Go and
+Rust, on Postgres and on SQLite:
+
+| `q` | Finds the rows that hold |
+| --- | --- |
+| `walnut desk` | both words, anywhere |
+| `"walnut desk"` | the phrase, its words side by side |
+| `wal*` | a word that starts with `wal` |
+| `walnut -pine` | walnut, and not pine; `-"pine table"` keeps out a phrase |
+| `oak OR pine` | either word: `OR`, upper case, joins the terms beside it, so `walnut oak OR pine` is walnut, and oak or pine |
+
+A `+` before a term says it is required, as every term is. A term with no
+letter or digit is dropped, and so is an `OR` with no term before it. A
+query of excluded terms alone finds nothing, and the first 16 terms count.
+Each term is a phrase of the words the database finds in it, so
+`o'brien` is the phrase `o brien` on both.
+
+With `foldDiacritics`, a word finds its accented forms: `cafe` finds the
+word written with an e acute, and so does the word itself.
+
+```ts
+export default defineConfig({
+  name: "records",
+  kind: SchemaKind.DB,
+  outputs: { sql: { dialects: ["postgres", "sqlite"], search: { foldDiacritics: true } } },
+});
+```
+
+On Postgres the index's words and a search's query go through the
+`unaccent` dictionary, in a text search configuration the migrations make,
+`search_unaccent`. The migration makes the `unaccent` extension where the
+database lacks it, in the schema `superschematic_extensions`, which a role
+with `CREATE` on the database may do; a database that will not have it
+fails the migration and says so. On SQLite the FTS5 table removes
+diacritics. Turning it on or off migrates the index: on Postgres its GIN
+index is built again, and on SQLite its FTS5 table is filled again from
+the index rows. It is off unless set, so a database that searches already
+is not migrated for it.
 
 Access is checked inside the query, so `total` and every page are exact
 and a hidden row never shows as a gap:
@@ -575,8 +613,13 @@ and a hidden row never shows as a gap:
 
 `searchRoutes({ orm, authenticate })` serves the search at
 `GET /api/search?q=...&tables=...&scope=...&limit=...&offset=...`, and
-`searchMcpTool` with `callSearchTool` as the MCP tool `search`. An app
-mounts them; an agent run calls the tool with its run token, a grant, and
+`searchMcpTool` with `callSearchTool` as the MCP tool `search`. A
+generated TypeScript server of an API over the database mounts both
+itself, the tool on the API's MCP endpoint, and a `@worker` of the
+declaration's queue hands each message to `indexSearch`, so the
+implementation has no method for it. What it searches with, a table's
+permission or embeddings, is the implementation's `createRuntimeOptions`'
+`search`. An agent run calls the tool with its run token, a grant, and
 finds what its grant reaches.
 
 ### Embeddings
@@ -596,6 +639,21 @@ text alone costs no model call. A search embeds its query and re-ranks its
 first 200 hits by reciprocal rank fusion of their text place and their
 similarity; the hits and the total stay the rows that hold the words. A
 model that fails leaves the text order.
+
+A search with a `vector` and no term to hold ranks by the vector alone
+(#740): every row the caller may read whose embedding is of the model, by
+cosine similarity, best first, with the exact total. Each hit is matched
+by its title, which is its snippet. Excluded terms still keep rows out:
+`{ q: "-draft", vector }`.
+
+```ts
+// vector: an embedding of the model the options name, from any source.
+const near = await searchTables(orm, principal, { q: "", vector }, options);
+```
+
+It reads every embedded row the caller may read, once per search, with no
+vector index, so it serves an index of moderate size. Embeddings, and a
+search by vector, are Postgres's alone; SQLite refuses them.
 
 | Settled | Why |
 | --- | --- |
@@ -626,8 +684,10 @@ let found = search_tables(Repositories::new(&client)?.untyped(), Some(&principal
 ```
 
 `search_routes(SearchRoutes::new(tables, authenticator))` serves
-`GET /api/search`, and `search_mcp_tool` with `call_search_tool` the MCP
-tool; an app merges the route into its router. A party's or an agent run's
+`GET /api/search`, and `SearchTool` the MCP tool (`search_mcp_tool`,
+`call_search_tool`). A generated Rust server merges the route, serves the
+tool and runs a `@worker` of a `@searchable` declaration's queue through
+`index_search` itself (#617), with the options `Wire::search` answers. A party's or an agent run's
 search, through `access::GrantAuthenticator`, keeps to the rows its grants
 reach, as in TypeScript.
 
@@ -657,10 +717,20 @@ found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{P
 ```
 
 `crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
-and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
-handler on its router. `ReindexSearch` builds every row's index row again.
-A Go server whose database lists `sqlite` first is refused a `@searchable`
-table, since `crosstable` ranks by Postgres statements alone.
+and `SearchMCPTool` with `CallSearchTool` the MCP tool. A stack's Go server
+mounts the handler itself, behind the API's auth step, over
+`CrossTables()` and the caller with its roles' permissions, with the
+options its implementation's `NewWiring` answers in `Wiring.Search`; and a
+`@worker` of a `@searchable` declaration's queue hands each message to
+`IndexSearch` with `Wiring.Indexing`, with no method of the
+implementation's ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)).
+A Go server with `outputs.api.mcp` on serves the tool on its MCP endpoint
+(#616): the API package's `MCPTools` calls `CallSearchTool` as the
+endpoint's caller with its roles' permissions, with `Wiring.Search`'s
+options. `ReindexSearch` builds every row's index row again.
+Over a database that lists `sqlite`, the SQLite database's `CrossTables()`
+searches the file as the TypeScript runtime does on SQLite
+([On SQLite and D1](#on-sqlite-and-d1), [Go on SQLite](#go-on-sqlite)).
 
 ### On SQLite and D1
 
@@ -692,10 +762,24 @@ const { items, total } = await searchTables(orm, principal, { q: "walnut desk" }
 | the FTS5 table is a piece of the model's SQL of its own, after every object | the migration model has no form of a virtual table; a plan that adds the index runs it, and a table made `@searchable` with rows needs `reindexSearch` once |
 
 The triggers keep a row's index row whichever ORM writes it, so a
-service's Go types are built beside it. Go's search (D187) and Rust's
-(D188) run on Postgres alone: a Go server is refused search over a
-database that lists `sqlite` first, and a service that lists `sqlite` and
-declares `@searchable` takes no Rust types.
+service's Go and Rust types are built beside it. Go's search runs on
+SQLite too (#615): `crosstable` writes the same statements over the SQLite
+database's `CrossTables()`, with the same ranking, access and refusal of
+embeddings. So does Rust's, in `orm::search_tables::sqlite`:
+
+```rust
+use superschematic_http_runtime::orm::search_tables::sqlite::{index_search, search_routes, search_tables, SearchRoutes};
+
+// A worker's handler, in a write of the file.
+database.write(|connection| index_search(connection, sqlite_definition()?, &message, &SearchOptions::default()))?;
+let hits = database.read(|connection| search_tables(Repositories::new(connection)?.untyped(), Some(&principal), &request, &options))?;
+// GET /api/search, on a reading connection of the file.
+let routes = search_routes(SearchRoutes::new(types::orm::sqlite::tables(database), authenticator));
+```
+
+Each function runs on the connection it is given, in the caller's
+transaction, and answers at once; a request's `vector` is refused as
+invalid and embeddings in the options as a definition's error.
 
 ## Pages
 
@@ -930,7 +1014,7 @@ A ciphertext compares with nothing, so the field:
 The envelope is bound to the row's key, which the ORMs must know before
 the insert: a table with an `Encrypted<T>` field has a UUID key the ORMs
 generate when a create leaves it unset, or a key each create sets. A
-table the engine, a version graph or the user model keeps cannot have one.
+table a version graph or the user model keeps cannot have one.
 A queue's message carries none, and an `@enqueueOnChange` neither copies
 one into a message, nor compares one in `fields`, nor tests what one
 equals; whether it is null it may test. Carry the row's key in the
@@ -1117,13 +1201,18 @@ see it (D156). The build adds five columns: `audience`, `audienceNamed`
 and `agentAccess`, which a write sets, and `effectiveAudience` and
 `effectiveAgents`, which a trigger resolves before each insert and
 update, through `inheritFrom` from a parent's, whatever writes the row.
-In an operation of a TypeScript server, every read of the table keeps to
-the rows its caller is in the audience of, through the repositories, a
-relation a read includes, a filter through a relation, a projection keyed
-by the table's key and a search, and every write to the same rows. A job,
-a worker and `orm.asSystem()` read every row, and an upsert of an
-`@audience` table in an operation is refused. The audience is Postgres
-alone, and the Go and Rust repositories do not apply it yet.
+In an operation, every read of the table keeps to the rows its caller is
+in the audience of. That covers the repositories, a relation a read
+includes, a filter through a relation, a projection keyed by the table's
+key and a search. Every write keeps to the same rows, and so does a
+behavior's operation on a row: a transition or a Comments post the caller
+may not make is the 404 of a row that is not there. A job, a worker and
+`orm.asSystem()` read every row, and an upsert of an `@audience` table in
+an operation is refused. The TypeScript, Go and Rust repositories apply
+the audience on Postgres. On SQLite the TypeScript and Go ones do, a
+behavior's operation on a row among their reads and writes (D201), and
+TypeScript's on D1
+([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)).
 [Per-record access](/superschematic/guides/api-routes/#per-record-access)
 covers the options, the grants a party or an agent run reaches rows
 through, reveal and the access log, and
@@ -1212,7 +1301,9 @@ turn on itself (`ErrMergeSelfReference`, code `self_reference`): point
 `into` elsewhere first. A merge that stamps a row deleted, `from` on a
 soft-deletable table or a refused row of one, needs an acting user as a
 soft delete does, and fails before it writes without one
-(`ErrNoUserInContext`, `NoUserError`).
+(`ErrNoUserInContext`, `NoUserError`). Under per-record access a merge
+keeps to the rows its caller may write
+([A merge and who may write the rows](#a-merge-and-who-may-write-the-rows)).
 
 What a merge does not do:
 
@@ -1240,8 +1331,8 @@ What a merge does not do:
   is not repointed. Its foreign key decides what the delete of `from`
   does to it.
 
-The trait is for a DB table: the build refuses it on an engine type, a
-queue, a view and a version graph's table. It also refuses two shapes a
+The trait is for a DB table: the build refuses it on a queue, a view and
+a version graph's table. It also refuses two shapes a
 merge could not carry out. A version graph's table that references the
 table: a commit made before a merge would still reference the row merged
 away. And a unique `@index` that lists no `keys` on a table that
@@ -1255,6 +1346,38 @@ caller opened none, and the lock is SQLite's one writer, which holds the
 database once the merge writes. A merge whose relations delete rows of a
 `@versioned` table has no SQLite form. The TypeScript and Go
 repositories run on Postgres alone, so D1 has no merge.
+
+### A merge and who may write the rows
+
+Under per-record access (D156) a merge keeps to its caller: in an
+operation of a TypeScript server, under Go's `WithPrincipal`, and in
+Rust's repositories opened `with_access`
+([Per-record access](/superschematic/guides/api-routes/#per-record-access)).
+Both rows must be ones the caller may write. Either one beyond its
+audience or its grants is not found (`ErrNotFound`, `NotFoundError`,
+`Error::NotFound`) before a statement runs, as an update's row is.
+
+So must every row the merge would repoint or delete. A note on `from`
+that someone else keeps private, or a board of theirs that carries
+`from`, is a row the caller would change without being able to see it.
+Before it writes, with both rows locked, the merge reads each relation's
+rows that reference `from` against the conditions of the caller's write
+of their table. At the first it may not write, it refuses and writes
+nothing: `ErrMergeOutOfReach` in Go, and code `out_of_reach` of a
+`MergeError` in TypeScript and of `Error::Merge` in Rust. The refusal names
+the table and carries no key or field of the row; a merge route answers
+it 403.
+
+- A pair of a `ManyToMany`'s join table is its declaring row's: a merge
+  of a label checks the boards whose `Board.labels` hold it. The pairs
+  the merged table declares are `from`'s own, as an Aliased field's
+  aliases and names are.
+- A party or an agent run reaches only the rows its grants reach, so a
+  grant whose role should fold the notes on a label names a path to
+  them (`LabelNote: ["label"]`).
+- A job, a worker, `AsSystem` and `asSystem()`, and Rust's repositories
+  opened for no caller write every row, so their merges repoint
+  everything.
 
 ## References and files on any row
 
@@ -1334,11 +1457,9 @@ goes, and a file's delete enqueues its object's release unless another
 file of the sub-table still names it, so a statement that deletes the
 files of one object releases it once. Of a statement that deletes a
 holder and a row it points at, a cleared message may name the holder
-the same statement deleted, which its worker finds gone. Go's and Rust's
-repositories on SQLite read neither sub-table yet: a service that lists
-`sqlite` and declares either builds with Go's types, whose `References()`
-and `Attachments()` there answer `ErrSQLiteUnsupported`
-([Go on SQLite](#go-on-sqlite)), and is refused with Rust's.
+the same statement deleted, which its worker finds gone. Go's and
+Rust's repositories on SQLite read and write both sub-tables
+([Go on SQLite](#go-on-sqlite); Rust's below, #611).
 
 ### References and backlinks
 
@@ -1419,10 +1540,47 @@ export const createWorkers: WorkersConstructor = deps => ({
 | text is extracted when an upload completes, and a preview is made on a file's first view | search indexes the text whether or not anyone opens the file; most files are never viewed, so a preview made at upload would mostly go unseen |
 
 Extraction and previews are a file processor's, the `files` interface of
-[Runtime providers](/superschematic/guides/runtime-providers/) (D159),
-which attachments do not call yet: `complete` asks a file's extraction and
-`download` its preview, and `pending` and `processed` are what a processor
-reads and records.
+[Runtime providers](/superschematic/guides/runtime-providers/) (D159):
+`complete` asks a file's extraction and `download` its preview, and
+`pending` and `processed` are what a processor reads and records.
+`processFiles` of the runtime's `./postgres` and `./d1` entries makes one
+pass over what is pending (#702): it reads each object's bytes from the
+bucket, hands them to the processors the environment's `files` slots
+name, in slot order, the first that reads the media type and answers,
+records the text as `extractedText` on every file that names the object,
+and puts the preview beside it, at `previewObjectOf(object)`. A file no
+processor reads, one past `maxBytes` (25 MiB) and one a processor throws
+on are recorded `failed` and not asked again. A generated TypeScript API
+whose database declares `@attachments` and whose config names a `files`
+slot exports `processPendingFiles(deps, options)`, which an
+implementation's job runs on a schedule, or an operation after an upload
+completes, with the bucket in `createRuntimeOptions`' `files`:
+
+```ts
+export const createRuntimeOptions: RuntimeOptionsConstructor = deps => ({ files: { bucket: deps.uploads } });
+
+export const createJobs: JobsConstructor = deps => ({
+  processFiles: async () => void (await api.processPendingFiles(deps, createRuntimeOptions(deps))),
+});
+```
+
+The Go and Rust runtimes make the same pass, over the same scenarios
+(`runtime/http/testdata/file_processing_parity.json`): Go's
+`fileprocessing.Process`, which a generated Go API's
+`ProcessPendingFiles(ctx, deps, wiring)` runs over `Deps.DB` with the
+bucket `Wiring.Files` names, and Rust's
+`orm::file_processing::process_files` over the repositories'
+`attachments()`, which a generated Rust API's
+`files::process_pending_files(&deps, bucket)` runs over `Deps.db`, on
+Postgres and on a SQLite file (#603, #614). A pass does
+not retry a file: a processor that fails on it ends it `failed`. An
+error of the database's is the pass's own, which its job retries.
+
+A `@searchable` table that indexes its attachments (the default) hears
+the write of a file's text through its triggers and indexes the text with
+the row, so search finds the row by its files' words. Such a table needs
+a file processor: the stack refuses an environment that runs the API
+with no `files` slot set (`no-provider`).
 
 In Rust, the generated repositories open the same operations,
 `references()` and `attachments()`, over the same tables and statements,
@@ -1437,6 +1595,25 @@ let orm = Repositories::new(&tx)?.acting(Some(user)).with_access(AccessCaller::o
 let backlinks = orm.references()?.referenced_by(&RowRef::new("Issue", &key), None).await?;
 let (file, upload) = orm.attachments()?.begin(&begin, bucket.as_ref(), None).await?;
 tx.commit().await?;
+```
+
+On a SQLite file (#611) the SQLite repositories open them too, over a
+`rusqlite::Connection` in the caller's transaction, which a write that
+takes a lock opens with `TransactionBehavior::Immediate`. They run the
+same statements in SQLite's words: a parameter `?n`, `CAST(... AS TEXT)`,
+the clock as RFC 3339 text, and a ref block found through `json_each`.
+They take no advisory lock, since the transaction holds the file's write
+lock. The members that touch only the file answer at once; `begin`,
+`complete`, `download` and `release` reach the bucket and are async, the
+file's statements running when first polled:
+
+```rust
+database.write(|connection| {
+    let orm = sqlite::Repositories::new(connection)?.acting(Some(user)).with_access(AccessCaller::of(Some(&principal)));
+    let backlinks = orm.references()?.referenced_by(&RowRef::new("Issue", &key), None)?;
+    let filed = orm.attachments()?.file(&onto)?;
+    Ok::<_, orm::Error>((backlinks, filed))
+})?;
 ```
 
 ### In Go
@@ -1463,11 +1640,14 @@ file, err := deps.DB.Attachments().Complete(ctx, rowrefs.FileRef{Table: "Issue",
 
 The types and the refusals (`rowrefs.Error` and its `Code`) are the
 schema runtime's `rowrefs` package; `bucket.ForAttachments` of the HTTP
-runtime is a listed bucket as the ORM reads it. A Go server serves
-neither as routes yet, as the TypeScript server does not: the
-implementation writes its routes over them. They run on Postgres alone:
-on SQLite each call answers `ErrSQLiteUnsupported`
-([Go on SQLite](#go-on-sqlite)).
+runtime is a listed bucket as the ORM reads it. They run on SQLite too, over
+the SQLite database and its transactions ([Go on SQLite](#go-on-sqlite)).
+
+An API serves a table's references, backlinks and files as routes, SDK
+methods and MCP tools with no code of yours, from a
+`@rowFeatureOperations` set
+([A table's references and files](/superschematic/guides/api-routes/#a-tables-references-and-files)),
+in TypeScript, Go and Rust (#723).
 
 ## State machines
 
@@ -1592,9 +1772,8 @@ and the state:
 ```
 
 On a DB service the build also refuses a machine where no guard could
-hold it: on an engine type (`@behavior`), whose instances are kept in the
-engine's own tables; on a `@queue` class; and on a field a behavior owns,
-such as a `Workflow` field, whose moves are the behavior's.
+hold it: on a `@queue` class, and on a field a behavior owns, such as a
+`Workflow` field, whose moves are the behavior's.
 
 A JSON or YAML schema file writes the same list on the type, under
 `stateMachines`, each state as the member's value and a return to null as
@@ -2038,8 +2217,8 @@ the fence's field:
   equality for, such as a `Geo.Location`'s `POINT`, since the trigger
   could not tell a write that changes it;
 - a class that is no table of a DB service: a `@jsonField` type, a base
-  class, a `@queue` class, an engine type, and a member of a version
-  graph, whose engines write its rows.
+  class, a `@queue` class, and a member of a version graph, whose engines
+  write its rows.
 
 ```
 @fenced on Parcel.version: version's column is DOUBLE PRECISION, and a fence is a whole number each covered write adds one to; type it by a scalar whose column is SMALLINT, INTEGER or BIGINT, as Default<Generic.Int64, 0>
@@ -2363,25 +2542,90 @@ Its upserts are refused with `ErrSQLiteUnsupported`, as the TypeScript
 repositories refuse its `upsertMany` there.
 
 A filter reaches through a one-to-many relation by its name, as on
-Postgres (D180), so a row rule's path through one holds on SQLite too. The
-repositories on SQLite keep to no audience, grants or access log, and
-write no references or attachments. A DB service that lists `sqlite` and
-declares an `@audience`, `@accessGrants`, `@accessLog`, `@references` or
-`@attachments` table builds all the same, its TypeScript repositories
-serving them there
-([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)),
-and the Go ORM, which a DB service always gets, refuses each call they
-touch on SQLite with `ErrSQLiteUnsupported`, naming why: every table's
-repository of a database whose reads keep to a caller (an audience or
-grants), the access log's repository, and the `References()` and
-`Attachments()` of the SQLite database and its transactions (D184), which
-a table's `Comments` gives a database too.
+Postgres (D180), so a row rule's path through one holds on SQLite too.
+
+Per-record access holds on SQLite as on Postgres (#611). In a database
+with an `@audience` or an `@accessGrants` table, each repository keeps its
+reads and writes to the caller `WithPrincipal` binds. The conditions are
+the TypeScript repositories' on SQLite
+([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)):
+
+| Kind of access | On SQLite |
+| --- | --- |
+| An audience | the rows whose `effective_audience`, a JSON array of ids, is null or holds the caller's id, found through `json_each` |
+| A grant | the target row, or the rows its role's paths lead from to it, a semijoin per step |
+| An agent run | the rows whose agent access lets it read them, or for a write `followRole` |
+
+`IssueGrant`, `RevokeGrant`, `ActiveGrants`, `RecordAccess` and
+`AccessLogOf` take the SQLite database or a transaction of it.
+`(*SQLiteDatabase).AuthenticateGrant` reads a token's grant on every call,
+as `(*Database).AuthenticateGrant` does, so an expired or a revoked grant
+is refused at the next call.
+
+`References()` and `Attachments()` of the SQLite database and its
+transactions run on the file too (D154). A table's `Comments` gives a
+database `References()`. They run the same reads and writes as on
+Postgres, in SQLite's words: a parameter `?n`, `CAST(... AS TEXT)`, the
+clock as RFC 3339 text, and a ref block found through `json_each`. They
+take no advisory lock, since a transaction on SQLite holds the write lock
+from its `BEGIN IMMEDIATE`. The SQLite DDL's row triggers clear a deleted
+target's references and release a file's object.
+
+Recurrence, the calendar and search run on SQLite too (#615). A
+Recurrence's operations run as the core's commands in the repository's
+transaction, as every behavior's do, so a plan's occurrences and the
+deadlines it arms commit together, with the same dates as on Postgres.
+`CrossTables()` of the SQLite database and its transactions is the
+calendar's and search's host on the file: `crosstable` writes their
+statements in SQLite's words, as the TypeScript runtime does on SQLite
+([On SQLite and D1](#on-sqlite-and-d1)):
+
+| Read | On SQLite |
+| --- | --- |
+| The calendar | a window bound as RFC 3339 text, which orders as text; an owner by its hyphenated text; each table's rows held to the caller by its repository's conditions on SQLite |
+| The feed | a grant of the `@accessGrants` table, issued, rotated, revoked and read as on Postgres |
+| Search | the FTS5 table `search_index_fts`, each word a quoted phrase, every one required, ranked by `bm25` with Postgres's weights; the audience through `json_each` over the index row's copy, and a grant's reach by an `EXISTS` with the table's conditions on SQLite |
+| Indexing | `IndexSearch` reads the row and writes its index row with its access columns in one statement; `ReindexSearch` indexes a table's rows one at a time |
+
+Embeddings are refused on SQLite: a search with `Vector` is `Invalid`, and
+`Embeddings` in the options is `ErrSQLiteEmbeddings`.
+
+The notifier, the parties and the agent dispatcher run on SQLite too
+(#618), as they do in TypeScript there (D189).
+`(*SQLiteDatabase).Notifications()` and `Orchestration()` are the hosts the
+HTTP runtime's `notify`, `inbound` and `agents` packages run through, so
+`notify.New(db.Notifications(), ...)` takes either database. The runtime
+writes each statement over the notifier's and the orchestration's own
+tables in SQLite's words:
+
+| Part | On SQLite |
+| --- | --- |
+| A statement | each parameter `?n`; a list bound as JSON text and read through `json_each`; a time bound as RFC 3339 text to the millisecond; a boolean as 1 or 0 |
+| A row read back | each cell as the Postgres driver reads its column: JSON decoded, a time a `time.Time`, a boolean `true` or `false`, a UUID in base62. The definitions name how a SQLite column holds each |
+| A recipient's wall time | read from Go's zone database, which the runtime carries, since SQLite holds none |
+| An enqueue | the queue's statement on SQLite, in the caller's `*SQLiteTx`, so an event commits with the change that raised it |
+| A claim | the queue's claims on SQLite. A queue there has no slots and no next due time (D145): a worker in drain mode takes its slot and stops once idle |
+| A behavior's operation | a run's Lease, Retries and status through the core, in the repository's transaction on SQLite |
+
+A record a recipient reads goes through its repository on SQLite, which
+keeps it to the record's audience and the recipient's grants. A
+`@versioned` table, as the agents' definitions are, keeps its rows and its
+version on SQLite, and its history by the SQLite DDL's row triggers
+(D189). The Go repository reads no history there, as the TypeScript one
+reads none: `GetVersion`, `GetVersions`, `ListVersions`, `GetAsOf` and the
+`ListAsOfBy...` reads answer `ErrSQLiteUnsupported`. The generated Go
+server and its workers wire them over a database that lists `sqlite`
+first as over a pool (#717): the API package's `Wire`, `Authenticator`,
+`Routes` and runtime queues take the ORM's `SQLiteDatabase`, and every
+worker, the app's `@worker`, a table's behavior worker and the runtime's
+own, claims its queue on the SQLite file.
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
-`@versioned` table, an `Encrypted<T>` field, a `Mergeable` table, and a
-version graph's released rows. The SQLite DDL refuses a vector and a
-`@versioned` table for the whole service. A timestamp is held to the millisecond, so two rows written in one
+`@versioned` table whose history is kept for some days, an `Encrypted<T>`
+field, a `Mergeable` table, and a version graph's released rows. The
+SQLite DDL refuses a vector for the whole service, and a `@versioned`
+history kept for some days, pinned or partitioned. A timestamp is held to the millisecond, so two rows written in one
 millisecond tie in an order by it, and their keys break the tie.
 
 An enqueue on SQLite takes the transaction itself
@@ -2609,6 +2853,16 @@ the Go ORM runs:
   `outputs.sql.dialects` lists `sqlite`; a write runs in a transaction the
   caller opened.
 
+A `@versioned` table's rows and their `_version` are served on SQLite
+too (#618), its history kept by the triggers of the SQLite DDL; the Rust
+repositories read no history on either dialect. The runtime's notifier,
+inbound path and agent dispatcher run over `orm::store::Store`, which holds
+either dialect's tables: on a SQLite file a transaction of theirs is a
+write a task holds across its awaits (`Database::begin_async`), which
+every other task's write waits for, and in which the same task's own
+reads and writes run, a write in a savepoint
+([events and notifications](/superschematic/guides/notifications/#in-rust)).
+
 Each table's repository has `get_one`, `find_one`, `find_many`,
 `find_page`, `create_one`, `create_many`, `update_one`, `update_many`,
 `upsert_one`, `delete_one`, `hard_delete_one` and `reencrypt`. `acting`
@@ -2730,13 +2984,17 @@ Four reference pages cover what a DB schema can add on top of this guide:
   type-checked SQL with `@query`, verified on Postgres into a lock and run
   by the Go ORM and the TypeScript repositories as typed functions.
 
-A type of a DB schema that composes a behavior with `@behavior`,
-`@behavior("Workflow", ...)` say, is no table: it is an engine type, whose
-instances the engine keeps, so the build writes it no table, no
-repository and no migration, and writes the schema's engine document
-instead
-([Engine types](/superschematic/guides/engine-behaviors/#engine-types)). A
-table that types a field as a behavior, `status: Workflow<{ ... }>`, or
+A type of a DB schema is a table, and composes a behavior by a field
+type or by `implements` (D103). `@behavior` is a General schema's (D16),
+which
+[development mode](/superschematic/guides/development-mode/) serves
+(D117): the load refuses it on a DB type, naming the table form.
+
+```
+type Ticket composes behavior Workflow with @behavior, which a DB type does not take: a DB type is a table, which composes it as status: Workflow<{ ... }> (D103)
+```
+
+A table that types a field as a behavior, `status: Workflow<{ ... }>`, or
 implements one, `implements Timers<Ticket, { ... }>`, `implements
 Reactions<Project, { ... }>`, Constants, StateRules and Approvals
 ([Fields a table keeps, freezes and signs off](#fields-a-table-keeps-freezes-and-signs-off)),
@@ -2822,8 +3080,7 @@ type Issue: field status: behavior Workflow config: the transition from "todo" t
 ```
 
 A JSON or YAML schema file writes each transition out: its document
-schema is the engine's declaration of Workflow, which takes one state in
-each.
+schema is Workflow's declaration, which takes one state in each.
 
 The build also holds a table's Workflow to the rules the behaviors' core
 holds it to at a row's first command, in the core's words: the initial
@@ -2860,9 +3117,7 @@ terminal states and `finished` the ones a transition leaves, so the build
 names the other when a transition is added or taken away. `finished`
 changes nothing else: a transition out of `done` is made as any is, and
 Lease, Retries and Reconcile, which ask whether a transition leaves a
-state, still ask that. It is a table's alone, as `by` is: an engine
-type's Workflow refuses it, since its blockers and rollups rely on a
-finished instance staying finished.
+state, still ask that.
 
 Reopening a row moves no other row back. A project that closed when its
 last task was done stays done when a task is reopened, unless its own
@@ -2946,10 +3201,6 @@ whose value the core never reads, a relation by its name, an audit field other t
 `seat:<name>` entry that names no seat of the table's Seats
 ([A row's seats](#a-rows-seats-and-a-field-that-follows-observations)),
 which a `by` names beside its fields.
-A type that composes Workflow with `@behavior("Workflow", ...)` is an
-engine type: its config has none of `by`, `overridePermission` and
-`repeat`, its `transition` takes no `from`, and the build and the engine
-refuse each.
 
 `by` is only as strong as its field. A caller who may write `askedOf`
 (through an update operation of an API, code that calls the repository's
@@ -3142,7 +3393,11 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   most `proofWithinMs` before the sign-off; `user-verification`, a passkey
   with user verification on the sign-off itself. The authenticator reports
   the caller's `assurance` (`{ signedInAt?, userVerified? }` on the
-  principal); a principal without one proves nothing.
+  principal); a principal without one proves nothing. The identity
+  runtime's session principal reports `signedInAt`, the time the session
+  signed in, in TypeScript, Go and Rust; an API key's principal reports
+  none. No authenticator reports `userVerified` yet, since the identity
+  runtime has no passkeys, so `user-verification` is never met.
 - **Whom it excludes.** `excludeCreator` as above, by the caller's subject
   or whom it counts as. `excludeCreatorPerson: true` also refuses the
   person the creator acted for, the subject the table's own `createdFor`
@@ -3152,7 +3407,12 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   guard, so a signer a later write lists stops counting.
 - **The permission again** (`recheckPermission: true`). Each guard reads
   each signer's permission now, so a signer who lost it stops counting;
-  without it the permission is read at the sign-off.
+  without it the permission is read at the sign-off. The repositories read
+  it from the identity runtime's tables in the same database: a person
+  holds the permissions of every role granted to them, and none while
+  disabled or waiting for approval. A signer who is no user of that
+  database, an Agent among them, holds none, and so does every signer of a
+  database without the identity tables.
 - **When it applies** (`when`). A list of conditions on own fields, all of
   which must hold: `{ field, test, values, negate? }`, `test` one of
   `every-matches` and `any-matches` (glob patterns: `*` within a path
@@ -3233,11 +3493,6 @@ a caller can write, or list it in Constants' `fields`. The build warns of
 an API operation that updates a row and takes a StateRules or Workflow
 `by` field in a `@source` view of the table, unless Constants lists it
 ([Who may move a row](/superschematic/guides/api-routes/#who-may-move-a-row-and-a-move-that-changes-nothing)).
-
-A type that composes these with `@behavior("Constants", ...)` and the like
-is an engine type: its configs have no `oneWay`, `by`, `status`, `resetOn`,
-`pinned` or D200's requirement members, its `signOff` takes no `version` or
-`read`, and the build and the engine refuse each.
 
 ### Rows a worker leases, retries, beats and meters
 
@@ -3341,7 +3596,7 @@ acknowledge? })`, `release({ abandon? })`, `expire({ holder?,
 notRenewedAfter? })`, `direct`, `acknowledge` and `resetExpiries`, and
 `expireHolder({ holder, notRenewedAfter? })`, an operation of the table
 as a whole ([below](#an-operation-of-the-table-as-a-whole)). The
-config is the engine's Lease's
+config is Lease's
 ([Work queues](/superschematic/guides/work-queues/#lease)): `ttlMs` (60
 seconds when absent), `heartbeatMs`, `maxHoldMs` or `maxHoldField` (a
 `Generic.Int64` field), `onExpiry` and `escalate` with `maxExpiries`,
@@ -3390,12 +3645,11 @@ seconds when absent), `heartbeatMs`, `maxHoldMs` or `maxHoldField` (a
   `{ expired, reasons, ids }`, the keys it expired and how many by each
   reason. A Presence miss's `releaseLeases` does the same for a principal
   gone quiet.
-- **Not on a table.** `sweepMs`, how often the engine's runner swept the
-  lapsed leases, is refused, since each lease expires at its own deadline;
+- **Not on a table.** `sweepMs`, how often a sweep found the lapsed
+  leases, is refused, since each lease expires at its own deadline;
   and `directOn` waits for Revisions and Branches on the core.
 
-**Retries.** The row's attempts counted against caps by failure class, as
-the engine's Retries counts them
+**Retries.** The row's attempts counted against caps by failure class
 ([Work queues](/superschematic/guides/work-queues/#retries)), and the time
 between them (D104). `retries.recordAttempt({ failure?, score?,
 signature?, predicates?, detail? })` records one, a success without
@@ -3453,7 +3707,7 @@ is. A table that implements both Lease and Presence lists
 `Presence.miss` in Lease's `exempt`, or another principal's lease vetoes
 the miss.
 
-**Budget.** Reserve-then-settle meters, as the engine's Budget keeps them
+**Budget.** Reserve-then-settle meters
 ([Work queues](/superschematic/guides/work-queues/#budget)), on the row
 and on the scopes it draws on. The build adds the sub-tables
 `account_budget_meters`, a row per meter with what is used and reserved,
@@ -3509,20 +3763,12 @@ queued, which then changes nothing, and a status moved by hand re-arms no
 miss. Prefer the operations: `lease.release` by a caller with
 `overridePermission`, `lease.resetExpiries`, `budget.setLimit`.
 
-A type that composes these with `@behavior("Lease", ...)` and the like is
-an engine type: its configs have no `status`, Retries' new members,
-`ttlByState` or Budget's new resets, `window` and `observePermission`, it
-has no `observe`, and the build and the engine refuse each, naming the
-table form.
-
 ### A row's seats, and a field that follows observations
 
 A table implements `Seats` as it implements Timers, with the table itself
 as its first type argument, and types a field as a `Reconcile` beside its
 Workflow field, as it types one as a Workflow (D104). The behaviors' core
-alone implements both: no engine does, so neither composes on an engine
-type, and the build refuses `@behavior("Seats", ...)` and
-`@behavior("Reconcile", ...)` naming the table form.
+implements both.
 
 ```ts
 // seats-db
@@ -3737,9 +3983,7 @@ newer than the last.
 A table implements `Schedules` as it implements Seats, with the table
 itself as its first type argument (D104): named schedules on each row,
 each a run after a delay, at every interval, or at each time a cron line
-names, whose runs your code answers. The behaviors' core alone implements
-it: no engine does, so it composes on no engine type, and the build
-refuses `@behavior("Schedules", ...)` naming the table form.
+names, whose runs your code answers. The behaviors' core implements it.
 
 ```ts
 // schedules-db
@@ -3916,14 +4160,15 @@ replaces it, `cancelSchedule`.
 
 A table implements `Recurrence` as it implements Schedules, with the table
 itself as its first type argument (D152): a rule on each row that turns
-into dated occurrences, each opened, reminded, done, missed or skipped.
+into dated occurrences, each opened, reminded, fallen due, done, missed
+or skipped.
 Schedules runs code at times; Recurrence keeps a record of what is due and
 what was done. The behaviors' core alone implements it, and dates every
 language's occurrences alike.
 
 ```ts
 // recurrence-db
-@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing" })
+@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing", permission: "filings.work" })
 export abstract class Filing
   implements
     Recurrence<Filing, {
@@ -3964,9 +4209,9 @@ moves to the next business day.
 | `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent |
 | `holidays` | `{ table, calendarField, dateField, field }`: the holiday table your app fills, and this table's field that names a row's calendar |
 | `relative` | `{ via, type, field }`: the to-one relation, the table it points at, and that table's date field |
-| `opensBefore` | how long before its due an occurrence opens (ISO 8601, `P14D`); with none it opens when the one before it falls due |
-| `remindBefore` | how long before its due an occurrence reminds |
-| `overdueAfter` | how long after its due an open occurrence is missed; at its due when absent |
+| `opensBefore` | how long before its due an occurrence opens, a `Temporal.Period` (ISO 8601, `P14D`); with none it opens when the one before it falls due |
+| `remindBefore` | how long before its due an occurrence reminds, a `Temporal.Period` |
+| `overdueAfter` | how long after its due an open occurrence is missed, a `Temporal.Period`; at its due when absent |
 | `permission` | the permission `complete` and `listOccurrences` need |
 | `managePermission` | the permission `setRecurrence`, `skip` and `moveOne` need; `permission` when absent |
 
@@ -3976,10 +4221,10 @@ The build adds the owned fields `recurrence` (the row's rule as set),
 nominal wall date-time before any adjustment (`2026-10-31T09:00`), with
 `due`, `due_at`, `opens_at`, `remind_at`, `overdue_at`, `state`,
 `revision`, `shifted`, `moved`, `changed_at`, `reminded_at`,
-`completed_at`, `completed_by_table`, `completed_by_key`,
+`fell_due_at`, `completed_at`, `completed_by_table`, `completed_by_key`,
 `completed_by_principal` and `note`; the deadline queue
-`filing_deadline_queue`, where the deadlines `open`, `remind`, `overdue`
-and `plan` wait; and the change queue `filing_change_queue`, through which
+`filing_deadline_queue`, where the deadlines `open`, `remind`, `due`,
+`overdue` and `plan` wait; and the change queue `filing_change_queue`, through which
 a write of the calendar field or the relation plans again. Its operations
 are `recurrence.setRecurrence({ anchor, rule?, start?, every?, offset?,
 timeZone?, adjust? })`, which answers `{ recurrence, planned, kept,
@@ -3991,6 +4236,16 @@ the read-only `listOccurrences({ from?, to?, states? })`.
   until it is `done` or, at its overdue time, `missed`. `skip` finishes one
   that is not done. A missed one can still be completed late, and it never
   blocks the next.
+- **Events.** The run that moves an occurrence on emits its event:
+  `opened`, `reminded`, `due` (its due came while it was neither done nor
+  skipped, recorded in `fell_due_at`) and `missed`. The behavior worker
+  hands each to your `Workers` method (`filingDeadlinesRecurrenceDue`),
+  which can raise it through the notifier as `recurrence.due`. With no
+  `overdueAfter`, `due` and then `missed` come at the same time.
+- **Typed anchors.** A client's types name only the anchors your config
+  takes: `setRecurrence`'s `anchor` is `FilingRecurrenceAnchor`, and it
+  takes no `rule` without the `calendar` anchor, no `offset` without
+  `relative`.
 - **Rule changes.** `setRecurrence` replans only the occurrences that
   have not opened. Open and finished ones stay as they are; `kept` names
   the open ones.
@@ -4014,7 +4269,8 @@ the read-only `listOccurrences({ from?, to?, states? })`.
 
 `@calendarSource` puts a table on the calendar: each row dated by a date
 or date-time `field` (to an `end`), or each occurrence of its Recurrence
-(`occurrences: true`), titled by a field, with a `kind` and a `color` key.
+(`occurrences: true`), titled by a field, with a `kind` and a `color` key,
+and a `permission` a caller needs to see any of its entries.
 `readCalendar(orm, principal, { from, to, sources?, scope? })` from
 `@superschematic/http-runtime/postgres` merges every source in a window.
 It reads each table through its repository as the caller, so a row's
@@ -4033,16 +4289,22 @@ shows only what its owner chose. A feed lasts a year unless its issue says
 otherwise; `POST /api/calendar/feeds/<id>/rotate` revokes it and issues
 another, and `DELETE /api/calendar/feeds/<id>` revokes it.
 
-The generated router mounts neither `calendarRoutes` nor the calendar's
-MCP tool: an app wires them itself, as it wires `grantAuthenticator`
-(`examples/recurring-duties`). Recurrence and the calendar are served end
+A generated TypeScript server of an API over the database mounts
+`calendarRoutes` beside its router and serves the `calendar` tool on its
+MCP endpoint, and puts `grantAuthenticator` in front of the
+implementation's authenticator, which refuses a feed's token on every
+other route. A source's permission is the schema's (`@calendarSource`'s
+`permission`), and the implementation's `createRuntimeOptions` may name
+another for a source, which wins: `calendar: { permissions: { duty:
+"duties.work" } }`. Recurrence and the calendar are served end
 to end by a TypeScript server, a Rust one and a Go one on Postgres, and
 by a TypeScript one on SQLite and D1 too.
 
 A Rust server serves Recurrence on Postgres as the TypeScript one does
 (D188): the router's `recurrence` routes run the operations through the
 behaviors' core, and the behavior worker's generated queues fire the
-`open`, `remind`, `overdue` and `plan` deadlines and hear a raw write. The
+`open`, `remind`, `due`, `overdue` and `plan` deadlines and hear a raw
+write. The
 runtime's `orm::calendar` reads the calendar over the Postgres definition,
 which carries each table's calendar sources:
 
@@ -4055,10 +4317,28 @@ let calendar = read_calendar(Repositories::new(&client)?.untyped(), Some(&princi
 let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_definition), authenticator));
 ```
 
-`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes,
-and `issue_calendar_feed`, `rotate_calendar_feed` and
-`revoke_calendar_feed` are the feed's operations. A Rust server whose
-database lists `sqlite` first is refused Recurrence and a calendar source.
+`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes
+(`CalendarTool`), and `issue_calendar_feed`, `rotate_calendar_feed` and
+`revoke_calendar_feed` are the feed's operations. A generated Rust server
+merges the calendar's routes and serves its tool itself on Postgres (#617).
+
+A Rust server whose database lists `sqlite` first serves Recurrence there
+too (#615): the router's `recurrence` routes run the operations through
+the core in a transaction of the file, and the behavior worker claims on
+it. `orm::calendar::sqlite` holds the same read, feed and routes over the
+SQLite repositories, an occurrences source read by one statement in
+SQLite's words, and each answers at once on the connection it is given:
+
+```rust
+use superschematic_http_runtime::orm::calendar::sqlite::{calendar_routes, read_calendar, CalendarRoutes};
+
+let calendar = database.read(|connection| read_calendar(Repositories::new(connection)?.untyped(), Some(&principal), &read, &CalendarOptions::default()))?;
+// A read on a reading connection; a feed's issue, rotation and revocation on the writing one.
+let routes = calendar_routes(CalendarRoutes::new(types::orm::sqlite::tables(database), authenticator));
+```
+
+A generated Rust server does not mount the calendar's or the search's
+routes over a SQLite file yet; an app merges them into its router.
 
 A Go server serves Recurrence on Postgres as the TypeScript one does
 (D187): its `recurrence` routes run the operations through the behaviors'
@@ -4079,9 +4359,18 @@ router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoute
 `CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
 `IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
 ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
-Go server whose database lists `sqlite` first is refused Recurrence, a
-calendar source and search, and one whose calendar source is titled by an
-`Encrypted<T>` field is refused it.
+stack's Go server mounts `CalendarRoutes` itself at `/api/calendar`,
+behind the API's auth step but for a feed's fetch, with the options its
+implementation's `NewWiring` answers in `Wiring.Calendar`
+([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server));
+with `outputs.api.mcp` on, its MCP endpoint serves the calendar tool
+through `MCPTools`, as the endpoint's caller (#616). A calendar source
+titled by an `Encrypted<T>` field opens each title under the database's
+field keys (`WithFieldKeys`), as its repository's read does. Over a
+database that lists `sqlite`, Recurrence's operations run through the core
+in the SQLite repositories' transactions, and the SQLite database's
+`CrossTables()` reads the calendar and serves its feed on the file
+([Go on SQLite](#go-on-sqlite)).
 
 On SQLite and D1 the `./orm/sqlite` entry's repositories run Recurrence
 through the core as Postgres's do (D186): the `occurrences` sub-table, its
@@ -4104,7 +4393,7 @@ A table implements `Pool` as it implements Schedules (D104): each row is a
 member of a pool, open, near its limit, or out until a time, and `pick`
 chooses one to run work on. Accounts at model vendors, payment
 processors, SMS gateways and API credentials are pools. The behaviors'
-core alone implements it, so it composes on no engine type.
+core implements it.
 
 ```ts
 // pool-db
@@ -4204,7 +4493,11 @@ change queue. A new member is open.
   (`/match/owner: Account has no own field owner (its own fields: name,
   vendor, kind, rank)`). A pick reads at most 2,000 members `match` keeps
   and refuses more (409 `vetoed`, `pool_too_large`, `{ max: 2000 }`):
-  narrow `match`, or pick with code of your own.
+  narrow `match`, or pick with code of your own. On an `@audience` table,
+  or for a caller held to grants, the core still picks among every
+  member, and a member the caller does not see is answered as no member,
+  `{ member: null }`, so its key is never shown: narrow `match` to the
+  members the caller sees, such as `{ owner }`.
 - **The recheck.** An out member's recheck falls due at its `outUntil` on
   the API's [behavior worker](/superschematic/guides/api-routes/#the-worker),
   and then every `recheckAfterMs` while it stays out. Each one writes the
@@ -4344,9 +4637,8 @@ this one (`link`), and a function:
   does not hold (D104's Barrier): a caller's who holds `permission`, and
   the move each of `deadlines`, deadlines of the table's one Timers whose
   `then` moves into a gated state, makes as it falls due. The core holds
-  each named deadline to the Timers config at define. An engine type
-  refuses `exemptions`. A rollup reads the rows that relate to the row 500 at a time,
-  up to 10,000; past that the value is `{ "over": true }` and its gate
+  each named deadline to the Timers config at define. A rollup reads the
+  rows that relate to the row 500 at a time, up to 10,000; past that the value is `{ "over": true }` and its gate
   does not hold.
 - Rollups keeps no column. A read of the row computes its values through
   the core; no repository, route or SDK serves that read yet. Rollups
@@ -4377,8 +4669,8 @@ state when absent) and `satisfiedBy` (`["success"]` when absent).
   blocker of a row in a gated state no transition leaves (`gated`).
 - A blocker that is gone neither blocks nor is listed; its edge stays
   until `removeBlocker` takes it, and deleting a dependent deletes its
-  edges. `listDependents` is an engine type's alone: on a table the rows
-  a row blocks are a query over every table's blockers, and
+  edges. `listDependents`, which the declaration lists, is no table's:
+  the rows a row blocks are a query over every table's blockers, and
   `@behaviorOperations` leaves it out, of which the build warns.
 - Dependencies joins a table with rows, each starting with no blockers,
   and cannot leave one.
@@ -4525,9 +4817,13 @@ as a whole and keyed by its normalized form (`company_name_names`), whose
 `holder` column holds the row's key. So the database holds each name
 unique: a create, a rename or an addAlias that takes a name inserts its
 row, and two that take one name at once never both hold it. A name
-another row holds is refused with that row's key, the veto `name_taken`
-(`details.vetoDetails.holder`), on Postgres, SQLite and D1 alike. A
-removed alias frees its name for any row, and so does a delete of the
+another row holds is refused, the veto `name_taken`, on Postgres, SQLite
+and D1 alike. The refusal says the name is taken and nothing of the row
+that holds it: its details are the name and its normalized form
+(`details.vetoDetails.name` and `.normalized`), with neither the row's
+key nor its fields, since the caller may be one that row is hidden from.
+Ask `resolve` for the row, which answers it to a caller who may read it.
+A removed alias frees its name for any row, and so does a delete of the
 row, through the repository, for all of its names. A name whose holder is
 no live row, deleted past the repository, is taken over by the next row
 that takes it. Aliased cannot be added to a table with rows, nor removed
@@ -4535,10 +4831,22 @@ from one, and its `normalize` stays while the table has rows. A table
 whose behaviors keep such tables has no upserts. A write around the core,
 raw SQL of the name, the aliases or the names, runs none of these rules.
 
+On a table whose rows keep to their caller, an `@audience` table or any
+table for a party or an agent run calling through grants
+([Per-record access](/superschematic/guides/api-routes/#per-record-access)),
+`resolve` answers `{ row: null }` for a name a row the caller may not
+read holds, as for a name no row holds: in a TypeScript operation, under
+Go's `WithPrincipal` and in Rust's repositories opened `with_access`. A
+job, a worker and the system actor read every row. Names stay unique
+across the table whoever holds them, so a caller can learn that a name
+is taken, by a create or a rename that `name_taken` refuses, and never
+which row holds it.
+
 A merge of a table with an Aliased field ([Merging rows](#merging-rows))
 moves the aliases of the row merged away to the row that stays, its name
 among them, and its rows of the names table with them, so a merge frees
-no name and takes none.
+no name and takes none. Those rows are the merged rows' own, so a merge
+under per-record access reads no access of them.
 
 ### A row's conversation
 
@@ -4610,7 +4918,7 @@ and `reopen` are the thread's author's or a holder of
 `resolvePermission`'s. `listMessages` pages the top-level messages, or
 one thread's replies, by `before`, `after` or `around`;
 `getMessage`, `listReactions` and `listPinned` read. Each refusal is
-the engine's, in its words.
+the core's, in its words.
 
 Each caller has a read marker on the conversation and on each thread.
 `markRead` moves it, and `follow` follows a thread or stops (#713). A
@@ -4880,7 +5188,7 @@ the ledger stop agreeing, so do not write them by hand.
 
 What a table does not have yet: `Stock.low` is computed at a read, so a
 list does not filter on it; a Payments event applies once per table and
-provider, where the engine applied it once per namespace.
+provider.
 
 ### Bundles: behaviors with their wiring preset
 

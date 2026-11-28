@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path"
 	"sort"
-	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
@@ -58,12 +57,11 @@ func ImportedDependencies(schema *ir.Schema, deps map[string]*ir.Schema) ([]stri
 }
 
 // DependencyServiceName extracts the service name from a schema import
-// package (e.g. "@schemas/web-db" -> "web-db").
+// package (e.g. "@schemas/web-db" -> "web-db"); it is
+// codegen.DependencyServiceName, under the name the generators outside the
+// type generators call it by.
 func DependencyServiceName(pkg string) string {
-	if idx := strings.LastIndex(pkg, "/"); idx >= 0 {
-		return pkg[idx+1:]
-	}
-	return pkg
+	return codegen.DependencyServiceName(pkg)
 }
 
 // resolveImports classifies every named import in the schema against its
@@ -78,7 +76,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 
 	usedAliases := map[string]struct{}{}
 	aliasByDep := map[string]string{}
-	localSymbols := localSchemaSymbols(schema)
+	localSymbols := codegen.LocalSchemaSymbols(schema)
 	seenEnums := map[string]struct{}{}
 	seenTypes := map[string]struct{}{}
 	seenUnions := map[string]struct{}{}
@@ -90,7 +88,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	})
 
 	for _, imp := range imports {
-		depName := DependencyServiceName(imp.Package)
+		depName := codegen.DependencyServiceName(imp.Package)
 		depSchema, ok := opts.Dependencies[depName]
 		if !ok || depSchema == nil {
 			return nil, fmt.Errorf("typegen: dependency schema %q (package %q) not loaded", depName, imp.Package)
@@ -207,20 +205,6 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	sort.Slice(result.imports, func(i, j int) bool { return result.imports[i].Alias < result.imports[j].Alias })
 
 	return result, nil
-}
-
-func localSchemaSymbols(schema *ir.Schema) map[string]struct{} {
-	symbols := make(map[string]struct{}, len(schema.Enums)+len(schema.Types)+len(schema.Unions))
-	for name := range schema.Enums {
-		symbols[name] = struct{}{}
-	}
-	for name := range schema.Types {
-		symbols[name] = struct{}{}
-	}
-	for name := range schema.Unions {
-		symbols[name] = struct{}{}
-	}
-	return symbols
 }
 
 // addImportedTypeAliases records a dependency type alias and walks nested

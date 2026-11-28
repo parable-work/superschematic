@@ -36,7 +36,7 @@ each links to shows.
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
 | a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite; a key over several fields; a [delay on enqueue](#enqueue-for-later) | `when` rules of `@enqueueOnChange` beyond the literal ones; a delay in an `@enqueueOnChange` trigger |
 | `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill`, on Postgres, SQLite and D1 | |
-| the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1 |
+| the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too; a TypeScript worker's claims on D1 on Workers | |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool, or, for a worker in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes and a schedule ticks; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute, and which an enqueue due before the next firing wakes through its Workflow; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a drain worker over a SQLite file, and a wake from an enqueue there or from a raw SQL write |
@@ -429,11 +429,13 @@ runs, a thread of the drain's own extends its message's claim every half
 of the queue's lease, so a method that runs past its lease keeps its
 message until it answers.
 
-A Worker or a Cron job on Cloudflare enqueues on D1 this way, but no
-worker claims there: a worker on Workers claims on Postgres through
-Hyperdrive ([On Cloudflare](#on-cloudflare)), so an environment that places
-a worker of a queue on D1 does not resolve, and says to list postgres
-first or claim where a SQLite file is the database, as under `stack dev`.
+A Worker or a Cron job on Cloudflare enqueues on D1 this way, and a
+worker on Workers claims there (#702): its `drain.ts` claims over its D1
+binding with `claimsOver`, each claim in the binding's turn with the
+repositories', at each firing of its Cron Trigger and each wake of its
+Workflow, as it claims on Postgres through Hyperdrive
+([On Cloudflare](#on-cloudflare)). A queue on SQLite has no slots and no
+next due time, so a wake's run stops once the queue was idle a while.
 
 ## Write a worker
 
@@ -950,7 +952,8 @@ cloudflare target runs a TypeScript worker as a Worker of its own,
 with the database reached through its Hyperdrive config
 ([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
 and runs the same claim loop `stack dev` runs for a window,
-`WORKER_DRAIN_SECONDS`, 50 seconds unless `drainSeconds` says otherwise;
+`WORKER_DRAIN_SECONDS`, 50 seconds or what the firing's CPU time leaves
+(22 seconds with the defaults), unless `drainSeconds` says otherwise;
 then it stops as a process stops at SIGTERM: it claims no more, lets the
 running handlers finish within the worker's `grace`, and gives back the
 rest. The next firing begins a minute after this one did, so a message
@@ -965,13 +968,13 @@ key, and the backoff, the retention and the dead messages are the
 table's. A firing prunes the done messages as it starts.
 
 ```ts
-settings: [{ of: FinancesApi, worker: "EmbedLineItems", concurrency: 4, drainSeconds: 40 }],
+settings: [{ of: FinancesApi, worker: "EmbedLineItems", concurrency: 4, drainSeconds: 40, cpuMs: 60000 }],
 ```
 
 | Setting | Default | |
 | --- | --- | --- |
 | `concurrency` | the `@worker`'s | how many messages a firing handles at a time, which its version binds as `WORKER_CONCURRENCY` |
-| `drainSeconds` | `50` | how long each firing claims; the window and the `grace` must fit in a Cron Trigger's 15 minutes |
+| `drainSeconds` | `50`, or what `cpuMs` leaves | how long each firing claims; the window and the `grace` must fit in `cpuMs`, so the firing ends before Cloudflare stops it (#600) |
 | `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: a handler's work counts, its waits on the database and on fetches do not |
 | `logs`, `telemetry` | as a job's | Workers Logs, and trace export, a span per message |
 
@@ -1001,8 +1004,10 @@ await enqueue(tx, reminderDue, { reminderId }, { delaySeconds: 30 });
 
 The wake is sent after the enqueue's statement and fails nothing; the
 request's `waitUntil` keeps it going after the response. A worker's own
-enqueues to another worker's queue send none: that worker's next firing
-takes them. A firing that ends with messages left logs `backlog left for
+enqueues to another worker's queue wake that worker too, through its wake
+relay, a Worker that holds the other's Workflow binding so the deploy's
+graph keeps no cycle (#600,
+[Queue workers on Cron Triggers](/superschematic/guides/stacks/#queue-workers-on-cron-triggers)). A firing that ends with messages left logs `backlog left for
 the next firing`, naming the queue.
 
 A deploy migrates the database from the deploying machine

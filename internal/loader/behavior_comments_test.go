@@ -39,7 +39,7 @@ func TestCommentsFixtureLoads(t *testing.T) {
 		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
 	}
 	ticket, review := db.Types["Ticket"], db.Types["Review"]
-	if ticket == nil || ticket.IsEngineType() || !ticket.Optimistic || review == nil || !review.Optimistic {
+	if ticket == nil || len(ticket.TypeBehaviors()) > 0 || !ticket.Optimistic || review == nil || !review.Optimistic {
 		t.Fatalf("Ticket = %s, Review = %s", marshal(t, ticket), marshal(t, review))
 	}
 	if refs := ticket.Behaviors; len(refs) != 1 || refs[0].Name != "Comments" || refs[0].Field != "" ||

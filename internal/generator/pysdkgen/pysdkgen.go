@@ -2,8 +2,8 @@ package pysdkgen
 
 import (
 	"embed"
-	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,10 +12,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/patterndialect"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -320,13 +322,7 @@ type QueryParam struct {
 	IsArray       bool
 	PyElementType string
 
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
+	ir.ValueRules
 
 	// EmptyIsAbsent marks a parameter whose empty value is left out, as
 	// the route reads it: a paged operation's cursor (D60), which an empty
@@ -423,25 +419,13 @@ type MethodParam struct {
 	KeywordsFollow bool
 }
 
-var errToolUnavailable = errors.New("required tool unavailable")
-
-// ToolUnavailableError indicates an external tool is unavailable in PATH.
-type ToolUnavailableError struct {
-	Tool string
-	Err  error
-}
-
-func (e *ToolUnavailableError) Error() string {
-	return fmt.Sprintf("%s is not available: %v", e.Tool, e.Err)
-}
-
-func (e *ToolUnavailableError) Unwrap() error {
-	return errToolUnavailable
-}
+// ToolUnavailableError is codegen's: an external tool missing from PATH,
+// which codegen.IsToolUnavailable recognises.
+type ToolUnavailableError = codegen.ToolUnavailableError
 
 // IsToolUnavailable reports whether an error indicates a missing external tool.
 func IsToolUnavailable(err error) bool {
-	return errors.Is(err, errToolUnavailable)
+	return codegen.IsToolUnavailable(err)
 }
 
 // Generate maps API output metadata to Python SDK metadata.
@@ -613,24 +597,24 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	}
 
 	for name, importSet := range importsByNamespace {
-		namespaceMap[name].Imports = sortedKeys(importSet)
+		namespaceMap[name].Imports = slices.Sorted(maps.Keys(importSet))
 	}
 	for _, namespace := range namespaceMap {
 		setPageType(namespace)
 	}
 	for name, jsonTypes := range jsonTypesByNamespace {
 		if len(jsonTypes) > 0 {
-			namespaceMap[name].JSONValueTypes = sortedKeys(jsonTypes)
+			namespaceMap[name].JSONValueTypes = slices.Sorted(maps.Keys(jsonTypes))
 		}
 	}
 	for name, unions := range unionsByNamespace {
 		if len(unions) > 0 {
-			namespaceMap[name].UnionOutputTypes = sortedKeys(unions)
+			namespaceMap[name].UnionOutputTypes = slices.Sorted(maps.Keys(unions))
 		}
 	}
 	for name, unions := range unionArgsByNamespace {
 		if len(unions) > 0 {
-			namespaceMap[name].UnionArgumentTypes = sortedKeys(unions)
+			namespaceMap[name].UnionArgumentTypes = slices.Sorted(maps.Keys(unions))
 		}
 	}
 
@@ -647,16 +631,6 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	output.Namespaces = namespaces
 
 	return output, nil
-}
-
-// sortedKeys returns the keys of set, sorted.
-func sortedKeys(set map[string]struct{}) []string {
-	keys := make([]string, 0, len(set))
-	for key := range set {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func collectNamespaceImports(target map[string]struct{}, endpoint apigen.EndpointInfo) {
@@ -710,20 +684,14 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			pyType = pythonListType(pyType, 1)
 		}
 		queryParams = append(queryParams, QueryParam{
-			Name:              param.Name,
-			PyName:            toPythonIdentifier(param.Name),
-			PyType:            pyType,
-			Required:          param.Required,
-			IsArray:           param.IsArray,
-			PyElementType:     pyElementType,
-			ValidateMin:       param.ValidateMin,
-			ValidateMax:       param.ValidateMax,
-			ValidateMinLength: param.ValidateMinLength,
-			ValidateMaxLength: param.ValidateMaxLength,
-			ValidateListMin:   param.ValidateListMin,
-			ValidateListMax:   param.ValidateListMax,
-			ValidatePattern:   param.ValidatePattern,
-			Paging:            param.Sort != nil,
+			Name:          param.Name,
+			PyName:        toPythonIdentifier(param.Name),
+			PyType:        pyType,
+			Required:      param.Required,
+			IsArray:       param.IsArray,
+			PyElementType: pyElementType,
+			ValueRules:    param.ValueRules,
+			Paging:        param.Sort != nil,
 		})
 	}
 	// The filter (D106) is a keyword after the operation's own query
@@ -1410,12 +1378,15 @@ func WriteSDK(output *SDKOutput, outputDir string) error {
 }
 
 func generateFile(templateName, outputPath string, data interface{}) error {
-	return codegen.GenerateFile(codegen.NewFileConfig(templatesFS, templateName, outputPath, data, nil))
+	// A schema pattern is RE2's syntax: the SDK holds it rewritten so re
+	// matches what RE2 matches (patterndialect).
+	funcs := template.FuncMap{"pythonPattern": patterndialect.Python}
+	return codegen.GenerateFile(codegen.NewFileConfig(templatesFS, templateName, outputPath, data, funcs))
 }
 
 // FormatSDK runs ruff format on the generated Python SDK files.
 func FormatSDK(outputDir string) error {
-	if err := runTool(outputDir, "ruff", "format", outputDir); err != nil {
+	if err := codegen.RunTool(outputDir, "ruff", "format", outputDir); err != nil {
 		return fmt.Errorf("format python sdk with ruff: %w", err)
 	}
 
@@ -1429,7 +1400,7 @@ func CompileSDK(outputDir string) error {
 		return err
 	}
 
-	if err := runTool(outputDir, python, "-m", "compileall", "-q", outputDir); err != nil {
+	if err := codegen.RunTool(outputDir, python, "-m", "compileall", "-q", outputDir); err != nil {
 		return fmt.Errorf("python syntax validation failed: %w", err)
 	}
 
@@ -1443,7 +1414,7 @@ func CompileSDK(outputDir string) error {
 
 	for _, packageDir := range packageDirs {
 		moduleName := filepath.Base(packageDir)
-		if err := runTool(
+		if err := codegen.RunTool(
 			outputDir,
 			python,
 			"-c",
@@ -1553,23 +1524,4 @@ func discoverPythonPackageDirs(outputDir string) ([]string, error) {
 	}
 
 	return packages, nil
-}
-
-func runTool(workingDir string, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Dir = workingDir
-	output, err := cmd.CombinedOutput()
-	if err == nil {
-		return nil
-	}
-
-	var execErr *exec.Error
-	if errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound) {
-		return &ToolUnavailableError{
-			Tool: name,
-			Err:  execErr,
-		}
-	}
-
-	return fmt.Errorf("%s %s failed: %w (output: %s)", name, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 }

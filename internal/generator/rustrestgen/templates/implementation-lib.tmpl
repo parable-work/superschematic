@@ -35,11 +35,11 @@
 //! Each manual route answers 501 until you implement its handler.
 {{- end }}
 {{- $async := .Async }}
-{{ if or .WebhookProviders $async }}
+{{ if or .WebhookProviders $async .HasWiring }}
 {{- if .WebhookProviders }}
 use std::collections::HashMap;
 {{- end }}
-{{- if $async }}
+{{- if or $async .HasWiring }}
 use std::sync::Arc;
 {{- end }}
 {{ end }}
@@ -235,6 +235,21 @@ impl Workers for {{ .WorkersStruct }} {
     }
 {{- end }}
 }
+{{- end }}
+{{- if .HasWiring }}
+
+/// Builds the Wire that shapes the runtime parts of {{ .Deps.Database }} the server
+/// builds (#620, #622, #617, #610){{ if .Wiring.Notifier }}: the notifier's reply actions{{ end }}{{ if .Wiring.Agents }}, the agent
+/// dispatcher's endpoint and tools{{ end }}. Each method of Wire is handed a part as the
+/// server built it, and its default keeps it so.
+pub async fn create_wiring(_deps: &WiringDeps) -> Result<Arc<dyn Wire>, BoxError> {
+    Ok(Arc::new({{ .WiringStruct }}))
+}
+
+/// Implements Wire, each part as the server builds it.
+pub struct {{ .WiringStruct }};
+
+impl Wire for {{ .WiringStruct }} {}
 {{- end }}
 {{- if .HasDerivers }}
 

@@ -2,10 +2,13 @@ package rules
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The conversions between the core's JSON and a column's value: the UUID
@@ -50,9 +53,9 @@ func TestUUIDCodec(t *testing.T) {
 			t.Errorf("uuidToColumn(%q) = %q, want a refusal", bad, got)
 		}
 	}
-	raw := randomUUID()
-	if raw[6]>>4 != 4 || raw[8]>>6 != 2 {
-		t.Errorf("randomUUID() = %x, want a version 4 variant 1 UUID", raw)
+	raw := uuid.New()
+	if column := hyphenatedBytes(raw); column != raw.String() {
+		t.Errorf("hyphenatedBytes(%x) = %q, want %q", raw, column, raw.String())
 	}
 	wire := base62(new(big.Int).SetBytes(raw[:]))
 	if column, err := uuidToColumn(wire); err != nil || column != hyphenatedBytes(raw) {
@@ -204,6 +207,116 @@ func TestFromColumn(t *testing.T) {
 	}
 	if _, _, err := fromColumn("o-1", id, convertTable); err == nil {
 		t.Error("a UUID column read a value that is no UUID")
+	}
+}
+
+// A list column both ways (D156): each form a driver scans a list in, and
+// each a dialect binds one in.
+func TestListColumns(t *testing.T) {
+	ids := Column{Field: "effectiveAudience", Column: "effective_audience", Type: "Identity.UUID", List: true}
+	tags := Column{Field: "tags", Column: "tags", Type: "string", List: true}
+	counts := Column{Field: "counts", Column: "counts", Type: "number", List: true}
+	lines := Column{Field: "lines", Column: "lines", Type: "Line", List: true}
+	// An unmarked UUID column, as a layout written before list.
+	unmarked := Column{Field: "ownerId", Column: "owner_id", Type: "Identity.UUID"}
+	const (
+		wire   = "6fe1XoZ0UJpMNNdUOSMC2X"
+		column = "db360f43-5530-c407-56da-9cd8e0c971dd"
+	)
+	var uuidBytes [16]byte
+	copy(uuidBytes[:], []byte{0xdb, 0x36, 0x0f, 0x43, 0x55, 0x30, 0xc4, 0x07, 0x56, 0xda, 0x9c, 0xd8, 0xe0, 0xc9, 0x71, 0xdd})
+
+	reads := []struct {
+		value  any
+		column Column
+		want   string
+	}{
+		// pgx's uuid[], text[] and bigint[].
+		{[]any{uuidBytes, nil}, ids, `["` + wire + `",null]`},
+		{[]any{uuidBytes}, unmarked, `["` + wire + `"]`},
+		{[]any{}, ids, `[]`},
+		{[]any{"red", "blue"}, tags, `["red","blue"]`},
+		{[]any{int64(2), 1.5}, counts, `[2,1.5]`},
+		// SQLite's JSON text, a hyphenated UUID or a base62 one.
+		{`["` + column + `","` + wire + `"]`, ids, `["` + wire + `","` + wire + `"]`},
+		{[]byte(`["red"]`), tags, `["red"]`},
+		{`[2, 12.50]`, counts, `[2,12.50]`},
+		// A jsonb list, the core's as it is.
+		{json.RawMessage(`[{"sku":"desk","quantity":1}]`), lines, `[{"sku":"desk","quantity":1}]`},
+		// A slice of another element type.
+		{[]string{column}, ids, `["` + wire + `"]`},
+	}
+	for _, c := range reads {
+		got, present, err := fromColumn(c.value, c.column, convertTable)
+		if err != nil || !present || string(got) != c.want {
+			t.Errorf("fromColumn(%#v, %s) = %s, %v, %v; want %s", c.value, c.column.Field, got, present, err, c.want)
+		}
+	}
+	for _, bad := range []struct {
+		value  any
+		column Column
+		want   string
+	}{
+		{`not a list`, tags, `rules: Order.tags: "not a list" is no list`},
+		{int64(3), tags, `rules: Order.tags: a int64 is no list`},
+		{[]any{"o-1"}, ids, `rules: "o-1" is no UUID, hyphenated or base62`},
+	} {
+		_, _, err := fromColumn(bad.value, bad.column, convertTable)
+		message := ""
+		if refusal, ok := AsRefusal(err); ok {
+			message = refusal.Message
+		} else if err != nil {
+			message = err.Error()
+		}
+		if message != bad.want {
+			t.Errorf("fromColumn(%#v, %s) = %v, want %s", bad.value, bad.column.Field, err, bad.want)
+		}
+	}
+
+	text := func(s string) *string { return &s }
+	binds := []struct {
+		raw      string
+		column   Column
+		postgres any
+		sqlite   any
+	}{
+		{`["` + wire + `", "` + column + `", null]`, ids, []*string{text(column), text(column), nil}, `["` + column + `","` + column + `",null]`},
+		{`["` + wire + `"]`, unmarked, []*string{text(column)}, `["` + column + `"]`},
+		{`[]`, ids, []*string{}, `[]`},
+		{`["red", "blue"]`, tags, []*string{text("red"), text("blue")}, `["red","blue"]`},
+		{`[2, 1.5, true, null]`, counts, []any{int64(2), 1.5, true, nil}, `[2,1.5,true,null]`},
+		{`[{"sku": "desk"}]`, lines, `[{"sku":"desk"}]`, `[{"sku":"desk"}]`},
+	}
+	for _, c := range binds {
+		for _, dialect := range []Dialect{DialectPostgres, DialectSQLite} {
+			want := c.postgres
+			if dialect == DialectSQLite {
+				want = c.sqlite
+			}
+			got, err := toColumn(json.RawMessage(c.raw), c.column, convertTable, dialect)
+			if err != nil {
+				t.Errorf("%s: toColumn(%s, %s) = %v", dialect, c.raw, c.column.Field, err)
+				continue
+			}
+			if gotJSON, wantJSON := jsonText(got), jsonText(want); gotJSON != wantJSON || fmt.Sprintf("%T", got) != fmt.Sprintf("%T", want) {
+				t.Errorf("%s: toColumn(%s, %s) = %T %s, want %T %s", dialect, c.raw, c.column.Field, got, gotJSON, want, wantJSON)
+			}
+		}
+	}
+	for _, bad := range []struct {
+		raw    string
+		column Column
+		want   string
+	}{
+		{`"red"`, tags, `rules: Order.tags: "red" is no list`},
+		{`{"a": 1}`, ids, `rules: Order.effectiveAudience: {"a":1} is no list of UUIDs`},
+		{`["o-1"]`, ids, `rules: Order.effectiveAudience: ["o-1"] is no list of UUIDs: rules: "o-1" is no UUID, hyphenated or base62`},
+		{`[1]`, ids, `rules: Order.effectiveAudience: [1] is no list of UUIDs`},
+	} {
+		_, err := toColumn(json.RawMessage(bad.raw), bad.column, convertTable, DialectPostgres)
+		if refusal, ok := AsRefusal(err); !ok || refusal.Code != CodeInternal || refusal.Message != bad.want {
+			t.Errorf("toColumn(%s, %s) = %v, want %s", bad.raw, bad.column.Field, err, bad.want)
+		}
 	}
 }
 

@@ -14,12 +14,13 @@ guide covers them in full.
 | `providers/sms-relay-a` | A channel adapter for an SMS relay that takes JSON with a Bearer token and posts back signed delivery statuses and replies; it fetches a text's photos and reads STOP and START (D157) |
 | `providers/sms-relay-b` | A second SMS channel adapter, for a relay of another shape: form posts under an account with basic authentication, send-only |
 | `providers/mail-relay` | A channel adapter for a mail relay that takes JSON with a Bearer token; `examples/notifications` sends email and password reset codes through it (D153), and `examples/parties` reads the mail it received, with its SPF, DKIM and DMARC results, threading headers and attachments (D157) |
+| `providers/chat-bridge` | A channel adapter for a messaging network whose inbound side is a bridge that connects outward: the app sends through the network's API, and the bridge (`runBridge`) relays what the network received to the app's inbound route with a key that can only relay messages (D157) |
 | `providers/vault-broker` | A credential provider over a password manager's service API: items named by secret reference, `vault://<vault>/<item>/<field>`, scoped to the vaults its config names |
 | `providers/local-sandbox` | A sandbox provider that runs each run's instance as a local process: a stub, not an isolation boundary |
 | `providers/stub-model` | A model provider whose answers follow from the turn |
 | `providers/text-preview` | A file processor with no dependency: the text of plain text and Markdown with an SVG preview, and a thumbnail of a greyscale PGM image |
 | `schemas/services/notes-db` | DB: notes, which raise `note.changed`, and the notifier's tables (D153), so every environment that runs notes-api needs a channel adapter |
-| `schemas/services/notes-api` | API over notes-db. Its config lists the six packages under `providers`, and `NotesApiConfig` names five slots with `@providers`: `SMS`, `VAULT`, `RUNNER`, `MODEL` and `PREVIEWS`, each with the settings fields after it |
+| `schemas/services/notes-api` | API over notes-db. Its config lists six of the packages under `providers`, and `NotesApiConfig` names five slots with `@providers`: `SMS`, `VAULT`, `RUNNER`, `MODEL` and `PREVIEWS`, each with the settings fields after it |
 | `schemas/services/notes-stack` | The stack: `Dev`, on this machine, sends SMS through sms-relay-a and names every slot; `Cloudflare` sends through sms-relay-b and names no vault, sandbox or model |
 | `src/app.ts` | The server's wiring: `notesProviders`, which reads the providers a loaded config names with `providersFrom`, and `sendNotice` and `receiveReplies`, which send through and read from whichever adapter `SMS` names |
 | `test/providers.test.ts` | Each provider against a stub service behind a fetch the test gives: the same notice through either relay with only the config changed, signed replies read as the adapter's own principal, the broker's list and a browser fill with no value in any log or record, a sandbox run and a cancel, a tool call, and text and previews from `fixtures/` |
@@ -47,6 +48,20 @@ guide covers them in full.
 - **A provider acts as itself.** Every call into a provider runs within
   its principal, `extension:<name>`, with the narrow role its package
   declares: sms-relay-a's is `messages.relay`.
+
+## Use a real service
+
+The packages here run with no account: the sandbox runs a local process,
+the model is a stub, and the tests put a stand-in behind every other
+provider's HTTP client. An app that wants a container runtime, a model
+API, or a channel of another shape writes a provider package for it,
+starting from the package here of the same interface, which serves as its
+skeleton. The runtime providers guide's
+[Set up your own provider](https://parable-work.github.io/superschematic/guides/runtime-providers/#set-up-your-own-provider)
+gives the steps for each interface, in TypeScript, Go and Rust: the
+members and what each must do, the manifest, the API's providers, its
+settings and secrets per environment, swapping it for the stub in one
+environment alone, and its tests.
 
 ## Run it
 

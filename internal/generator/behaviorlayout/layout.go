@@ -151,6 +151,10 @@ type Layout struct {
 	// hands them to its core (the bindings' declare) before it checks the
 	// layout's specs. Absent when no use names one.
 	Declarations []json.RawMessage `json:"declarations,omitempty"`
+	// Permissions is where an adapter answers the core's permissions read
+	// (D200): the schema's identity tables; absent for a schema with none,
+	// or whose tables compose no Approvals.
+	Permissions *Permissions `json:"permissions,omitempty"`
 }
 
 // Table is the layout of one table that composes behaviors: where the core's
@@ -444,6 +448,14 @@ type Operation struct {
 	// declaration's scope "schema": a repository method that takes no key,
 	// which the adapters run as a command without a row.
 	Table bool `json:"table,omitempty"`
+	// AnswersRow is, of an operation of the table as a whole, the member of
+	// its answer that names one of the table's rows, an object whose key is
+	// the row's key in its wire form, or null for none (Aliased's resolve:
+	// row; registry.TableOperationRow). The core reads every row, so the
+	// adapters keep it to the caller (D156): to one who may not read the
+	// row, they answer null there, as for an answer of no row. Empty for any
+	// other operation.
+	AnswersRow string `json:"answersRow,omitempty"`
 }
 
 // TypeSpec is the type as the core runs it: superschematic_rules::TypeSpec
@@ -672,6 +684,9 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 		return nil, err
 	}
 	layout.Declarations = declarations
+	if layout.Permissions, err = permissionsOf(schema); err != nil {
+		return nil, err
+	}
 	// A table a use reads beside its own row's (registry.BehaviorReads:
 	// Recurrence's holidays and relative target, D152) that composes no
 	// behavior is in the layout read-only, so an adapter answers the core's
@@ -870,7 +885,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			case "", registry.OperationScopeInstance:
 				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes})
 			case registry.OperationScopeSchema:
-				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes, Table: true})
+				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes, Table: true, AnswersRow: registry.TableOperationRow(ref.Name, op.Name)})
 			}
 		}
 		for _, declared := range behavior.Tables {

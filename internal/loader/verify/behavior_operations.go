@@ -49,13 +49,14 @@ func BehaviorOperationsMessage(set *ir.OperationSet, problem BehaviorOperationsP
 
 // SetClauseMessage words the refusal of decorator (@auth,
 // @requirePermission or @publicRoute) on the class of set, which is
-// neither @behaviorOperations nor @graphOperations: on every other set the
-// user clause is each operation's (D103, D138).
+// none of @behaviorOperations, @graphOperations, @rowFeatureOperations
+// and @triageOperations: on every other set the user clause is each
+// operation's (D103, D138, #723, #746).
 func SetClauseMessage(set *ir.OperationSet, decorator string) string {
 	if decorator == "@auth" {
-		return fmt.Sprintf("%s: @auth on a class applies only to a @behaviorOperations or @graphOperations set; extend Authenticated, or put @auth on each method of %s", set.Name, set.Name)
+		return fmt.Sprintf("%s: @auth on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; extend Authenticated, or put @auth on each method of %s", set.Name, set.Name)
 	}
-	return fmt.Sprintf("%s: %s on a class applies only to a @behaviorOperations or @graphOperations set; put it on each method of %s", set.Name, decorator, set.Name)
+	return fmt.Sprintf("%s: %s on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; put it on each method of %s", set.Name, decorator, set.Name)
 }
 
 // CheckBehaviorOperations runs the checks of the API's @behaviorOperations
@@ -89,9 +90,11 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 			sets = append(sets, set)
 			continue
 		}
-		if set.IsGraphOperations() {
-			// A @graphOperations set takes the clause too (D138), and
-			// its own checks hold it (checkGraphOperations).
+		if set.IsGraphOperations() || set.IsRowFeatureOperations() || set.IsTriageOperations() {
+			// A @graphOperations set takes the clause too (D138), and so
+			// does a @rowFeatureOperations set (#723): their own checks
+			// hold it (checkGraphOperations, checkRowFeatureOperations),
+			// and so does a @triageOperations set's (#746).
 			continue
 		}
 		if set.Auth {
@@ -480,9 +483,6 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 		return nil, false
 	case td.Role != ir.RoleDBTable || td.JsonField:
 		r.errorf("", "%s: @behaviorOperations names %s, which is not a table of %s: a set serves a table one of whose fields is a behavior (D103)", set.Name, typeName, db.Name)
-		return nil, false
-	case td.IsEngineType():
-		r.errorf("", "%s: @behaviorOperations names %s, an engine type of %s (D58), whose engine serves its operations; a set serves a table one of whose fields is a behavior (D103)", set.Name, typeName, db.Name)
 		return nil, false
 	case len(td.TableBehaviors()) == 0:
 		r.errorf("", "%s: @behaviorOperations names %s, a table of %s that composes no behavior; a set serves a table that does, such as status: Workflow<{ ... }> or implements Timers<%s, { ... }> (D103)", set.Name, typeName, db.Name, typeName)

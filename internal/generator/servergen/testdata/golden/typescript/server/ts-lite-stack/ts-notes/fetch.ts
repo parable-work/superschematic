@@ -34,7 +34,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { binding, perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
+import { binding, perIsolate, requestIP, stackEnvOf, installQueueWakes, queueWakesSettled } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import { ping, type SqlDatabase } from '@superschematic/http-runtime/d1';
 import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
@@ -58,6 +58,11 @@ interface ExecutionContext {
 // Each API's config as Cloudflare loads the version, from the string
 // bindings: a refused config throws here, and Cloudflare refuses the version.
 configure('ts-notes', () => tsNotesApi.loadEnvConfig(stackEnvOf(env)));
+
+// The wakes the server's writes send (D145, D151), as its QUEUE_WAKES binding
+// names them: an enqueue, a deadline or an event due before the next firing
+// of a worker's Cron Trigger starts a run of the worker's Workflow.
+installQueueWakes(env);
 
 /** Builds the server from the Worker's bindings, once per isolate. */
 async function build(): Promise<Handle> {
@@ -118,8 +123,9 @@ export default {
     try {
       return await handle(request);
     } finally {
-      // The spans the request ended go out after its response.
-      ctx.waitUntil(telemetry.flush());
+      // The wakes the request sent and the spans it ended go out after its
+      // response.
+      ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
     }
   },
 };

@@ -136,7 +136,6 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: true, Template: "index.tmpl", Filename: "index.ts"},
 		{Condition: true, Template: "readme.tmpl", Filename: "README.md"},
 		{Condition: output.IdentityDescriptor != "", Template: "identity.tmpl", Filename: "identity.ts"},
-		{Condition: output.EngineDocument != "", Template: "engine.tmpl", Filename: "engine.ts"},
 		{Condition: len(output.StateMachines) > 0, Template: "state_machines.tmpl", Filename: StateMachinesFile},
 		{Condition: len(output.Queues) > 0, Template: "queues.tmpl", Filename: QueuesFile},
 		{Condition: output.ORM != nil, Template: "orm.tmpl", Filename: ORMFile},
@@ -166,7 +165,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 	for i := range output.Scalars {
 		scalar := &output.Scalars[i]
 		scalarTasks = append(scalarTasks, func() error {
-			outPath := filepath.Join(validatorsDir, "scalars", scalar.Module+".ts")
+			outPath := filepath.Join(validatorsDir, "scalars", scalar.Module()+".ts")
 			data := struct {
 				Scalar *ScalarInfo
 				Module *ModuleOutput

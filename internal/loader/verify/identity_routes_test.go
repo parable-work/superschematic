@@ -33,9 +33,62 @@ func TestUserModelRoutes(t *testing.T) {
 		api  func(s *ir.Schema)
 		db   func(db *ir.Schema)
 		noDB bool
+		in   func(in *Input)
 		want string
 	}{
 		{name: "the valid routes"},
+
+		// @userSessions({ oauth }) (#695).
+		{
+			name: "oauth in a TypeScript server that serves MCP",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.OAuth = &ir.IdentityOAuthConfig{} },
+			in:   func(in *Input) { in.TypeScriptServer, in.MCPServer = true, true },
+		},
+		{
+			name: "oauth with no server output",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.OAuth = &ir.IdentityOAuthConfig{} },
+		},
+		{
+			name: "oauth without the login",
+			api: func(s *ir.Schema) {
+				cfg := sessions(s).UserSessions
+				cfg.NoLogin, cfg.Register, cfg.OAuth = true, false, &ir.IdentityOAuthConfig{}
+			},
+			want: "Account: @userSessions: oauth needs the login, since a person signs in to consent; drop oauth or login: false",
+		},
+		{
+			name: "oauth in a TypeScript server without MCP",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.OAuth = &ir.IdentityOAuthConfig{} },
+			in:   func(in *Input) { in.TypeScriptServer = true },
+			want: "Account: @userSessions oauth signs clients in to the API's MCP endpoint, which this API does not serve; set outputs.api.mcp: true, or drop oauth",
+		},
+		{
+			name: "oauth in a Go server",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.OAuth = &ir.IdentityOAuthConfig{} },
+			in:   func(in *Input) { in.GoServer = true },
+			want: "Account: @userSessions oauth: the Go server does not serve an OAuth authorization server yet (#695)",
+		},
+		{
+			name: "oauth in a Rust server",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.OAuth = &ir.IdentityOAuthConfig{} },
+			in:   func(in *Input) { in.RustOutput, in.MCPServer = "outputs.api.language: rust", true },
+			want: "Account: @userSessions oauth: the Rust server does not serve an OAuth authorization server yet (#695)",
+		},
+		{
+			name: "oauth with an access token that outlives its refresh token",
+			api: func(s *ir.Schema) {
+				sessions(s).UserSessions.OAuth = &ir.IdentityOAuthConfig{AccessTokenTTLSeconds: 7200, RefreshTokenTTLSeconds: 3600, GrantMaxTTLSeconds: 86400}
+			},
+			want: "Account: @userSessions oauth: an access token's lifetime (7200 s) must be shorter than a refresh token's (3600 s)",
+		},
+		{
+			name: "oauth with no kind of client",
+			api: func(s *ir.Schema) {
+				off := false
+				sessions(s).UserSessions.OAuth = &ir.IdentityOAuthConfig{Clients: &ir.IdentityOAuthClients{MetadataDocuments: &off, Registration: &off}}
+			},
+			want: "Account: @userSessions oauth.clients turns off both kinds of client, so no client could connect; keep metadataDocuments or registration",
+		},
 		{name: "sessions alone, without a UserRole table", api: func(s *ir.Schema) { s.OperationSets = s.OperationSets[:1] }, db: func(db *ir.Schema) { delete(db.Types, "Role") }},
 		{name: "a path of segments", api: func(s *ir.Schema) {
 			sessions(s).UserSessions.Path = "v1/account"
@@ -403,6 +456,9 @@ func TestUserModelRoutes(t *testing.T) {
 				tc.api(api)
 			}
 			var in Input
+			if tc.in != nil {
+				tc.in(&in)
+			}
 			if !tc.noDB {
 				in.AuthDB = userModel()
 				if tc.db != nil {

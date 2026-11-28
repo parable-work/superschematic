@@ -119,12 +119,6 @@ fn open_bucket(
 {{ rustLetCall .Var "open_file" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
 {{- end }}
 {{- end }}
-{{- range .Engines }}
-
-    // The engine of {{ .Service }}, an engine database (D58), opened in the
-    // background for the API's Deps; the servers deploy its document.
-{{ $.OpenLet . }}
-{{- end }}
 {{- if .Clients }}
 
     // One client per API called.
@@ -149,18 +143,18 @@ fn open_bucket(
 {{- end }}
 
     // {{ $api.Service }}: its {{ .Kind }}s, built from its Deps.
+{{- if $api.Wiring }}
+{{ $api.WiringLets }}
+{{- end }}
     let {{ $api.Deps }} = {{ $api.Alias }}::Deps {
 {{- if $api.Providers }}
-        providers: std::sync::Arc::new(configure({{ rustString $api.Service }}, {{ $api.Alias }}::providers::from_config(&{{ $api.Config }}))?),
+        providers: {{ $api.ProvidersInit }},
 {{- end }}
 {{- if $api.Config }}
         config: {{ $api.Config }},
 {{- end }}
 {{- if $api.Database }}
-        db: {{ $api.Database.Var }}{{ if or .Worker .DeriverOfTables }}.clone(){{ end }},
-{{- end }}
-{{- with $api.Engine }}
-        engine: {{ .Var }}.clone(),
+        db: {{ $api.Database.Var }}{{ if or .Worker .Deriver }}.clone(){{ end }},
 {{- end }}
 {{- range $api.Calls }}
         {{ .Field }}: {{ .Client.Var }},
@@ -170,6 +164,9 @@ fn open_bucket(
 {{- end }}
 {{- range $api.MemoryStores }}
         {{ .Field }}: Arc::clone(&{{ .Store.Var }}),
+{{- end }}
+{{- range $api.WiredFields }}
+{{ . }}
 {{- end }}
         span: logging::api_span({{ rustString $api.Service }}),
     };

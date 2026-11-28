@@ -1,0 +1,819 @@
+{
+  "comment": "The OAuth authorization server's pure parts (#695). tokens: an access token's and a refresh token's text from bytes (hex), and the hash a row keeps of each. credentials: what extractCredential reads of headers with the cookie named session. config: the identity config's oauth member read as the identity_parity.json config section reads a config, want null for a refusal. pkce: whether a verifier answers a challenge under S256, and the challenge of each verifier in verifiers. redirects: whether given is one of registered, the port ignored on loopback. redirectKinds: whether a URI is a redirect a client may name, and whether it is loopback. publicBases: the API's public base from the config and the request. metadata: the protected resource and authorization server metadata, the discovery paths, and the MCP endpoint's challenge without and with a refused token. scopes: a scope's names, null for one refused. metadataUrls: why a client_id is no metadata document's URL, null for one that is. privateAddresses: whether a metadata document's fetch refuses an address. cacheSeconds: how long a document is kept for a Cache-Control. runtime/http/typescript's src/identity/oauth-parity.test.ts writes the wants with OAUTH_PARITY_WRITE=1.",
+  "tokens": [
+    {
+      "bytes": "0000000000000000000000000000000000000000000000000000000000000000",
+      "access": "oat_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "accessHash": "3018786920f6c66f1bc6305f10aaeb503c70d1987f89f4e9c51829528ab72554",
+      "refresh": "ort_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "refreshHash": "8157080bd062cfefe5ba404bb1dc36d07f445cc3de89062d37bfec3bc249d35d"
+    },
+    {
+      "bytes": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "access": "oat___________________________________________8",
+      "accessHash": "ade5e769c7b1753c23fac07a8ea29efc0aff884b2d94831e85b92163653a6a62",
+      "refresh": "ort___________________________________________8",
+      "refreshHash": "3fdeedf5efe012b17f041f42edfbea388eec4bb26866d37d6af41b8c026e7076"
+    },
+    {
+      "bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "access": "oat_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "accessHash": "c1c52ae3f3cac83500a52600878295f73efa5426ec2b35e2bb6d66e1334aebe4",
+      "refresh": "ort_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "refreshHash": "6e420790f39c93bea59c9ea0cc3c5cd4a02d0a1e83f0d556e09aca3b71e45d90"
+    }
+  ],
+  "credentials": [
+    {
+      "name": "an access token is a bearer credential",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer oat_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ]
+      ],
+      "want": {
+        "outcome": "usable",
+        "transport": "bearer",
+        "token": "oat_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "apiKey": false
+      }
+    },
+    {
+      "name": "a refresh token is refused as a bearer credential",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer ort_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an access token one character short is refused",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer oat_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an access token with a character outside base64url is refused",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer oat_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an access token prefix in upper case is refused",
+      "headers": [
+        [
+          "Authorization",
+          "Bearer OAT_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "bearer",
+        "token": null,
+        "apiKey": false
+      }
+    },
+    {
+      "name": "an access token in the cookie is refused",
+      "headers": [
+        [
+          "Cookie",
+          "session=oat_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ]
+      ],
+      "want": {
+        "outcome": "invalid",
+        "transport": "cookie",
+        "token": null,
+        "apiKey": false
+      }
+    }
+  ],
+  "config": [
+    {
+      "name": "no oauth member",
+      "input": {},
+      "want": {
+        "publicBaseUrl": ""
+      }
+    },
+    {
+      "name": "a public base URL under a site",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com/api/notes"
+        }
+      },
+      "want": {
+        "publicBaseUrl": "https://app.example.com/api/notes"
+      }
+    },
+    {
+      "name": "a public base URL on loopback over http",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "http://127.0.0.1:4000"
+        }
+      },
+      "want": {
+        "publicBaseUrl": "http://127.0.0.1:4000"
+      }
+    },
+    {
+      "name": "http elsewhere is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "http://app.example.com"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "a trailing slash is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com/"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an unknown member is refused",
+      "input": {
+        "oauth": {
+          "issuer": "https://app.example.com"
+        }
+      },
+      "want": null
+    }
+  ],
+  "verifiers": [
+    {
+      "verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      "challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+    },
+    {
+      "verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "challenge": "ZtNPunH49FD35FWYhT5Tv8I7vRKQJ8uxMaL0_9eHjNA"
+    },
+    {
+      "verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "challenge": "aDbPE7rEAOkQUHHNavRwhN-srU5eMCyUv-0k4BOvtz4"
+    },
+    {
+      "verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~",
+      "challenge": "ViXENzuL5KYDfitXtFOFLFT58KAyvipc8Dbxfncf5Qc"
+    }
+  ],
+  "pkce": [
+    {
+      "verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      "challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      "want": true
+    },
+    {
+      "verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      "challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cN",
+      "want": false
+    },
+    {
+      "verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "challenge": "elOGB_2quSlplZKfRRVlu7gULhhEEXMiqv0rPXawGv8",
+      "want": false
+    },
+    {
+      "verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "challenge": "wSywJKLlVRzKDgj86PHF4xRVXMP-9jKe6ZSj23UhZq4",
+      "want": false
+    },
+    {
+      "verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!",
+      "challenge": "eejtYKWJY_EVRpWyQ5uVYYEekHJHZ8_ubIlUxhzqIMA",
+      "want": false
+    },
+    {
+      "verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "challenge": "short",
+      "want": false
+    }
+  ],
+  "redirects": [
+    {
+      "registered": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "given": "https://claude.ai/api/mcp/auth_callback",
+      "want": true
+    },
+    {
+      "registered": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "given": "https://claude.ai/api/mcp/auth_callback/",
+      "want": false
+    },
+    {
+      "registered": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "given": "https://claude.ai/api/mcp/auth_callback?x=1",
+      "want": false
+    },
+    {
+      "registered": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "given": "https://CLAUDE.ai/api/mcp/auth_callback",
+      "want": false
+    },
+    {
+      "registered": [
+        "http://localhost/callback"
+      ],
+      "given": "http://localhost:51234/callback",
+      "want": true
+    },
+    {
+      "registered": [
+        "http://localhost/callback"
+      ],
+      "given": "http://localhost/callback",
+      "want": true
+    },
+    {
+      "registered": [
+        "http://127.0.0.1/callback"
+      ],
+      "given": "http://127.0.0.1:8080/callback",
+      "want": true
+    },
+    {
+      "registered": [
+        "http://[::1]/callback"
+      ],
+      "given": "http://[::1]:8080/callback",
+      "want": true
+    },
+    {
+      "registered": [
+        "http://localhost/callback"
+      ],
+      "given": "http://127.0.0.1:8080/callback",
+      "want": false
+    },
+    {
+      "registered": [
+        "http://localhost/callback"
+      ],
+      "given": "http://localhost:8080/callback/other",
+      "want": false
+    },
+    {
+      "registered": [
+        "http://localhost/callback"
+      ],
+      "given": "http://localhost:8080/callback?x=1",
+      "want": false
+    },
+    {
+      "registered": [
+        "https://localhost/callback"
+      ],
+      "given": "https://localhost:8443/callback",
+      "want": false
+    },
+    {
+      "registered": [
+        "http://localhost:3000/callback"
+      ],
+      "given": "http://localhost:3001/callback",
+      "want": true
+    },
+    {
+      "registered": [
+        "http://app.example.com/callback"
+      ],
+      "given": "http://app.example.com:8080/callback",
+      "want": false
+    }
+  ],
+  "redirectKinds": [
+    {
+      "uri": "https://claude.ai/api/mcp/auth_callback",
+      "allowed": true,
+      "loopback": false
+    },
+    {
+      "uri": "http://localhost:51234/callback",
+      "allowed": true,
+      "loopback": true
+    },
+    {
+      "uri": "http://127.0.0.1/callback",
+      "allowed": true,
+      "loopback": true
+    },
+    {
+      "uri": "http://[::1]:9/cb",
+      "allowed": true,
+      "loopback": true
+    },
+    {
+      "uri": "http://app.example.com/cb",
+      "allowed": false,
+      "loopback": false
+    },
+    {
+      "uri": "https://app.example.com/cb#frag",
+      "allowed": false,
+      "loopback": false
+    },
+    {
+      "uri": "https://me@app.example.com/cb",
+      "allowed": false,
+      "loopback": false
+    },
+    {
+      "uri": "myapp://callback",
+      "allowed": false,
+      "loopback": false
+    },
+    {
+      "uri": "not a url",
+      "allowed": false,
+      "loopback": false
+    }
+  ],
+  "publicBases": [
+    {
+      "configured": "https://app.example.com/api/notes",
+      "url": "http://10.0.0.5:8080/oauth/token",
+      "host": "10.0.0.5:8080",
+      "prefix": "/api/notes",
+      "want": "https://app.example.com/api/notes"
+    },
+    {
+      "configured": "",
+      "url": "http://localhost:4000/oauth/token",
+      "host": "localhost:4000",
+      "prefix": null,
+      "want": "http://localhost:4000"
+    },
+    {
+      "configured": "",
+      "url": "http://localhost:4000/oauth/token",
+      "host": "localhost:4000",
+      "prefix": "/api/notes",
+      "want": "http://localhost:4000/api/notes"
+    },
+    {
+      "configured": "",
+      "url": "https://api.example.com/oauth/token",
+      "host": "api.example.com",
+      "prefix": "/api/notes/",
+      "want": "https://api.example.com/api/notes"
+    },
+    {
+      "configured": "",
+      "url": "https://api.example.com/oauth/token",
+      "host": "api.example.com",
+      "prefix": "javascript:alert(1)",
+      "want": "https://api.example.com"
+    }
+  ],
+  "metadata": [
+    {
+      "options": {
+        "base": "https://app.example.com/api/notes",
+        "scopes": [
+          "notes.write",
+          "notes.read",
+          "notes.read"
+        ],
+        "metadataDocuments": true,
+        "registration": true
+      },
+      "protectedResource": {
+        "resource": "https://app.example.com/api/notes/api/mcp",
+        "authorization_servers": [
+          "https://app.example.com/api/notes"
+        ],
+        "scopes_supported": [
+          "notes.read",
+          "notes.write",
+          "offline_access"
+        ],
+        "bearer_methods_supported": [
+          "header"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://app.example.com/api/notes",
+        "authorization_endpoint": "https://app.example.com/api/notes/oauth/authorize",
+        "token_endpoint": "https://app.example.com/api/notes/oauth/token",
+        "registration_endpoint": "https://app.example.com/api/notes/oauth/register",
+        "revocation_endpoint": "https://app.example.com/api/notes/oauth/revoke",
+        "response_types_supported": [
+          "code"
+        ],
+        "response_modes_supported": [
+          "query"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "revocation_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "client_id_metadata_document_supported": true,
+        "authorization_response_iss_parameter_supported": true,
+        "scopes_supported": [
+          "notes.read",
+          "notes.write",
+          "offline_access"
+        ]
+      },
+      "paths": {
+        "protectedResource": [
+          "/.well-known/oauth-protected-resource",
+          "/.well-known/oauth-protected-resource/api/notes/api/mcp"
+        ],
+        "authorizationServer": [
+          "/.well-known/oauth-authorization-server",
+          "/.well-known/oauth-authorization-server/api/notes",
+          "/.well-known/openid-configuration",
+          "/.well-known/openid-configuration/api/notes",
+          "/api/notes/.well-known/openid-configuration"
+        ]
+      },
+      "challenge": "Bearer resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/notes/api/mcp\"",
+      "invalidTokenChallenge": "Bearer resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/notes/api/mcp\", error=\"invalid_token\""
+    },
+    {
+      "options": {
+        "base": "https://api.example.com",
+        "scopes": [],
+        "metadataDocuments": true,
+        "registration": false
+      },
+      "protectedResource": {
+        "resource": "https://api.example.com/api/mcp",
+        "authorization_servers": [
+          "https://api.example.com"
+        ],
+        "scopes_supported": [
+          "offline_access"
+        ],
+        "bearer_methods_supported": [
+          "header"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://api.example.com",
+        "authorization_endpoint": "https://api.example.com/oauth/authorize",
+        "token_endpoint": "https://api.example.com/oauth/token",
+        "revocation_endpoint": "https://api.example.com/oauth/revoke",
+        "response_types_supported": [
+          "code"
+        ],
+        "response_modes_supported": [
+          "query"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "revocation_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "client_id_metadata_document_supported": true,
+        "authorization_response_iss_parameter_supported": true,
+        "scopes_supported": [
+          "offline_access"
+        ]
+      },
+      "paths": {
+        "protectedResource": [
+          "/.well-known/oauth-protected-resource",
+          "/.well-known/oauth-protected-resource/api/mcp"
+        ],
+        "authorizationServer": [
+          "/.well-known/oauth-authorization-server",
+          "/.well-known/openid-configuration"
+        ]
+      },
+      "challenge": "Bearer resource_metadata=\"https://api.example.com/.well-known/oauth-protected-resource/api/mcp\"",
+      "invalidTokenChallenge": "Bearer resource_metadata=\"https://api.example.com/.well-known/oauth-protected-resource/api/mcp\", error=\"invalid_token\""
+    },
+    {
+      "options": {
+        "base": "http://localhost:4000",
+        "scopes": [
+          "identity.users.read"
+        ],
+        "metadataDocuments": false,
+        "registration": true
+      },
+      "protectedResource": {
+        "resource": "http://localhost:4000/api/mcp",
+        "authorization_servers": [
+          "http://localhost:4000"
+        ],
+        "scopes_supported": [
+          "identity.users.read",
+          "offline_access"
+        ],
+        "bearer_methods_supported": [
+          "header"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "http://localhost:4000",
+        "authorization_endpoint": "http://localhost:4000/oauth/authorize",
+        "token_endpoint": "http://localhost:4000/oauth/token",
+        "registration_endpoint": "http://localhost:4000/oauth/register",
+        "revocation_endpoint": "http://localhost:4000/oauth/revoke",
+        "response_types_supported": [
+          "code"
+        ],
+        "response_modes_supported": [
+          "query"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "revocation_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "client_id_metadata_document_supported": false,
+        "authorization_response_iss_parameter_supported": true,
+        "scopes_supported": [
+          "identity.users.read",
+          "offline_access"
+        ]
+      },
+      "paths": {
+        "protectedResource": [
+          "/.well-known/oauth-protected-resource",
+          "/.well-known/oauth-protected-resource/api/mcp"
+        ],
+        "authorizationServer": [
+          "/.well-known/oauth-authorization-server",
+          "/.well-known/openid-configuration"
+        ]
+      },
+      "challenge": "Bearer resource_metadata=\"http://localhost:4000/.well-known/oauth-protected-resource/api/mcp\"",
+      "invalidTokenChallenge": "Bearer resource_metadata=\"http://localhost:4000/.well-known/oauth-protected-resource/api/mcp\", error=\"invalid_token\""
+    }
+  ],
+  "scopes": [
+    {
+      "scope": "",
+      "want": []
+    },
+    {
+      "scope": "notes.read",
+      "want": [
+        "notes.read"
+      ]
+    },
+    {
+      "scope": "notes.read  notes.write",
+      "want": [
+        "notes.read",
+        "notes.write"
+      ]
+    },
+    {
+      "scope": "notes.read notes.read offline_access",
+      "want": [
+        "notes.read",
+        "offline_access"
+      ]
+    },
+    {
+      "scope": "notes.read \"x\"",
+      "want": null
+    },
+    {
+      "scope": "café",
+      "want": null
+    }
+  ],
+  "metadataUrls": [
+    {
+      "url": "https://claude.ai/oauth/claude-code-client-metadata",
+      "want": null
+    },
+    {
+      "url": "https://example.com/client.json",
+      "want": null
+    },
+    {
+      "url": "http://example.com/client.json",
+      "want": "it is not an https URL"
+    },
+    {
+      "url": "https://example.com",
+      "want": "it has no path"
+    },
+    {
+      "url": "https://example.com/",
+      "want": "it has no path"
+    },
+    {
+      "url": "https://example.com/a/../client.json",
+      "want": "it has a dot segment"
+    },
+    {
+      "url": "https://example.com/client.json#x",
+      "want": "it has a fragment"
+    },
+    {
+      "url": "https://me@example.com/client.json",
+      "want": "it has a user"
+    }
+  ],
+  "privateAddresses": [
+    {
+      "address": "93.184.216.34",
+      "want": false
+    },
+    {
+      "address": "10.0.0.1",
+      "want": true
+    },
+    {
+      "address": "127.0.0.1",
+      "want": true
+    },
+    {
+      "address": "169.254.169.254",
+      "want": true
+    },
+    {
+      "address": "172.16.0.1",
+      "want": true
+    },
+    {
+      "address": "172.32.0.1",
+      "want": false
+    },
+    {
+      "address": "192.168.1.1",
+      "want": true
+    },
+    {
+      "address": "100.64.0.1",
+      "want": true
+    },
+    {
+      "address": "0.0.0.0",
+      "want": true
+    },
+    {
+      "address": "224.0.0.1",
+      "want": true
+    },
+    {
+      "address": "::1",
+      "want": true
+    },
+    {
+      "address": "::",
+      "want": true
+    },
+    {
+      "address": "fe80::1",
+      "want": true
+    },
+    {
+      "address": "fd00::1",
+      "want": true
+    },
+    {
+      "address": "::ffff:10.0.0.1",
+      "want": true
+    },
+    {
+      "address": "::ffff:93.184.216.34",
+      "want": false
+    },
+    {
+      "address": "::ffff:7f00:1",
+      "want": true
+    },
+    {
+      "address": "::ffff:a9fe:a9fe",
+      "want": true
+    },
+    {
+      "address": "::ffff:a00:1",
+      "want": true
+    },
+    {
+      "address": "::ffff:5db8:d822",
+      "want": false
+    },
+    {
+      "address": "64:ff9b::a00:1",
+      "want": true
+    },
+    {
+      "address": "::7f00:1",
+      "want": true
+    },
+    {
+      "address": "0:0:0:0:0:ffff:127.0.0.1",
+      "want": true
+    },
+    {
+      "address": "2001:db8::1",
+      "want": true
+    },
+    {
+      "address": "not:an:address::x",
+      "want": true
+    },
+    {
+      "address": "2606:4700::6810:84e5",
+      "want": false
+    }
+  ],
+  "cacheSeconds": [
+    {
+      "cacheControl": null,
+      "want": 3600
+    },
+    {
+      "cacheControl": "max-age=600",
+      "want": 600
+    },
+    {
+      "cacheControl": "public, max-age=86400",
+      "want": 86400
+    },
+    {
+      "cacheControl": "max-age=999999",
+      "want": 86400
+    },
+    {
+      "cacheControl": "no-store",
+      "want": 0
+    },
+    {
+      "cacheControl": "no-cache, max-age=600",
+      "want": 0
+    },
+    {
+      "cacheControl": "private",
+      "want": 3600
+    }
+  ]
+}

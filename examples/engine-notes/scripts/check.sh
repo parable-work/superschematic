@@ -1,38 +1,35 @@
 #!/usr/bin/env bash
-# Build the engine from this checkout, link it into the example, type-check
-# the example and run its end-to-end test on Node.js and on Bun.
+# Build the HTTP runtime and development mode's handler from this checkout,
+# link them into the example, type-check the example and run its end-to-end
+# tests on Node.js and on Bun.
 #
 #   examples/engine-notes/scripts/check.sh
 #
 # Needs the superscalar checkout scripts/superscalar-dep.sh stands up (make
-# setup runs it), bun, Node.js 24, and cargo, which builds the engine's
-# Node-API addon (scripts/engine-napi.sh) when the engine's native/ holds
-# none: the Rust engine (D58), which @superschematic/engine loads. An addon
-# already there is used as it is, the test addon CI builds included.
+# setup runs it), which the HTTP runtime's build links, bun, Node.js 24, and
+# cargo with the wasm32-unknown-unknown target, which builds development
+# mode's handler (runtime/rules-handler/typescript), the behaviors' core for
+# WebAssembly, and superschematic-dev unless SUPERSCHEMATIC_DEV names one.
 # Installs the runtimes' pinned dependencies from the npm registry (bun
 # install --frozen-lockfile).
 #
-# The test (test/notes.test.ts) serves the example on a free port with
-# @hono/node-server, under each runtime, and drives it over HTTP, the event
-# stream and MCP. test/notes.dev.test.ts serves the same schema on
-# development mode (D117), the superschematic-dev server this script builds
-# with cargo unless SUPERSCHEMATIC_DEV names one, and drives it the same
-# way, a streamed reply and read state among it. The CI typescript job runs
-# this script after the engine's own tests.
+# test/notes.dev.test.ts serves the notes schema on development mode (D117)
+# with @superschematic/rules-handler over a SQLite file, behind
+# @hono/node-server on a free port, under each runtime, and drives it over
+# HTTP, the event stream and MCP with each caller's bearer token.
+# test/notes.dev-server.test.ts serves the file that host writes with
+# superschematic-dev, development mode's server in Rust. The CI typescript
+# job runs this script.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(cd "$EXAMPLE_DIR/../.." && pwd)"
 
-echo "==> build the HTTP runtime and the engine"
-for runtime in http engine; do
+echo "==> build the HTTP runtime and development mode's handler"
+for runtime in http rules-handler; do
   (cd "$REPO_ROOT/runtime/$runtime/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 done
-if ! compgen -G "$REPO_ROOT/runtime/engine/typescript/native/superschematic-engine.*.node" >/dev/null; then
-  echo "==> build the engine's addon"
-  "$REPO_ROOT/scripts/engine-napi.sh" >/dev/null
-fi
 if [[ -z "${SUPERSCHEMATIC_DEV:-}" ]]; then
   echo "==> build development mode's server (superschematic-dev)"
   cargo build --quiet --manifest-path "$REPO_ROOT/runtime/engine/rust/Cargo.toml" \

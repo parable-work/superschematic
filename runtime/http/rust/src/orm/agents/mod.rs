@@ -71,23 +71,29 @@
 //! unredacted while the run lives.
 //!
 //! The parts here are pure and shared with the TypeScript runtime through
-//! `runtime/http/testdata/agents_parity.json`. The dispatcher is
-//! Postgres's alone, as the loader holds it to.
+//! `runtime/http/testdata/agents_parity.json`. The dispatcher runs over
+//! [`Store`](super::store::Store), on Postgres or on a SQLite file (#618),
+//! where a run's token is admitted by the SQLite grants' authenticator as
+//! by the Postgres one, and its request queue claims on the file.
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod dispatcher;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod queue;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod routes;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod tools;
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub use dispatcher::{
     AgentRunRequest, AgentSandboxTool, AgentTool, AgentToolContext, AgentToolRun, Agents,
     AgentsError, AskDeadline, AskThread, Clock, FollowUp, GateOutcome, OnReturn, PrincipalRef,
     RunAuthenticator, SandboxExtra, SandboxSpecOf, TranscriptEntry, TranscriptStore,
 };
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use queue::AgentsQueue;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub use routes::AgentRoutes;
 
 use std::collections::BTreeMap;

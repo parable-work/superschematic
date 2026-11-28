@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -75,16 +76,6 @@ type crate struct {
 	// Pages are the pages of each resource the operations describe, nil
 	// unless outputs.topcoat.pages turns them on (pages.go).
 	Pages *pagesModel
-	// Engine is the engine of the API's engine database, which the crate
-	// opens in-process on SQLite and mounts at /engine (D58), nil when its
-	// database is none (engine.go).
-	Engine *engineModel
-	// EnginePages are the pages of the engine's types under
-	// <prefix>/engine, nil unless the pages are on and the crate mounts an
-	// engine (engine_pages.go); EnginePanels the panels its instance pages
-	// show per behavior, set whenever EnginePages is (engine_panels.go).
-	EnginePages  *enginePagesModel
-	EnginePanels *enginePanelsModel
 	// IdentityPages are sign-in, sign-out, the account, users and roles
 	// pages, nil unless the pages are on and the API authenticates with the
 	// identity runtime (identity_pages.go).
@@ -133,7 +124,7 @@ func (c *crate) UsedHosted() []*hostedCrate {
 	if c.hosting == nil {
 		return out
 	}
-	for _, service := range sortedKeys(c.hosting.crates) {
+	for _, service := range slices.Sorted(maps.Keys(c.hosting.crates)) {
 		if h := c.hosting.crates[service]; h != nil && h.used {
 			out = append(out, h)
 		}
@@ -556,9 +547,6 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, tab
 	if err := out.markPicks(); err != nil {
 		return nil, err
 	}
-	if out.Engine, err = engineOf(c, api, Dir(c.Options.OutputRoot, service)); err != nil {
-		return nil, err
-	}
 	if site != nil {
 		title := humanize(strings.ReplaceAll(service, "-", " "))
 		if out.Pages, err = pagesOf(out, schemas, site, cfg.PagesPrefix(), title, cfg.PagesLive(), c.Logf); err != nil {
@@ -571,21 +559,10 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, tab
 	return out, nil
 }
 
-// consoleModules sets the models of the console's own pages, the engine's
-// and the identity runtime's, the engine's behavior panels, and money,
-// each from what newCrate built before, then what the pages share with
-// them (hookPages).
+// consoleModules sets the models of the console's own pages, the identity
+// runtime's, and money, each from what newCrate built before.
 func (c *crate) consoleModules(ctx registry.GenerateContext, api *registry.RustAPI, cfg Config, schemas schemaSet) error {
 	var err error
-	if c.EnginePages, err = enginePagesOf(ctx, cfg, c); err != nil {
-		return err
-	}
-	if c.EnginePanels, err = enginePanelsOf(ctx, c); err != nil {
-		return err
-	}
-	if c.EnginePages != nil && c.EnginePanels == nil {
-		return fmt.Errorf("topcoat: %s has engine pages without their panels, which an instance's page calls", c.SchemaName)
-	}
 	if c.IdentityPages, err = identityPagesOf(ctx, api, cfg, c); err != nil {
 		return err
 	}
@@ -600,16 +577,14 @@ func (c *crate) consoleModules(ctx registry.GenerateContext, api *registry.RustA
 		}
 		c.ScalarPath = filepath.ToSlash(rel)
 	}
-	c.hookPages()
 	return nil
 }
 
 // WritesMoney reports whether views.rs writes money_text: a display
-// component shows money, a form reads an amount as a decimal, or the
-// engine's panels may show money (a Holds' or a Payments' amounts).
-// Cargo.toml then depends on the scalar crate, which views.rs and forms.rs
-// read each currency's minor units from.
-func (c *crate) WritesMoney() bool { return c.Money || c.EnginePanels != nil }
+// component shows money, or a form reads an amount as a decimal. Cargo.toml
+// then depends on the scalar crate, which views.rs and forms.rs read each
+// currency's minor units from.
+func (c *crate) WritesMoney() bool { return c.Money }
 
 // schemasOf is the service's schema and its dependencies', in which a
 // result type and the types it nests are declared.
@@ -992,15 +967,6 @@ func (c *crate) write(dir string) error {
 	if c.Pages != nil {
 		files = append(files, struct{ template, path string }{"pages.tmpl", filepath.Join("src", "pages.rs")})
 	}
-	if c.Engine != nil {
-		files = append(files, struct{ template, path string }{"engine.tmpl", filepath.Join("src", "engine.rs")})
-	}
-	if c.EnginePages != nil {
-		files = append(files, struct{ template, path string }{"engine_pages.tmpl", filepath.Join("src", "engine_pages.rs")})
-	}
-	if c.EnginePanels != nil {
-		files = append(files, struct{ template, path string }{"engine_panels.tmpl", filepath.Join("src", "engine_panels.rs")})
-	}
 	if c.IdentityPages != nil {
 		files = append(files, struct{ template, path string }{"identity_pages.tmpl", filepath.Join("src", "identity_pages.rs")})
 	}
@@ -1009,7 +975,9 @@ func (c *crate) write(dir string) error {
 		return err
 	}
 	// A crate written before with records or forms keeps no stale module,
-	// arg_forms.rs among them, which argument forms were once written to.
+	// arg_forms.rs among them, which argument forms were once written to,
+	// and the engine console's modules, which a crate wrote for a
+	// database's engine types (D58) before a DB type was a table (D103).
 	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs", "engine.rs", "engine_pages.rs", "engine_panels.rs", "identity_pages.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
@@ -1034,7 +1002,6 @@ func (c *crate) write(dir string) error {
 // call.
 func parseTemplates() (*template.Template, error) {
 	funcs := template.FuncMap{
-		"engineMount":  func() string { return EngineMount },
 		"rustString":   rustString,
 		"escapeBraces": escapeBraces,
 		"join":         strings.Join,
@@ -1107,14 +1074,4 @@ func doc4(text string) string {
 // rustString renders a Rust string literal.
 func rustString(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s) + `"`
-}
-
-// sortedKeys returns m's keys in order.
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

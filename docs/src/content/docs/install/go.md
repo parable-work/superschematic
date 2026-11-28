@@ -491,8 +491,15 @@ Written against the interfaces, one implementation runs on either
 dialect: a transaction's `ExecContext` and `QueryContext` run raw SQL on
 SQLite, where `Exec` and `Query`, which answer pgx's types, are
 Postgres's ([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)).
-Resolution refuses a Go worker on a SQLite file, which claims its queue
-on Postgres alone, and the build refuses an engine database there.
+A generated Go worker opens the file too and claims its queue there
+(#717): an app's `@worker` through the ORM's `New<Queue>SQLiteQueue`, a
+table's behavior worker over the `SQLiteDatabase`, and the runtime's own
+queues, the notifier's, the run requests', the dispatcher's and a
+`@searchable` table's, through the generated wiring, as on Postgres. A
+queue on SQLite has no drain slots and no next due time (D145): a worker
+in drain mode stops once its queues are idle. The build refuses a worker
+whose queue's message the SQLite queue client cannot hold, and an engine
+database on SQLite.
 
 ## Consume a generated SDK
 

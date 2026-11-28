@@ -435,7 +435,7 @@ func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 // SiteFlags returns the sites' digests as `--site` values, in site order.
 func (r *BuildResult) SiteFlags() []string {
 	var out []string
-	for _, site := range sortedKeys(r.Sites) {
+	for _, site := range slices.Sorted(maps.Keys(r.Sites)) {
 		out = append(out, site+"="+r.Sites[site])
 	}
 	return out
@@ -444,7 +444,7 @@ func (r *BuildResult) SiteFlags() []string {
 // ImageFlags returns the images as `--image` values, in server order.
 func (r *BuildResult) ImageFlags() []string {
 	var out []string
-	for _, server := range sortedKeys(r.Images) {
+	for _, server := range slices.Sorted(maps.Keys(r.Images)) {
 		out = append(out, server+"="+r.Images[server])
 	}
 	return out

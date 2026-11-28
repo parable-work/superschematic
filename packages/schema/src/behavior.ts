@@ -4,7 +4,10 @@
  * the superschematic repository), which @superschematic/engine implements,
  * the work-queue behaviors, which @superschematic/engine-workqueue
  * implements, and the commerce behaviors (D70), which
- * @superschematic/engine-commerce implements.
+ * @superschematic/engine-commerce implements. Links, Search, Queue and
+ * Branches are not among them: D103 folds each into a schema feature (a
+ * relation, @searchField, @queue and @versioned), and the build refuses
+ * them.
  * An extension's authoring package adds its behaviors by module
  * augmentation, as it adds an invocation policy key to MCPToolOptions:
  *
@@ -32,20 +35,14 @@ export interface BehaviorConfigs {
   Revisions: RevisionsConfig;
   /** Blockers between instances, which hold up the type's Workflow; it requires Workflow. */
   Dependencies: DependenciesConfig;
-  /** Typed links to instances of the schemas it names, optionally pinned to a revision or a release. */
-  Links: LinksConfig;
   /** Values derived from the instances that point at this one through a link, computed when it is read. */
   Rollups: RollupsConfig;
-  /** Full-text search over the type's own text fields. */
-  Search: SearchConfig;
   /** Rules that move Workflow statuses after a change commits; it requires Workflow. */
   Reactions: ReactionsConfig;
   /** Fields of the type that its create sets and nothing changes after. */
   Constants: ConstantsConfig;
   /** Types an open JSON field of the type by the value of another of its fields. */
   Variants: VariantsConfig;
-  /** Makes each instance the root of a version graph over rows of the kinds it names, each kind's content a type of the document. */
-  Branches: BranchesConfig;
   /** Own fields each state of the type's Workflow requires to enter it, or freezes while the instance is in it; it requires Workflow. */
   StateRules: StateRulesConfig;
   /** Sign-offs by distinct principals that gate states of the type's Workflow; it requires Workflow. */
@@ -62,8 +59,6 @@ export interface BehaviorConfigs {
   Lease: LeaseConfig;
   /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
   Assignment: AssignmentConfig;
-  /** Makes the type's instances claimable work, in priority order; it requires Workflow and Lease. */
-  Queue: QueueConfig;
   /** A heartbeat on an instance that stands for a worker, which the principal it names beats and a miss can expire that principal's leases. */
   Presence: PresenceConfig;
   /** Creates the instance's children and the edges between them, in one transaction, from a map of steps. */
@@ -112,22 +107,45 @@ export interface WorkflowTransition {
 
 /** Comments' config; every member is optional. */
 export interface CommentsConfig {
-  /** The longest body a post or an edit may give, in code points, 1 to 40000; 40000 when absent. */
+  /** The longest body a post, an edit or a finish may give, and the longest draft appendDraft builds, in code points, 1 to 40000; 40000 when absent. */
   readonly maxBodyLength?: number;
   /** How long after posting its author may edit a message, in milliseconds, at least 1000; no limit when absent. A caller holding moderatePermission is not held to it. */
   readonly editWindowMs?: number;
-  /** The block kinds a post or an edit may give; every kind when absent, none when empty. */
+  /** How long a composing message's author may append nothing before the engine's runner interrupts it, in milliseconds, 5000 to 3600000; 60000 when absent. */
+  readonly composeTimeoutMs?: number;
+  /** The most composing messages one subject may have on an instance at once, 1 to 50; begin refuses another. 5 when absent. */
+  readonly maxDrafts?: number;
+  /** The block kinds a post, an edit or a finish may give; every kind when absent, none when empty. */
   readonly blocks?: readonly CommentsBlockKind[];
-  /** The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges. */
+  /** What an attachment block may describe. The engine keeps a file's description, never its bytes: the deployment stores and serves the file. */
+  readonly attachments?: {
+    /** The largest file an attachment block may describe, in bytes, at least 1; no limit when absent. */
+    readonly maxBytes?: number;
+    /** The media types an attachment may have, each type/subtype or type/* in lower case; any when absent. */
+    readonly mediaTypes?: readonly string[];
+    /** The URI schemes an attachment's uri may use, in lower case; https alone when absent. Schemes that run code or carry the bytes themselves are refused. */
+    readonly schemes?: readonly string[];
+  };
+  /** The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, move the anchor of a code block on another's message, and purge. Absent, only a message's author edits, deletes or interrupts it, and nobody purges. */
   readonly moderatePermission?: string;
   /** The permission a caller needs to pin and unpin. Absent, any caller the policy lets write may. */
   readonly pinPermission?: string;
   /** The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does. */
   readonly resolvePermission?: string;
+  /** The permission that lets a caller move the anchor of a code block on another's message with moveAnchor. Absent, only the message's author and a caller holding moderatePermission may. */
+  readonly anchorPermission?: string;
+  /** The permission a notifier or an agent dispatcher needs to claim and settle the deliveries of this type's messages. Absent, nobody claims them, and they serve only the inbox. */
+  readonly deliverPermission?: string;
+  /** How many times a delivery is claimed before a failure, or a claim that lapses, drops it, 1 to 20; 5 when absent. */
+  readonly maxAttempts?: number;
+  /** How long after its first failure a delivery is due again, in milliseconds, 1000 to 3600000, doubled after each later failure up to an hour; 30000 when absent. */
+  readonly retryBackoffMs?: number;
+  /** How long a delivery is kept from when it was made, in milliseconds, a day to a year, whatever its state but a live claim; 30 days when absent. */
+  readonly deliveryRetentionMs?: number;
 }
 
-/** A kind of block a Comments message may hold: a reference to another instance, or an action card. */
-export type CommentsBlockKind = "ref" | "action";
+/** A kind of block a Comments message may hold: a reference to another instance, an action card, code, or an attachment. */
+export type CommentsBlockKind = "ref" | "action" | "code" | "attachment";
 
 /** Revisions' config. */
 export interface RevisionsConfig {
@@ -155,47 +173,6 @@ export interface DependenciesConfig {
   readonly satisfiedBy?: readonly WorkflowOutcome[];
 }
 
-/** Links' config. */
-export interface LinksConfig {
-  /** The links an instance may hold, by name: camelCase, at most 64 characters. */
-  readonly links: Readonly<Record<string, LinkConfig>>;
-}
-
-/**
- * One link of a Links config. It holds one target, or with many a list of
- * at most max, in the order they were linked.
- */
-export type LinkConfig = LinkTarget &
-  (
-    | { readonly many?: false }
-    | {
-        /** The link holds a list of targets rather than one. */
-        readonly many: true;
-        /** The most targets it holds, from 1 to 100. */
-        readonly max: number;
-      }
-  );
-
-/** What a link points at and how it holds its target. */
-export interface LinkTarget {
-  /** The schema of the instance the link points at. */
-  readonly schema: string;
-  /**
-   * Every create gives the link, which can then be moved to another target
-   * but not unlinked, and the delete of its target is refused. A
-   * many-valued link holds at least one target, and only the delete of its
-   * last is refused.
-   */
-  readonly required?: boolean;
-  /**
-   * What the link records of the target, reporting the target's latest
-   * beside it and whether the target has moved past it: true or
-   * "revision", its revision, whose schema must compose Revisions;
-   * "release", its release, whose schema must compose Branches.
-   */
-  readonly pinned?: boolean | "revision" | "release";
-}
-
 /** Rollups' config. */
 export interface RollupsConfig {
   /** The rollups, by name: camelCase, at most 64 characters. */
@@ -204,9 +181,9 @@ export interface RollupsConfig {
 
 /** Where a rollup reads from: the instances of a schema that point at this one through a link. */
 export interface RollupSource {
-  /** The schema whose instances point at this one; it composes Links. */
+  /** The schema whose instances point at this one through a relation. */
   readonly schema: string;
-  /** The link of that schema's Links config that points at this schema. */
+  /** That schema's relation, by its field, that points at this schema. */
   readonly link: string;
 }
 
@@ -229,26 +206,6 @@ export type RollupConfig =
       /** The outcomes a linked instance's terminal state must have to count; every outcome when absent. */
       readonly outcomes?: readonly WorkflowOutcome[];
     });
-
-/** Search's config. */
-export interface SearchConfig {
-  /** The type's own top-level fields to index, by JSON key: each a string, or a scalar whose values are strings; at most 16. */
-  readonly fields: readonly string[];
-  /** A weight per indexed field, which multiplies that field's part of a match's score; 1 for a field it does not name. */
-  readonly weights?: Readonly<Record<string, number>>;
-  /** A vector per instance, which an outside embedder computes from the indexed fields' text; none when absent. */
-  readonly vectors?: SearchVectorsConfig;
-}
-
-/** Search's vectors: what an embedder computes them with, and who may settle them. */
-export interface SearchVectorsConfig {
-  /** How many numbers a vector holds, 1 to 4096. */
-  readonly dimensions: number;
-  /** A label for the embedding model, which the engine only compares: a new one makes every vector stale. */
-  readonly model: string;
-  /** The permission an embedder needs to settle vectors. */
-  readonly permission: string;
-}
 
 /** Reactions' config. */
 export interface ReactionsConfig {
@@ -307,9 +264,9 @@ export type ReactionWhen =
   | {
       /**
        * The rule fires on an instance when the instance its link points to
-       * gains a new revision of Revisions, or, when its schema composes
-       * Branches, a new release; for a link pinned to the one it gains, only
-       * on an instance the new revision or release leaves stale.
+       * gains a new revision of Revisions, or a new release of its version
+       * graph (@versioned); for a link pinned to the one it gains, only on an
+       * instance the new revision or release leaves stale.
        */
       readonly revised: { readonly link: string };
     };
@@ -332,9 +289,9 @@ export interface ReactionChanges {
 
 /** The instances an allTerminal or anyTerminal rule hears. */
 export interface ReactionSource {
-  /** The schema of the linking instances, which composes Links and Workflow. */
+  /** The schema of the linking instances, which composes Workflow and points at this type's schema through a relation. */
   readonly schema: string;
-  /** The link of that schema's Links config that points at this type's schema. */
+  /** That schema's relation, by its field, that points at this type's schema. */
   readonly link: string;
 }
 
@@ -342,7 +299,7 @@ export interface ReactionSource {
 export interface ReactionThen {
   /** The state to move the target to. */
   readonly transition: string;
-  /** A link of the type's Links config: the target is the instance it points to. The instance itself when absent. */
+  /** A relation of the type, by its field: the target is the instance it points to. The instance itself when absent. */
   readonly link?: string;
 }
 
@@ -370,52 +327,6 @@ export interface VariantsConfig {
    * value or none, field holds none.
    */
   readonly types: Readonly<Record<string, string>>;
-}
-
-/** Branches' config. */
-export interface BranchesConfig {
-  /** The graph's kinds, by name (camelCase): the rows each ref holds. */
-  readonly kinds: Readonly<Record<string, BranchesKind>>;
-  /** The name of each instance's primary line; main when absent. */
-  readonly primary?: string;
-  /** How many commits past the nearest snapshot on its chain a commit is snapshotted at; 64 when absent. */
-  readonly snapshotEvery?: number;
-  /** Turns the sweep schedule on for the schema. */
-  readonly sweep?: BranchesSweep;
-}
-
-/** One kind of a Branches graph, as @graphMember, @conflictUnit and @versioned declare a member of a compiled graph. */
-export interface BranchesKind {
-  /**
-   * The type of the schema document, besides the instance type, whose
-   * fields are the kind's content. None of its fields may take the JSON key
-   * of a role or audit column: id, entity_key, ref_id, root_id,
-   * deleted_on_ref, _version, created_at, created_by, updated_at or
-   * updated_by.
-   */
-  readonly type: string;
-  /** Containment: key is the kind's field, of a UUID scalar, that holds the parent row's entity key, and of is the parent's kind. */
-  readonly parent?: { readonly key: string; readonly of: string };
-  /** The kind's integer field that orders siblings. */
-  readonly order?: string;
-  /** At most one live row of the kind. */
-  readonly singleton?: boolean;
-  /** A field's conflict unit: atomic (the default), keyed, jsonSchema, or excluded (not content). */
-  readonly units?: Readonly<Record<string, "atomic" | "keyed" | "jsonSchema" | "excluded">>;
-  /** How many days of the kind's history the sweep keeps; all of it when absent. */
-  readonly retentionDays?: number;
-}
-
-/** When the Branches sweep runs on a schema, and what it keeps. */
-export interface BranchesSweep {
-  /** How often it runs, in milliseconds; at least 1000. */
-  readonly intervalMs: number;
-  /** How long a discarded ref's rows are kept, in milliseconds; seven days when absent. */
-  readonly discardGrace?: number;
-  /** At most this many history images of each kind pruned per run; no limit when absent. */
-  readonly pruneBatch?: number;
-  /** Discards a draft with no write for this many milliseconds; none when absent. */
-  readonly abandonAfter?: number;
 }
 
 /** StateRules' config. */
@@ -516,7 +427,7 @@ export interface NumberingConfig {
    * instance was created in: "INV-{yyyy}-{seq:4}" prints INV-2026-0042.
    */
   readonly format: string;
-  /** Counts per target of a link of the type's Links config, which is required and holds one target. */
+  /** Counts per target of a required relation of the type. */
   readonly scope?: NumberingScope;
   /** "yearly" starts the count again at 1 each UTC year; the format then prints the year. */
   readonly reset?: "yearly";
@@ -524,7 +435,7 @@ export interface NumberingConfig {
 
 /** What a Numbering count runs per. */
 export interface NumberingScope {
-  /** The link's name in the type's Links config. */
+  /** The relation's field. */
   readonly link: string;
 }
 
@@ -607,7 +518,7 @@ export interface LeaseConfig {
   /**
    * Directives the engine's runner sends the holder of an instance's
    * active lease when the target of one of its links moves on: a new
-   * revision, or a release. One entry per link of the type's Links; needs
+   * revision, or a release. One entry per relation of the type; needs
    * directPermission or overridePermission, which the runner's principal
    * must hold.
    */
@@ -622,7 +533,7 @@ export interface LeaseTransition {
 
 /** A directive Lease's directOn sends when a link's target moves on. */
 export interface LeaseDirectOn {
-  /** The link of the type's Links whose target's new revision or release sends it. */
+  /** The relation of the type, by its field, whose target's new revision or release sends it. */
   readonly revised: { readonly link: string };
   /** The directive's name. */
   readonly name: string;
@@ -634,24 +545,6 @@ export interface LeaseDirectOn {
 export interface AssignmentConfig {
   /** The permission a principal needs to assign another principal, reassign, or unassign another principal. */
   readonly permission?: string;
-}
-
-/** Queue's config. */
-export interface QueueConfig {
-  /** The Workflow states an instance is claimed from, and the state a claim moves it to. */
-  readonly claim: { readonly from: readonly string[]; readonly to: string };
-  /** An integer field of the type that orders claimNext: higher first, an instance without a value last. */
-  readonly priorityField?: string;
-  /** The type's own top-level scalar fields claimNext and countClaimable may filter on, by a value or a list of values. */
-  readonly match?: readonly string[];
-  /** The most instances one claimNext tries; 100 when absent. */
-  readonly maxCandidates?: number;
-  /**
-   * Pinned links of the type's Links config: an instance one of which is
-   * pinned to a revision or a release its target has moved past is not
-   * claimed, and is no candidate until a change of it lets it back in.
-   */
-  readonly excludeStale?: readonly string[];
 }
 
 /** Presence's config. */
@@ -681,15 +574,15 @@ export type BlueprintConfig = BlueprintBase & ({ readonly steps: BlueprintSteps;
 
 /** What every Blueprint config gives. */
 export interface BlueprintBase {
-  /** The child schema: it composes Links with parentLink, Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint. */
+  /** The child schema: it has parentLink, a relation to this schema, and composes Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint. */
   readonly schema: string;
-  /** The link of the child schema's Links config that points at this schema. */
+  /** The child's relation, by its field, that points at this schema. */
   readonly parentLink: string;
   /** A string field of the child's type that gets each step's key. */
   readonly keyField: string;
   /** Fields of this type copied to every child. */
   readonly copyFields?: readonly string[];
-  /** Links of this type copied to every child, keeping the revision or release a pinned one records where the child's pins the same: the ones the instance holds when it is stamped. */
+  /** Relations of this type, by their fields, copied to every child: the targets the instance holds when it is stamped. */
   readonly copyLinks?: readonly string[];
 }
 
@@ -734,7 +627,7 @@ export interface BudgetMeter {
   readonly reserve?: number;
   /** An integer field of the type whose positive value is that amount, in place of reserve. */
   readonly reserveField?: string;
-  /** A link of the type's Links config whose target, which composes Budget with the meter, is the enclosing scope. */
+  /** A relation of the type, by its field, whose target, which composes Budget with the meter, is the enclosing scope. */
   readonly scope?: string;
   /** daily: the used amount starts again at 0 at each UTC day. */
   readonly reset?: "daily";
@@ -886,7 +779,7 @@ export interface PaymentsConfig {
   readonly refunds?: { readonly permission: string };
   /** Who reports what providers did: the adapter's principal. */
   readonly record: { readonly permission: string };
-  /** Makes the instance a refund of the instance a required link of the type's Links config names. */
+  /** Makes the instance a refund of the instance a required relation of the type names. */
   readonly refundOf?: { readonly link: string };
   /** With refundOf, the states whose entry asks the linked instance to refund the amount. */
   readonly issueOn?: readonly string[];

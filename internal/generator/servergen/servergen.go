@@ -36,7 +36,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
-	"github.com/parable-work/superschematic/internal/generator/projectengine"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/release"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -71,7 +71,7 @@ const (
 // generated API and ORM modules require, and of the Cloud SQL Go connector
 // cloudsql.go imports, whose own pgx requirement is pgxVersion.
 const (
-	chiVersion          = "v5.3.2"
+	chiVersion          = "v5.4.0"
 	pgxVersion          = "v5.11.0"
 	zapVersion          = "v1.28.0"
 	cloudSQLConnVersion = "v1.25.3"
@@ -201,18 +201,6 @@ type Input struct {
 	// connects to.
 	CloudSQL []string
 
-	// EngineGo is the directory of the engine's Go binding, when a database
-	// the server connects to is an engine database (D58). A checkout's
-	// Dockerfile builds the engine's static archive from the Cargo
-	// workspace beside it.
-	EngineGo string
-
-	// EngineProject is the project's engine crate the entrypoint's engine
-	// is built from, nil when the core's archive runs every behavior its
-	// engine databases compose (D58): the checkout's Dockerfile builds the
-	// archive of the crate's ffi member in the core's place.
-	EngineProject *EngineProject
-
 	// RulesGo is the directory of the rules module (D103), when a database
 	// the server connects to has a table whose fields are behaviors, whose
 	// ORM requires it: it links the behaviors' core's static archive, which
@@ -224,9 +212,6 @@ type Input struct {
 	// adds nothing (D144).
 	Image *ImageInput
 
-	// opensEngine is true when the entrypoint opens an engine (D58), whose
-	// archive its image must link.
-	opensEngine bool
 	// linksRules is true when an API's Deps holds the ORM of a database
 	// whose tables' fields are behaviors (D103), whose binary links the
 	// behaviors' core's archive.
@@ -318,25 +303,9 @@ type Server struct {
 	// job (D53).
 	Worker *Worker
 
-	// Runner is what an engine's runner's entrypoint runs, nil for every
-	// other (D58).
-	Runner *Runner
-
 	// Deriver is what a deriver's entrypoint runs, nil for every other
 	// (D146).
 	Deriver *Deriver
-
-	// Engines are the engines the entrypoint opens, one per engine
-	// database it connects to (D58). With one, engine.go opens each, and
-	// go.mod requires the engine's Go binding.
-	Engines []*Engine
-
-	// EngineLink names the ffi member of the project's engine crate whose
-	// archive the binary links in the core's place, nil when the core's
-	// archive runs every behavior its engines compose: Write writes it as
-	// projectengine.LinkFile, which the local target builds the archive
-	// from (D58).
-	EngineLink *projectengine.Link
 
 	// GoVersion and RustVersion are the toolchain pins.
 	GoVersion   string
@@ -402,6 +371,31 @@ type Loopback struct {
 	Serves []string
 }
 
+// planLoopback is the loopback key of a server that calls an API it serves
+// itself, whose operations have a service clause, and which of its clients
+// send it, by index: apis are the APIs it serves, apiOf giving each one's
+// service and whether its operations have a service clause, clients its
+// clients, clientOf giving the service each calls, and take the variable
+// of the key. It is nil, and no client sends it, when no client calls such
+// an API.
+func planLoopback[A, C any](apis []A, apiOf func(A) (string, bool), clients []C, clientOf func(C) string, take func(string) string) (*Loopback, []bool) {
+	serves := make([]string, len(apis))
+	guarded := map[string]bool{}
+	for i, a := range apis {
+		service, guard := apiOf(a)
+		serves[i] = service
+		guarded[service] = guard
+	}
+	sends := make([]bool, len(clients))
+	for i, c := range clients {
+		sends[i] = guarded[clientOf(c)]
+	}
+	if !slices.Contains(sends, true) {
+		return nil, sends
+	}
+	return &Loopback{Var: take("loopback"), Serves: serves}, sends
+}
+
 // Job is the job a job's entrypoint runs: its @job class and the method of
 // the API's Jobs interface that runs it. A TypeScript job on Workers also
 // reads the timeout of a try, and how many tries a run makes, from it
@@ -433,14 +427,20 @@ type Worker struct {
 	// Workers, which it builds from the API's Deps (D104). Method is empty
 	// then. Nil for an ordinary worker.
 	Behavior *apigen.BehaviorWorkerInfo
+
+	// Runtime is set for a @worker of a queue the runtime handles (D190,
+	// D192, D187; apigen.WorkerInfo.Runtime): its main builds the API's
+	// Deps, with the runtime wired, and runs the queue the API package's
+	// QueueFunc builds, calling no NewWorkers.
+	Runtime   string
+	QueueFunc string
 }
 
-// Background reports whether the entrypoint is a job's, a worker's, an
-// engine's runner's or a deriver's, which serves no request: it mounts no
-// routes, listens on no port, verifies no end user or caller, and decrypts
-// no payload.
+// Background reports whether the entrypoint is a job's, a worker's or a
+// deriver's, which serves no request: it mounts no routes, listens on no
+// port, verifies no end user or caller, and decrypts no payload.
 func (s *Server) Background() bool {
-	return s.Job != nil || s.Worker != nil || s.Runner != nil || s.Deriver != nil
+	return s.Job != nil || s.Worker != nil || s.Deriver != nil
 }
 
 // Deriver is the deriver a Go deriver's entrypoint runs (D146): its
@@ -454,8 +454,7 @@ type Deriver struct {
 
 // DerivedPermissions are the permissions the deriver holds as a behavior
 // caller: each Derived config's permission, which the core asks of a pull
-// and a settle. A table's name, which the engine's permission policy asks
-// of a deriver of engine types, is left out.
+// and a settle.
 func (d *Deriver) DerivedPermissions() []string {
 	var out []string
 	for _, permission := range d.Permissions {
@@ -539,6 +538,12 @@ type API struct {
 	// which read through the ORM of its database and run through each
 	// graph's facade, GraphsOf its ORM (D138).
 	Graphs bool
+	// RowFeatures is true when the API serves a table's references and
+	// files, which run through the ORM of its database (#723), and
+	// Attachments when one of them reads the bucket that holds the files,
+	// AttachmentsOf its Deps.
+	RowFeatures bool
+	Attachments bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -571,16 +576,20 @@ type API struct {
 	// (D140).
 	Idempotent bool
 
-	// Engine is the engine Deps holds, of the API's engine database (D58),
-	// nil without one; MountsEngine is true for the API whose router
-	// mounts its routes, the first on the database, on a server.
-	Engine       *Engine
-	MountsEngine bool
-
 	// Providers is true for an API whose Deps holds runtime providers
 	// (D159, D184), which the entrypoint reads from its config with the
 	// API package's ProvidersOf.
 	Providers bool
+
+	// Wiring is the runtime the entrypoint wires over the API's database
+	// (D190, D192, D187, D180), nil for none (go_wiring.go).
+	Wiring *apigen.DepsWiring
+
+	// MCP is true for a server's API that serves its MCP endpoint (D81,
+	// #660), and MCPConfirmationKey the expression of its config that
+	// holds the key the endpoint signs confirmations with (go_mcp.go).
+	MCP                bool
+	MCPConfirmationKey string
 }
 
 // Call is a client in an API's Deps.
@@ -642,8 +651,7 @@ type Database struct {
 	// Identity is true when an API on the database authenticates with
 	// the identity runtime: the server builds one identity store over
 	// the database's pool, from the descriptor constant of its Go types,
-	// whose import name and module are Types and TypesModule, which the
-	// entrypoint imports too for an engine database's EngineDocument.
+	// whose import name and module are Types and TypesModule.
 	Identity    bool
 	Types       string
 	TypesModule string
@@ -653,10 +661,6 @@ type Database struct {
 	// database/sql handle over the pool that each one's store reads
 	// through, as the identity store does.
 	Idempotency bool
-
-	// Engine is the engine the entrypoint opens on the database, an
-	// engine database (D58); nil for every other.
-	Engine *Engine
 
 	// Field is the derived config field the connection is read from, and
 	// From the expression that reads it from the first API's config.
@@ -717,11 +721,6 @@ type Docker struct {
 	// VersionGraphCrate its crate, empty when no database declares one.
 	VersionGraphGo    string
 	VersionGraphCrate string
-
-	// Engine is where the engine stage builds the engine's archive from,
-	// nil when the entrypoint opens no engine or downloads the release's
-	// archives (D58).
-	Engine *engineDocker
 
 	// Rules is where the rules stage builds the behaviors' core's archive
 	// from, nil when no database the entrypoint connects to has a table
@@ -785,10 +784,8 @@ var reserved = []string{
 	"emulatorSigning", "emulatorKey", "objectOf", "bucket", "storage", "iterator", "option", "io", "rand", "rsa",
 	"x509", "pem", "strings", "sync", "url",
 	"workers", "worker", "queue", "concurrency",
-	"engine", "enginehttp", "openEngine", "engineURL", "mountEngine", "engineCaller", "engineStreams", "engineDocument",
-	"engineSetup", "deployEngine", "startRunner", "engineTimeout", "cloudSQLEngineURL", "cloudSQLProxy", "cloudSQLDialerOf",
-	"runner", "runtimemiddleware", "identity", "serviceauth", "streams", "filepath", "slog",
-	"openedEngine", "cloudSQLEngineSocket", "keywordValue", "apperror", "principal", "stop",
+	"cloudSQLProxy", "cloudSQLDialerOf", "runtimemiddleware", "identity", "serviceauth", "streams", "filepath", "slog",
+	"keywordValue", "apperror", "principal", "stop",
 	"openMemoryStore", "openRedisStore", "redisStore", "redisOptions", "memoryStoreRetryBackoff", "installRedisLog",
 	"isConnectionError", "redis", "maintnotifications", "memorystore", "tls", "strconv",
 }
@@ -884,6 +881,9 @@ func Plan(in Input) (*Server, error) {
 		}
 		s.Kind, s.Binary = "worker", "worker"
 		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace, Behavior: o.Workers[i].Behavior}
+		if o.Workers[i].Runtime != "" {
+			s.Worker.Runtime, s.Worker.QueueFunc = o.Workers[i].Runtime, o.Workers[i].QueueFunc()
+		}
 	case in.Deriver != nil:
 		if len(in.APIs) != 1 {
 			return nil, fmt.Errorf("stack %s: deriver %s runs a deriver of %d APIs; a deriver belongs to one", in.Stack, in.Server, len(in.APIs))
@@ -939,6 +939,8 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Behaviors = o.HasBehaviorEndpoints()
 			apis[i].Tables = o.HasTableEndpoints()
 			apis[i].Graphs = o.HasGraphEndpoints()
+			apis[i].RowFeatures = o.HasRowFeatureEndpoints()
+			apis[i].Attachments = o.RowFeatureBucket() != ""
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -984,11 +986,8 @@ func Plan(in Input) (*Server, error) {
 				}
 				d.Queues = o.Deps.Queues
 				if o.Deps.SQLite {
-					// A Go server and job open the SQLite file (D116); a
-					// worker claims its queue on Postgres alone.
-					if s.Worker != nil {
-						return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Go server and job open a SQLite file, and a Go worker claims its queue on Postgres alone (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
-					}
+					// A Go server, job and worker open the SQLite file
+					// (D116), and a worker claims its queue there (#717).
 					d.SQLite, d.FieldKeys = true, ""
 				}
 				databases[db] = d
@@ -1103,16 +1102,10 @@ func Plan(in Input) (*Server, error) {
 		}
 		// A job or a worker serves no request, so it turns no client away.
 		api.ClientVersions = o.HasEnvConfig() && o.EnvConfig.ClientVersions && !s.Background()
-	}
-	if err := s.planEngines(in, apis, taken); err != nil {
-		return nil, err
-	}
-	for _, d := range s.Databases {
-		if d.SQLite && d.Engine != nil {
-			return nil, fmt.Errorf("stack %s: %s %s opens the engine of %s, whose DB service lists sqlite first; a Go server opens the ORM, the identity store and the idempotency keys on a SQLite file, and the engine on Postgres alone (D58, D116)", in.Stack, s.Kind, in.Server, d.Service)
-		}
+		planMCP(api, o, s)
 	}
 	s.APIs = apis
+	s.planWiring(in)
 	if s.Worker != nil {
 		s.Worker.Database = apis[0].Database
 	}
@@ -1128,11 +1121,7 @@ func Plan(in Input) (*Server, error) {
 	if err := s.planModule(in, dir); err != nil {
 		return nil, err
 	}
-	in.opensEngine = len(s.Engines) > 0
 	in.linksRules = slices.ContainsFunc(in.APIs, func(a APIInput) bool { return a.Output.Deps.Rules })
-	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir); err != nil {
-		return nil, err
-	}
 	s.Docker, s.NoDocker, err = planDocker(in, dir)
 	if err != nil {
 		return nil, err
@@ -1154,17 +1143,11 @@ func (s *Server) planLoopback(taken names) {
 	if s.Background() {
 		return
 	}
-	serves := make([]string, len(s.APIs))
-	guarded := map[string]bool{}
-	for i, a := range s.APIs {
-		serves[i] = a.Service
-		guarded[a.Service] = a.ServiceAuth
-	}
-	for _, c := range s.Clients {
-		c.Loopback = guarded[c.Service]
-	}
-	if slices.ContainsFunc(s.Clients, func(c *Client) bool { return c.Loopback }) {
-		s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
+	var sends []bool
+	s.Loopback, sends = planLoopback(s.APIs, func(a *API) (string, bool) { return a.Service, a.ServiceAuth },
+		s.Clients, func(c *Client) string { return c.Service }, taken.take)
+	for i, c := range s.Clients {
+		c.Loopback = sends[i]
 	}
 }
 
@@ -1266,11 +1249,6 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 	d.Dockerfile = path.Join(d.Context, DockerFile)
 	include := []string{d.Context}
 	if archives != nil {
-		// The release's archives hold the core's engine archive beside
-		// superscalar's and the version graph's (D58), not a project's.
-		if p := in.EngineProject; p != nil {
-			return nil, fmt.Sprintf("the engine of %s composes behaviors the release's engine archive does not run, so the image builds the archive of the project's engine crate %s, whose crates the engine's checkout holds and no release ships (D58, amended), and the naming file's [paths] scalar_go is unset; set scalar_go, engine_go and the engine crates' keys (engine_rust, engine_behaviors_rust, engine_workqueue_rust, engine_commerce_rust, engine_abi_rust) to a checkout's runtimes", p.Database, p.Dir), nil
-		}
 		d.Archives = archives
 		if in.VersionGraphGo != "" {
 			if d.VersionGraphGo, ok = rel(in.VersionGraphGo); !ok {
@@ -1290,22 +1268,6 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		}
 		d.VersionGraphCrate = path.Join(path.Dir(d.VersionGraphGo), "rust")
 		include = append(include, d.VersionGraphGo, d.VersionGraphCrate+"/Cargo.toml", d.VersionGraphCrate+"/Cargo.lock", d.VersionGraphCrate+"/src")
-	}
-	if in.opensEngine && in.EngineGo == "" {
-		return nil, "the entrypoint opens the engine (D58), and the naming file's [paths] engine_go, the engine's Go binding, whose Cargo workspace the image builds the engine's archive from, is unset while [paths] scalar_go names a checkout to build superscalar's from; set engine_go to the same checkout's runtime/engine/go", nil
-	}
-	if in.EngineGo != "" {
-		engine, why := planEngineDocker(in.EngineGo, in.EngineProject, root, rel, "the engine's Go binding")
-		if engine == nil {
-			return nil, why, nil
-		}
-		d.Engine = engine
-		include = append(include, engine.Go, engine.Workspace)
-		include = append(include, engine.Crates...)
-		if engine.Project != "" {
-			include = append(include, engine.Project)
-			include = append(include, engine.ProjectCrates...)
-		}
 	}
 	if in.linksRules {
 		if in.RulesGo == "" {
@@ -1418,8 +1380,6 @@ func Write(s *Server, dir string) error {
 		main = "worker.go.tmpl"
 	case s.Deriver != nil:
 		main = "deriver.go.tmpl"
-	case s.Runner != nil:
-		main = runnerTemplate
 	}
 	files := []struct{ template, name string }{
 		{main, MainFile},
@@ -1447,14 +1407,6 @@ func Write(s *Server, dir string) error {
 	}
 	if err := writeIdentity(s, dir); err != nil {
 		return err
-	}
-	if err := writeEngine(s, dir); err != nil {
-		return err
-	}
-	if s.EngineLink != nil {
-		if err := projectengine.WriteLink(dir, *s.EngineLink); err != nil {
-			return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
-		}
 	}
 	return writeCORS(s, dir)
 }
@@ -1647,9 +1599,6 @@ func templateFuncs() template.FuncMap {
 		"anyCORS": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })
 		},
-		"anyMountsEngine": func(apis []*API) bool {
-			return slices.ContainsFunc(apis, func(a *API) bool { return a.MountsEngine })
-		},
 		"tsQuote":   tsQuote,
 		"join":      strings.Join,
 		"joinNames": joinNames,
@@ -1677,7 +1626,7 @@ func templateFuncs() template.FuncMap {
 
 // tsQuote is s as a TypeScript string literal, in single quotes.
 func tsQuote(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
+	return tsutil.Quote(s)
 }
 
 // joinNames joins names as a sentence lists them: a, b and c.

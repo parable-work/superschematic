@@ -13,12 +13,6 @@ mod auth;
 mod body;
 // The provider-neutral interface of a bucket an API lists (D54).
 pub mod bucket;
-#[cfg(any(
-    feature = "logging",
-    feature = "postgres",
-    feature = "gcs",
-    feature = "sqlite"
-))]
 mod civil;
 /// The oldest version of each client an API serves, and the 426 that
 /// turns an older one away (D143).

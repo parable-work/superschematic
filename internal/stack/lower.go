@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -37,7 +38,7 @@ func (r *resolver) produce(owner string, phase ir.ResourcePhase, resources []*ir
 // everything into the graph.
 func (r *resolver) lower(out *ir.ResolvedEnvironment) {
 	var records []*ir.DNSRecord
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		ctx := registry.PlatformContext{Environment: r.stackEnvironment(), Deployable: cloneDeployable(d.res)}
 		lowered, err := d.platform.Lower(ctx)
@@ -219,7 +220,7 @@ func (r *resolver) mergeResources(out *ir.ResolvedEnvironment) {
 			slices.Sort(prev.Owners)
 		}
 	}
-	for _, id := range sortedKeys(byID) {
+	for _, id := range slices.Sorted(maps.Keys(byID)) {
 		out.Resources.Resources = append(out.Resources.Resources, byID[id])
 	}
 }

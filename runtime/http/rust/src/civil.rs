@@ -1,5 +1,8 @@
 //! The proleptic Gregorian date of a day since the Unix epoch, for the times
-//! the log writes and the dates and timestamps a queue's claim reads (D65).
+//! the log writes, the dates and timestamps a queue's claim reads (D65), a
+//! provider's and a confirmation's times, the identity store's timestamps and
+//! the repositories' calendar: the one copy of Howard Hinnant's algorithms in
+//! this crate, for any day before or after the epoch (year 0 is 1 BC).
 
 /// The year, month (1 to 12) and day (1 to 31) of `days` since 1970-01-01:
 /// Howard Hinnant's `civil_from_days`.
@@ -18,7 +21,6 @@ pub(crate) fn from_days(days: i64) -> (i64, i64, i64) {
 
 /// The days since 1970-01-01 of a proleptic Gregorian date: Howard
 /// Hinnant's `days_from_civil`.
-#[cfg(any(feature = "gcs", feature = "sqlite", feature = "postgres"))]
 pub(crate) fn to_days(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);
@@ -49,7 +51,7 @@ pub(crate) fn basic_timestamp(t: std::time::SystemTime) -> String {
 /// Reads an RFC 3339 timestamp, as Cloud Storage writes an object's
 /// `updated`: `2026-10-19T12:34:56.789Z`, with a fraction of up to nine
 /// digits, and `Z` or an offset. `None` for anything else.
-#[cfg(any(feature = "gcs", feature = "postgres"))]
+#[cfg(any(feature = "gcs", feature = "postgres", feature = "sqlite"))]
 pub(crate) fn parse_rfc3339(text: &str) -> Option<std::time::SystemTime> {
     use std::time::{Duration, UNIX_EPOCH};
     let b = text.as_bytes();

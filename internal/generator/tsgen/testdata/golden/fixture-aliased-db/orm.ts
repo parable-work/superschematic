@@ -139,7 +139,7 @@ export interface CompanyUses {
       result: { alias: string; unchanged?: boolean };
     };
   }, T.IdentityUUID> & TableOperations<{
-    /** Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing. */
+    /** Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing. A row the caller may not read is none (D156). */
     resolve: {
       params: { name: string };
       result: { row: { alias: boolean; key: string; name: string } | null };
@@ -226,6 +226,7 @@ export const companyTable: TableDefinition = {
         source: "Contact",
         field: "company",
         repoint: { sql: "UPDATE contact SET company_id = $2 WHERE contact.company_id = $1" },
+        reach: { type: "Contact", rows: "SELECT 1 FROM contact WHERE contact.company_id = $1" },
       },
     ],
   },
@@ -429,7 +430,7 @@ export interface TagUses {
       result: { alias: string; unchanged?: boolean };
     };
   }, T.IdentityUUID> & TableOperations<{
-    /** Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing. */
+    /** Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing. A row the caller may not read is none (D156). */
     resolve: {
       params: { name: string };
       result: { row: { alias: boolean; key: string; name: string } | null };
@@ -563,7 +564,8 @@ export const fixtureAliasedDbRules: RulesLayout = {
             {
               "name": "resolve",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "row"
             }
           ],
           "tables": [
@@ -669,7 +671,8 @@ export const fixtureAliasedDbRules: RulesLayout = {
             {
               "name": "resolve",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "row"
             }
           ],
           "tables": [

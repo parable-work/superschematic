@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -113,9 +114,17 @@ type RuntimeProvider struct {
 	// loader's alone, and no schema.json holds it.
 	Dir string `json:"-"`
 
-	// Path is the package's directory as the API's config lists it,
-	// relative to the service's directory, in slash form.
+	// Path is the entry of the API's config that lists the provider: its
+	// directory relative to the service's directory, in slash form, or its
+	// npm name (Npm).
 	Path string `json:"path"`
+
+	// Npm is the package's npm name when the API's config lists it by that
+	// name rather than by its directory (D159, #608): the name a
+	// TypeScript server imports it by, which resolves from the service's
+	// node_modules. Dir is where the loader found it there. Empty for a
+	// provider listed by its directory.
+	Npm string `json:"npm,omitempty"`
 
 	// Module is the Go module the directory holds, as its go.mod names it
 	// (D184): the module a Go server imports, whose root package exports
@@ -266,7 +275,7 @@ func (s *Schema) ProviderSlotsOf() (map[string]string, error) {
 	}
 	var slots map[string]string
 	from := map[string]string{}
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		td := s.Types[name]
 		if td == nil || td.ProviderSlots == nil {
 			continue
@@ -274,7 +283,7 @@ func (s *Schema) ProviderSlotsOf() (map[string]string, error) {
 		if !td.EnvVars {
 			return nil, fmt.Errorf("%s: @providers is on %s, which is no @envVars class; a provider slot is a config field (D159)", s.Name, name)
 		}
-		for _, slot := range sortedStringMapKeys(td.ProviderSlots) {
+		for _, slot := range slices.Sorted(maps.Keys(td.ProviderSlots)) {
 			iface := td.ProviderSlots[slot]
 			if prev, ok := slots[slot]; ok && prev != iface {
 				return nil, fmt.Errorf("%s: slot %s takes %s on %s and %s on %s; a slot takes one interface (D159)", s.Name, slot, prev, from[slot], iface, name)

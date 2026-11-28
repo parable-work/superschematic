@@ -94,6 +94,10 @@ const revisionsFixture = "fixture-revisions-db"
 // marks a shared table's, none with a repository.
 const commentsFixture = "fixture-comments-db"
 
+// sqliteReferencesFixture holds references, attachments and an audience,
+// generated with its repositories on SQLite (D182, #611).
+const sqliteReferencesFixture = "fixture-references-db"
+
 // derivedProvenanceFixture is the DB fixture whose Ticket implements
 // Derived and Provenance beside its status Workflow and whose Article
 // implements Derived (D73 on D103's step 4): their operations under
@@ -158,7 +162,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture || svc == blueprintFixture || svc == aliasedFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture || svc == blueprintFixture || svc == aliasedFixture || svc == sqliteReferencesFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -175,7 +179,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 		// claims on SQLite too; it, fixture-ledger-db, the tables both
 		// ORMs are held to, and fixture-workflow-db, whose writes run
 		// through the behaviors' core, have repositories on SQLite (D116).
-		SQLite:   svc == queueFixture || svc == tableParityFixture || svc == workflowFixture,
+		SQLite:   svc == queueFixture || svc == tableParityFixture || svc == workflowFixture || svc == sqliteReferencesFixture,
 		Registry: reg,
 		Clock:    codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
@@ -218,6 +222,7 @@ func TestWriteORMGolden(t *testing.T) {
 		// advance them, and Depot's soft deletes carry the bump.
 		{"fixture-fenced-db", []string{"repository_courier.go", "repository_delivery.go", "repository_depot.go", "repository_parcel.go", "fences.go"}},
 		{"fixture-user-model-db", []string{
+			"repository_oauth_client.go", "repository_oauth_code.go", "repository_oauth_grant.go", "repository_oauth_token.go",
 			"repository_role.go", "repository_session.go", "repository_user.go", "repository_user_api_key.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
@@ -294,6 +299,14 @@ func TestWriteORMGolden(t *testing.T) {
 		// Comments(), every writing one beside the row, no repository of a
 		// sub-table or of the shared table, no upserts, and no queue.
 		{commentsFixture, []string{"repository_review.go", "repository_ticket.go", "rowrefs.go", "rules.go"}},
+		// References, attachments and an audience on SQLite (D154, D156,
+		// D182, #611): rowrefs.go's host on the SQLite database, which
+		// rowrefs writes SQLite's statements through, and access_sqlite.go,
+		// which holds the repositories on SQLite to the caller.
+		{sqliteReferencesFixture, []string{
+			"access.go", "access_sqlite.go", "queues.go", "queues_sqlite.go", "repository_note.go", "repository_ticket.go",
+			"rowrefs.go", "rules.go", "sqlite.go", "sqlite_note.go", "sqlite_ticket.go",
+		}},
 		// Tables of Derived and Provenance (D73 on D103's step 4): their
 		// operations under Derived() and Provenance(), Derived's of the
 		// table as a whole taking no key, no repository of a sub-table, no
@@ -520,9 +533,8 @@ func TestGenerateFixtureDBShape(t *testing.T) {
 		t.Fatalf("expected one hasMany relationship on Tenant, got %+v", tenant.Relationships)
 	}
 	users := tenant.Relationships[0]
-	if users.HasManyParentRelationField != "Tenant" || users.HasManyParentFilterField != "TenantID" {
-		t.Errorf("hasMany parent mapping = (%q, %q), want (Tenant, TenantID)",
-			users.HasManyParentRelationField, users.HasManyParentFilterField)
+	if back := users.Back; back == nil || *back != (HasManyBack{GoField: "Tenant", FilterField: "TenantID"}) {
+		t.Errorf("hasMany back relation = %+v, want Tenant, by TenantID, required", back)
 	}
 
 	// hasMany relationships must not participate in column scan order.

@@ -86,6 +86,7 @@ export interface AudienceDef {
   default?: string;
   inheritFrom?: string;
   owner?: string;
+  queue?: string;
 }
 
 export interface BehaviorOperationsConfig {
@@ -107,8 +108,8 @@ export interface BehaviorRef {
   /**
    * True for a use a DB table implements (D103), `implements Timers<Ticket,
    * Config>`: anchored on the type, on a table that stays a table. A use on
-   * the whole type without it is @behavior's, which makes the type an engine
-   * type.
+   * the whole type without it is @behavior's, which a General schema takes
+   * (D16) and a DB type does not.
    */
   implements?: boolean;
   /**
@@ -146,6 +147,7 @@ export interface CalendarSourceDef {
   name: string;
   occurrences?: boolean;
   owner?: string;
+  permission?: string;
   title: string;
 }
 
@@ -176,7 +178,6 @@ export interface DeployableRef {
   deployable?: string;
   deriver?: string;
   job?: string;
-  runner?: boolean;
   service?: ServiceRef;
   worker?: string;
 }
@@ -467,6 +468,19 @@ export interface IdentityFirstUser {
   role: string;
 }
 
+export interface IdentityOAuthClients {
+  metadataDocuments?: boolean;
+  registration?: boolean;
+}
+
+export interface IdentityOAuthConfig {
+  accessTokenTtlSeconds?: number;
+  clients?: IdentityOAuthClients;
+  consentPath?: string;
+  grantMaxTtlSeconds?: number;
+  refreshTokenTtlSeconds?: number;
+}
+
 export interface ImageConstraints {
   maxAspectRatio?: number;
   maxHeight?: number;
@@ -624,7 +638,9 @@ export interface OperationSet {
   operations: FieldDef[];
   permissions?: string[];
   public?: boolean;
+  rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
+  triageOperations?: TriageOperationsConfig;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
 }
@@ -643,7 +659,9 @@ export interface OperationSetFile {
   operations: FieldDef[];
   permissions?: string[];
   public?: boolean;
+  rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
+  triageOperations?: TriageOperationsConfig;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
 }
@@ -796,6 +814,13 @@ export interface RoleSeed {
   permissions: string[];
 }
 
+export interface RowFeatureOperationsConfig {
+  bucket?: string;
+  operations?: string[];
+  permissions?: { [key: string]: string[] };
+  type: string;
+}
+
 export interface RowReferencesDef {
   cleared?: string;
   maxPerRow?: number;
@@ -863,6 +888,11 @@ export interface SearchableDef {
   queue: string;
   scope?: string;
   title: string;
+}
+
+export interface SeedRows {
+  key?: string[];
+  rows: { [key: string]: unknown }[];
 }
 
 export interface ServerDecl {
@@ -974,6 +1004,11 @@ export interface TraitRef {
   name: string;
 }
 
+export interface TriageOperationsConfig {
+  party: string;
+  refersTo?: string;
+}
+
 export interface TypeDef {
   accessGrants?: AccessGrantsDef;
   accessLog?: AccessLogDef;
@@ -983,8 +1018,7 @@ export interface TypeDef {
   audience?: AudienceDef;
   /**
    * The behaviors the type composes, in the order their checks run. A registry
-   * admits the behaviors it registers: the core's, which the engine
-   * implements, and its extensions'.
+   * admits the behaviors it registers: the core's and its extensions'.
    */
   behaviors?: BehaviorRef[];
   bundles?: BundleRef[];
@@ -1028,6 +1062,7 @@ export interface TypeDef {
   runRequests?: RunRequestsDef;
   searchable?: SearchableDef;
   seedRoles?: RoleSeed[];
+  seedRows?: SeedRows;
   server?: ServerDecl;
   source?: SourceRef;
   sqlName?: string;
@@ -1090,6 +1125,7 @@ export interface UnionFile {
 
 export interface UserAdministrationConfig {
   apiKeys?: boolean;
+  oauth?: boolean;
   path?: string;
 }
 
@@ -1101,6 +1137,7 @@ export interface UserSessionsConfig {
   defaultRoles?: string[];
   firstUser?: IdentityFirstUser;
   noLogin?: boolean;
+  oauth?: IdentityOAuthConfig;
   path?: string;
   register?: boolean;
   registration?: string;

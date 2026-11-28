@@ -56,11 +56,11 @@ import type { {{ join .DatabaseTypeImports ", " }} } from '{{ .Deps.DatabaseType
 {{- if .DepsORM }}
 import type { {{ .Deps.ORM }}{{ if .WorkerEvents }}, {{ .DepsTx }}{{ end }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
 {{- end }}
-{{- if .Deps.Engine }}
-import type { EngineBackground } from '{{ .Deps.Engine.Package }}/server';
+{{- if .DepsRuntimeTypes }}
+import type { {{ join .DepsRuntimeTypes ", " }} } from '{{ .RuntimePackage }}{{ .RuntimeEntry }}';
 {{- end }}
-{{- if .HasAgents }}
-import type { Agents, AgentsOptions } from '{{ .RuntimePackage }}/postgres';
+{{- if .HasProviders }}
+import type { Providers } from '{{ .RuntimePackage }}/providers';
 {{- end }}
 {{- if .WorkerEventTypes }}
 import type { {{ join .WorkerEventTypes ", " }} } from '{{ .TypesPackage }}/types';
@@ -139,16 +139,6 @@ export interface Deps {
    */
   readonly {{ .Field }}: MemoryStore;
 {{- end }}
-{{- with .Deps.Engine }}
-  /**
-   * The engine of {{ .Database }}, the API's engine database (D58), which the
-   * entrypoint opens in the background, so it starts while the database is
-   * not up yet: engine.wait() resolves with it once it opens, and
-   * engine.engine() returns it at once, or throws why it is not open. Its
-   * types' instances are the engine's, in namespace {{ .Namespace }}.
-   */
-  readonly engine: EngineBackground;
-{{- end }}
 {{- with .Deps.Agents }}
   /**
    * The agent dispatcher (D158, D183): createAgents over orm and the queue
@@ -161,6 +151,32 @@ export interface Deps {
    */
   readonly agents: Agents;
 {{- end }}
+{{- if .HasProviders }}
+  /**
+   * The runtime providers the environment's config names (D159): each slot
+   * of the API's @providers, made on first use from its settings, over the
+   * provider packages its config lists (providersOf). Each call core makes
+   * into one runs as the provider's own principal.
+   */
+  readonly providers: Providers;
+{{- end }}
+{{- with .Deps.Notifier }}
+  /**
+   * The notifier (D153): createNotifier over orm and the queue {{ .Dispatch }}{{ if $.HasProviders }},
+   * sending on every channel slot of providers{{ end }}, with the options the implementation's
+   * createRuntimeOptions answers. A worker of {{ .Dispatch }} hands each message to
+   * notifier.handle; a server mounts its relay callbacks and the inbox
+   * (runtimeRoutes).
+   */
+  readonly notifier: Notifier;
+{{- end }}
+{{- with .Deps.Inbound }}
+  /**
+   * The inbound path (D157): createInbound over orm, the notifier and the
+   * queue {{ .Runs }}, which every message a relay receives goes down.
+   */
+  readonly inbound: Inbound;
+{{- end }}
   /** The API's logger. */
   readonly logger: Logger;
 }
@@ -170,24 +186,67 @@ export interface Deps {
  * the API's Deps. The scaffolded implementation exports create: Constructor.
  */
 export type Constructor = (deps: Deps) => Implementations | Promise<Implementations>;
+{{- if .HasRuntime }}
+
+/**
+ * Deps but the members the entrypoint builds over it (withRuntime): what
+ * createRuntimeOptions{{ if .HasAgents }} and createAgentOptions{{ end }} are called with.
+ */
+export type DepsBase = {{ if .BuildsRuntime }}Omit<Deps, {{ join .RuntimeMembers " | " }}>{{ else }}Deps{{ end }};
+
+/**
+ * What the runtime pieces are built with beside what the entrypoint fills
+ * (runtime.ts): each piece's options, which override the generated ones.
+ */
+export interface RuntimeOptions {
+{{- if .HasNotifier }}
+  /** The notifier's (D153) beside its ORM and its dispatch queue: its reply actions by event kind, its default channels, its renderer. */
+  readonly notifier?: Partial<Omit<NotifierOptions, 'orm' | 'dispatch'>>;
+  /** Where the relays' callbacks and the inbox are (notifierRoutes): /webhooks and /api/inbox unless set. */
+  readonly notifierRoutes?: Pick<NotifierRoutesOptions, 'webhooks' | 'inbox'>;
+{{- end }}
+{{- if .HasInbound }}
+  /** The inbound path's (D157) beside its ORM, the notifier and its queue: the bucket a message's files go to, the inbound address, the approval policy of a send. */
+  readonly inbound?: Partial<Omit<InboundOptions, 'orm' | 'notifier' | 'runs'>>;
+{{- end }}
+{{- if .HasCalendar }}
+  /** The calendar's routes' and MCP tool's (D152): each source's permission, the routes' path, a feed's window. */
+  readonly calendar?: Omit<CalendarRoutesOptions, 'orm' | 'authenticate'>;
+{{- end }}
+{{- if .HasSearch }}
+  /** Search's (D155), for its route, its MCP tool and its indexing queue's handler: each table's permission, embeddings. */
+  readonly search?: SearchOptions & { readonly base?: string };
+{{- end }}
+{{- if .HasFileProcessing }}
+  /** The file processor's (D154, D159), for processPendingFiles: the bucket the attachments' objects are in, the preview's size, the largest file read. */
+  readonly files?: Omit<FileProcessingOptions, 'orm' | 'providers'>;
+{{- end }}
+}
+
+/**
+ * The type of the implementation's createRuntimeOptions, which it may
+ * export: the entrypoint calls it with DepsBase and builds the runtime
+ * pieces with its answer, or with none when it exports none.
+ */
+export type RuntimeOptionsConstructor = (deps: DepsBase) => RuntimeOptions | Promise<RuntimeOptions>;
+{{- end }}
 {{- if .HasAgents }}
 
 /**
  * What the agent dispatcher is built with beside Deps.orm and its queue,
  * which the entrypoint fills (D183): the URL a run's sandbox instance
- * reaches the agent routes at, the providers its sandbox and model slots
- * name (D159), the notifier and the inbound path, the app's tools and the
- * rest of createAgents' options.
+ * reaches the agent routes at, the app's tools and the rest of
+ * createAgents' options.{{ if or .HasProviders .HasNotifier .HasInbound }} The entrypoint fills{{ if .HasProviders }} the providers (D159){{ end }}{{ if .HasNotifier }}{{ if .HasProviders }},{{ end }} the notifier{{ end }}{{ if .HasInbound }} and the inbound path{{ end }} too, which these override.{{ end }}
  */
 export type AgentOptions = Omit<AgentsOptions, 'orm' | 'requests'>;
 
 /**
  * The type of the implementation's createAgentOptions, which the
- * entrypoint calls with Deps but its dispatcher, then builds Deps.agents
- * with its answer (withAgents). The scaffolded implementation exports
+ * entrypoint calls with DepsBase, then builds Deps.agents with its answer
+ * (withRuntime). The scaffolded implementation exports
  * createAgentOptions: AgentOptionsConstructor.
  */
-export type AgentOptionsConstructor = (deps: Omit<Deps, 'agents'>) => AgentOptions | Promise<AgentOptions>;
+export type AgentOptionsConstructor = (deps: DepsBase) => AgentOptions | Promise<AgentOptions>;
 {{- end }}
 {{- if .ChecksEndUsers }}
 
@@ -323,7 +382,7 @@ export type DerivedAnswer<T> =
  * The derivers of {{ .SchemaName }}, a member per @deriver class. A deriver's
  * entrypoint pulls the stale derived fields of its schemas and calls the
  * method of each with a signal that aborts when the deriver stops. A value
- * of the wrong type fails to compile; one {{ .DeriverJudge }} still refuses counts
+ * of the wrong type fails to compile; one the behaviors' core still refuses counts
  * an attempt.
  */
 export interface Derivers {

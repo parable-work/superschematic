@@ -20,6 +20,18 @@ import (
 // table's, for a party or an agent run that calls through grants, to the
 // rows one of its grants reaches.
 
+// accessChoice reports whether field is one of the string fields @audience
+// adds a table with a default (D156): audience, agentAccess and
+// effectiveAgents, each one of a few values the table's trigger checks or
+// sets, "" never among them. A create that leaves one at its Go zero value
+// takes its default, as it takes an enum's (Field.EnumDefault), so a
+// struct literal that names neither audience nor agentAccess inserts the
+// table's, as a create through the API, whose body takes the schema's
+// defaults, does.
+func accessChoice(field *ir.FieldDef) bool {
+	return field.Origin == ir.OriginAccess && field.TypeRef.Name == "string" && !field.TypeRef.IsArray && !field.TypeRef.IsMap
+}
+
 // AccessModel is what access.go is generated from.
 type AccessModel struct {
 	// Tables are the database's tables, by type, sorted: each one's
@@ -39,6 +51,18 @@ type AccessModel struct {
 	// a database with an @audience table or grants. A database with an
 	// access log alone has only its log.
 	Held bool
+
+	// Resolves are the tables whose @audience names a queue (#734), by
+	// type, sorted, each with the statement that resolves a batch of its
+	// rows that inherit from one parent: audience_resolve.go's
+	// ResolveAudience runs it.
+	Resolves []AudienceResolve
+}
+
+// AudienceResolve is a table whose @audience names a queue, by its type,
+// and its resolve statement (sqlutil.AudienceModel's Resolve).
+type AudienceResolve struct {
+	Type, Statement string
 }
 
 // AccessTable is one table as access reads it.
@@ -125,6 +149,9 @@ func accessOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Rep
 		}
 		if table.Audience != nil {
 			at.Effective, at.Agents = table.Audience.Effective, table.Audience.Agents
+			if table.Audience.Resolve != "" {
+				model.Resolves = append(model.Resolves, AudienceResolve{Type: table.Type, Statement: table.Audience.Resolve})
+			}
 		}
 		for _, rel := range table.ToOne {
 			if !served[rel.Target] {
@@ -155,6 +182,7 @@ func accessOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Rep
 		model.Tables = append(model.Tables, at)
 	}
 	slices.SortFunc(model.Tables, func(a, b AccessTable) int { return strings.Compare(a.Type, b.Type) })
+	slices.SortFunc(model.Resolves, func(a, b AudienceResolve) int { return strings.Compare(a.Type, b.Type) })
 	return model, nil
 }
 
@@ -223,24 +251,17 @@ func (o *ORMOutput) HeldByAccess() bool {
 	return o.Access != nil && o.Access.Held
 }
 
-// sqliteAccessRefusal is why the repository of typeName refuses every
-// call on SQLite under the database's per-record access (D156), or "": the
-// Go repositories on SQLite (D116) keep to no audience and no grant's
-// reach, so in a database whose reads keep to a caller (Held) every table's
-// would read rows a held caller may not, and the server records its calls
-// in the access log on Postgres alone. The loader refuses such a service's
-// Go types on sqlite by decorator and table (verify/sqlite_features.go,
-// D182); this holds a generation that did not read the service's config,
-// whose Go ORM the DB kind writes always, to repositories that refuse,
-// naming why, as a table SQLite does not hold has.
-func sqliteAccessRefusal(access *AccessModel, typeName string) string {
-	switch {
-	case access == nil:
-		return ""
-	case access.Held:
-		return "its database keeps its rows to per-record access (D156), an audience or grants, which the Go repositories on SQLite do not hold yet (D180, D182)"
-	case access.Log == typeName:
-		return "it is the @accessLog table, which the Go server records its calls in on Postgres alone (D180)"
-	}
-	return ""
+// HasSQLiteAccess reports whether access_sqlite.go is written: a database
+// whose repositories keep to a caller (HeldByAccess) and that lists the
+// sqlite dialect, whose repositories on SQLite keep to the caller in
+// SQLite's words (D182, #611).
+func (o *ORMOutput) HasSQLiteAccess() bool {
+	return o.HeldByAccess() && o.HasSQLiteRepositories()
 }
+
+// SQLiteAudienceContains and SQLiteAudiencePlaceholder are how a read on
+// SQLite asks whether an effective audience holds one of a caller's ids,
+// and a parameter of one (sqlutil, D182): the TypeScript repositories' and
+// the Go ones' on SQLite alike.
+func (o *ORMOutput) SQLiteAudienceContains() string    { return sqlutil.SQLiteAudienceContains }
+func (o *ORMOutput) SQLiteAudiencePlaceholder() string { return sqlutil.SQLiteAudiencePlaceholder }

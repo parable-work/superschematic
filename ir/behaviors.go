@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 )
 
@@ -13,9 +14,9 @@ import (
 // against that declaration. The list order is the order its checks run in.
 //
 // A use is anchored on the whole type or on one field (D103). A type anchor
-// (Field empty) is the @behavior decorator's form (D16): it makes a DB type
-// an engine type, whose rows the engine keeps (D58), until D103's step 7
-// removes engine types, and a type lists such a behavior at most once. A
+// (Field empty) is the @behavior decorator's form (D16), which only a
+// General schema's type takes (a DB type is a table, D103), and a type
+// lists such a behavior at most once. A
 // field anchor is the field-type form, `status: Workflow<{ ... }>`: the type
 // stays a table, the behavior's declared fields become columns of it that
 // the loader adds as fields (see [FieldBehavior]), and a type may carry one
@@ -38,7 +39,7 @@ type BehaviorRef struct {
 	// Implements is true for a use a DB table implements, the type-anchored
 	// form on a table that stays a table (D103): `implements Timers<Ticket,
 	// Config>`. Field is empty. A type anchor without it is @behavior's
-	// (D16), which makes the type an engine type (D58).
+	// (D16), a General schema's.
 	Implements bool `json:"implements,omitempty" yaml:"implements,omitempty"`
 
 	// Config is the type's configuration of the behavior in canonical JSON
@@ -133,9 +134,8 @@ func CanonicalizeBehaviors(refs []BehaviorRef) error {
 }
 
 // TypeBehaviors returns td's @behavior uses, in list order (D16): those
-// anchored on the type and not implemented by a table. An implements use
-// is left out, so [TypeDef.IsEngineType] and every engine path see only
-// the decorator's form.
+// anchored on the type and not implemented by a table, which a General
+// schema's type takes and a DB type does not (D103).
 func (td *TypeDef) TypeBehaviors() []BehaviorRef {
 	return td.behaviorsWhere(func(ref BehaviorRef) bool { return !ref.FieldAnchored() && !ref.Implements })
 }
@@ -185,15 +185,6 @@ func (td *TypeDef) FieldBehavior(field string) (BehaviorRef, bool) {
 	return BehaviorRef{}, false
 }
 
-// IsEngineType reports whether td, a type of a DB schema, is an engine
-// type (D58): one that composes a behavior by @behavior, whose rows the
-// engine keeps in its own tables, so it gets no table, no repository and
-// no migration of its own. A type whose uses are all implements uses and
-// field uses is not one: it stays a table (D103).
-func (td *TypeDef) IsEngineType() bool {
-	return len(td.TypeBehaviors()) > 0
-}
-
 // OwnedFields returns td's fields a behavior owns ([FieldDef.Owned]), in
 // field order.
 func (td *TypeDef) OwnedFields() []*FieldDef {
@@ -225,7 +216,7 @@ func (s *Schema) FindBehavior() (typeName, behavior string, found bool) {
 		return "", "", false
 	}
 	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
-		for _, name := range sortedStringMapKeys(types) {
+		for _, name := range slices.Sorted(maps.Keys(types)) {
 			if td := types[name]; td != nil && len(td.Behaviors) > 0 {
 				return td.Name, td.Behaviors[0].Name, true
 			}
@@ -243,7 +234,7 @@ func (s *Schema) FindTableBehavior() (typeName string, use BehaviorRef, found bo
 		return "", BehaviorRef{}, false
 	}
 	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
-		for _, name := range sortedStringMapKeys(types) {
+		for _, name := range slices.Sorted(maps.Keys(types)) {
 			if uses := types[name].TableBehaviors(); len(uses) > 0 {
 				return types[name].Name, uses[0], true
 			}
@@ -335,7 +326,7 @@ func (s *Schema) BehaviorQueueOf(row, kind string) *TypeDef {
 	if s == nil {
 		return nil
 	}
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		if td := s.Types[name]; td != nil && td.BehaviorQueue != nil && td.BehaviorQueue.Row == row && td.BehaviorQueue.Kind == kind {
 			return td
 		}
@@ -353,7 +344,7 @@ func (s *Schema) FindFieldBehavior() (typeName, field, behavior string, found bo
 		return "", "", "", false
 	}
 	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
-		for _, name := range sortedStringMapKeys(types) {
+		for _, name := range slices.Sorted(maps.Keys(types)) {
 			if uses := types[name].FieldBehaviors(); len(uses) > 0 {
 				return types[name].Name, uses[0].Field, uses[0].Name, true
 			}

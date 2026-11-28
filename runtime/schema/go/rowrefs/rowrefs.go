@@ -29,8 +29,9 @@
 //
 // Nothing here opens a connection: the generated ORM implements Host over
 // its pool or its transaction and its repositories, and the definitions
-// are the ones it is generated with. Postgres alone: the loader refuses
-// either declaration on SQLite.
+// are the ones it is generated with. A Host runs Postgres's statements
+// unless it is a DialectHost of SQLite (D182, #611), whose statements are
+// SQLite's words of the same reads and writes (dialect.go).
 package rowrefs
 
 import (
@@ -237,7 +238,13 @@ func limitOf(limit int) (int, error) {
 	return limit, nil
 }
 
+// lock holds name's advisory lock to the end of the transaction on
+// Postgres. On SQLite the transaction holds the database's write lock from
+// its BEGIN IMMEDIATE, so there is none to take.
 func lock(ctx context.Context, h Host, name string) error {
+	if !wordsOf(h).locks() {
+		return nil
+	}
 	_, err := h.Query(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, name)
 	return err
 }
@@ -440,21 +447,39 @@ func integer(row Row, column string) int64 {
 	return 0
 }
 
+// timeOf is a time a row read holds: a time.Time on Postgres, its RFC
+// 3339 text on SQLite.
 func timeOf(row Row, column string) time.Time {
-	if t, ok := row[column].(time.Time); ok {
-		return t
+	if t := optionalTime(row, column); t != nil {
+		return *t
 	}
 	return time.Time{}
 }
 
 func optionalTime(row Row, column string) *time.Time {
-	if t, ok := row[column].(time.Time); ok {
-		return &t
+	switch v := row[column].(type) {
+	case time.Time:
+		return &v
+	case string, []byte:
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999"} {
+			if t, err := time.Parse(layout, text(row, column)); err == nil {
+				t = t.UTC()
+				return &t
+			}
+		}
 	}
 	return nil
 }
 
+// boolean is a boolean a row read holds: true on Postgres, 1 on SQLite.
 func boolean(row Row, column string) bool {
-	b, _ := row[column].(bool)
-	return b
+	switch v := row[column].(type) {
+	case bool:
+		return v
+	case int64:
+		return v != 0
+	case int:
+		return v != 0
+	}
+	return false
 }

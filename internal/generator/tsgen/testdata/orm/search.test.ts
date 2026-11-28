@@ -10,6 +10,7 @@ import {
   grantAuthenticator,
   indexSearch,
   issueGrant,
+  processFiles,
   reindexSearch,
   revokeGrant,
   searchRoutes,
@@ -17,8 +18,10 @@ import {
   type SearchEmbeddings,
   type SearchOptions,
 } from '@superschematic/http-runtime/postgres';
-import type { Principal } from '@superschematic/http-runtime';
+import { ObjectNotFoundError, type Bucket, type Principal } from '@superschematic/http-runtime';
+import { defineProvider, providersFrom, type FileProcessor } from '@superschematic/http-runtime/providers';
 import { createOrm, type FixtureSearchDbOrm } from './orm';
+import { paritySearches, parityAnswer, writeParityCorpus } from './search_parity';
 import { alice, bob, database, dsn, type TestDatabase } from './harness';
 
 const party = '3cKSm7Pv2EM8Wl4z4XvMh1';
@@ -191,6 +194,49 @@ describe.skipIf(dsn === '')('search across tables on Postgres', () => {
     expect(rows[0].n).toBe(0);
   });
 
+  test("a file's text the file processor extracts is indexed with its row (D154, D159, #702)", async () => {
+    // A completed upload of a plain text file asks its text: extraction pending.
+    const objects = new Map<string, Uint8Array>([['attachments/plan', new TextEncoder().encode('Hawthorn rows along the north wall.')]]);
+    const bucket = {
+      name: 'mem',
+      async get(name: string) {
+        const bytes = objects.get(name);
+        if (!bytes) throw new ObjectNotFoundError('mem', name);
+        return { object: { name, size: bytes.byteLength }, body: new Response(bytes).body! };
+      },
+      async put(name: string, body: Uint8Array) {
+        objects.set(name, body);
+        return { name, size: body.byteLength, created: true };
+      },
+    } as unknown as Bucket;
+    await db.pool.query(
+      `INSERT INTO unit_attachments (unit_id, name, media_type, size, content_hash, object_key, state, extraction)
+       VALUES ($1, 'plan.txt', 'text/plain', 35, $2, 'attachments/plan', 'ready', 'pending')`,
+      [uuidOf(ids.unitA), '1'.repeat(64)]
+    );
+    await drain();
+    expect((await found(user(alice), 'hawthorn')).result.total).toBe(0);
+    const plainText = defineProvider({
+      name: 'plain-text',
+      implements: 'files',
+      config: {},
+      create: (): FileProcessor => ({
+        mediaTypes: ['text/plain'],
+        extractText: async file => ({ text: new TextDecoder().decode(file.bytes) }),
+        preview: async () => null,
+      }),
+    });
+    const providers = providersFrom({ slots: { FILES: 'files' }, config: { FILES: 'plain-text' }, definitions: [plainText] });
+    expect(await processFiles({ orm, providers, bucket })).toEqual({ extracted: 1, previewed: 0, failed: 0 });
+    const { rows } = await db.pool.query(`SELECT extraction, extracted_text FROM unit_attachments WHERE object_key = 'attachments/plan'`);
+    expect(rows[0]).toEqual({ extraction: 'done', extracted_text: 'Hawthorn rows along the north wall.' });
+    // The write of the text enqueues the row, whose index row then holds it.
+    expect(await drain()).toBe(1);
+    const hawthorn = (await found(user(alice), 'hawthorn')).result.items;
+    expect(hawthorn.map(hit => `${hit.table}:${hit.key}`)).toEqual([`Unit:${ids.unitA}`]);
+    expect(hawthorn[0]!.matched).toBe('files');
+  });
+
   test('an index row follows its row: an audience change and a delete at once, a change of text once the queue drains', async () => {
     const asAlice = orm.as(user(alice));
     expect((await found(user(bob), 'walnut')).keys).toContain(`Folder:${ids.sharedFolder}`);
@@ -297,6 +343,14 @@ describe.skipIf(dsn === '')('search across tables on Postgres', () => {
     expect(n).toBe(written.length + 1);
     expect([modelCalls, calls - textsBefore]).toEqual([6, written.length]);
     expect(await indexRows()).toEqual(written);
+  });
+
+  test("the parity file's searches answer the same titles in every runtime (#740)", async () => {
+    await writeParityCorpus('postgres', (text, values) => db.pool.query(text, values));
+    const answers: Record<string, unknown> = {};
+    for (const search of paritySearches) answers[search.name] = await parityAnswer(searchTables, orm, user(alice), search);
+    if (process.env.SEARCH_PARITY_PRINT) console.log(JSON.stringify(answers));
+    expect(answers).toEqual(Object.fromEntries(paritySearches.map(search => [search.name, search.postgres ?? null])));
   });
 });
 

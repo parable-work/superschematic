@@ -5,8 +5,8 @@ go 1.27.3
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/parable-work/superschematic v0.0.0
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/mod v0.38.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -18,7 +18,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/microsoft/typescript-go v0.0.0 // indirect
 	github.com/microsoft/typescript-go/shim v0.0.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3 // indirect
 	github.com/parable-work/superschematic/ir v0.0.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect

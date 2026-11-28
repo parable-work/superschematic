@@ -69,9 +69,15 @@ func GetClientIP(r *http.Request) string {
 }
 
 // CheckContext returns a descriptive wrapped error when a request context is invalid.
+//
+// A route's check (WithRouteCheck) that is still valid is ErrRouteReached:
+// the implementation never runs for it.
 func CheckContext(ctx context.Context) error {
 	err := ctx.Err()
 	if err == nil {
+		if reachRoute(ctx) {
+			return ErrRouteReached
+		}
 		return nil
 	}
 

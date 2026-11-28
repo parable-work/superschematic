@@ -1,0 +1,340 @@
+// Package lower lowers development mode's General documents to the DB
+// tables they publish as (D117). A General schema of D16's is an instance
+// type and its behaviors: development mode serves the type as a table, and
+// runtime and compiled mode serve it as the table `format --to=ts` writes
+// it as. Lowering writes that table:
+//
+//   - the instance type, the type named like the document or its only type,
+//     is a DB table; with no field marked key, it takes development mode's
+//     key, `id`, a UUID the database makes;
+//   - a behavior anchored on the type whose declaration names a value field
+//     is anchored on a field of that name, the field form: a Workflow is
+//     `status: Workflow<{ ... }>`, and a type that already has a field of
+//     that name is refused;
+//   - every other behavior anchored on the type is one the table implements,
+//     `implements Comments<Note>`;
+//   - the documents are of one DB service, which the caller names.
+//
+// Development mode reads a General document the same way, so a type's
+// fields, its uses and their ids are the same in all three modes.
+// `migrate plan` lowers General documents before it plans them, and the
+// TypeScript writer lowers a General type that composes behaviors before
+// it writes it.
+package lower
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/registry"
+	ir "github.com/parable-work/superschematic/ir"
+)
+
+// Values names the value field of a behavior whose declaration names one
+// (Workflow's status, Numbering's label), and "" for any other behavior.
+type Values func(behavior string) string
+
+// RegistryValues reads each behavior's value field from a registry's
+// declarations.
+func RegistryValues(reg *registry.Registry) Values {
+	return func(behavior string) string {
+		if declared, ok := reg.Behavior(behavior); ok {
+			return declared.Value
+		}
+		return ""
+	}
+}
+
+// coreValues is CoreValues, read once.
+var coreValues = sync.OnceValue(func() Values {
+	return RegistryValues(registry.New(naming.Default()))
+})
+
+// CoreValues reads each value field from the core's declarations, for a
+// caller with no registry at hand, such as the TypeScript writer. An
+// extension's behavior has no value field there.
+func CoreValues() Values {
+	return coreValues()
+}
+
+// Key is the key development mode gives a type that marks no field key:
+// `id`, a UUID the database makes.
+const Key = "id"
+
+// keyScalar is the IR type of that key.
+const keyScalar = "Identity.UUID"
+
+// Instance returns a document's instance type as development mode reads
+// it: the type named like the document, or its only type.
+func Instance(doc *schemafile.Document) (*ir.TypeDef, bool) {
+	if doc == nil {
+		return nil, false
+	}
+	if td, ok := doc.Types[doc.Name]; ok && td != nil {
+		return td, true
+	}
+	if len(doc.Types) == 1 {
+		for _, td := range doc.Types {
+			return td, td != nil
+		}
+	}
+	return nil, false
+}
+
+// Composes reports whether a type composes a behavior in the form
+// lowering rewrites: one anchored on the type with no implements, the
+// @behavior form of a General schema (D16).
+func Composes(td *ir.TypeDef) bool {
+	return len(td.TypeBehaviors()) > 0
+}
+
+// Type returns a copy of a General type lowered to its table: a DB table
+// with a key, each behavior on the type anchored on its value field or
+// implemented. The type itself is left as it was. A field named as a
+// value field a behavior lowers to, and a field named id where no field is
+// marked key, are refused.
+func Type(td *ir.TypeDef, values Values) (*ir.TypeDef, error) {
+	lowered := *td
+	lowered.Role = ir.RoleDBTable
+	lowered.Fields = slices.Clone(td.Fields)
+	lowered.Behaviors = slices.Clone(td.Behaviors)
+	// A class and its fields carry no description in TypeScript, so the
+	// table's are its comments, as the documents' description is
+	// (described).
+	lowered.Comment = commented(lowered.Description, lowered.Comment)
+	lowered.Description = ""
+	for i, fd := range lowered.Fields {
+		if fd == nil || fd.Description == "" {
+			continue
+		}
+		field := *fd
+		field.Comment = commented(field.Description, field.Comment)
+		field.Description = ""
+		lowered.Fields[i] = &field
+	}
+
+	own := func(name string) bool {
+		return slices.ContainsFunc(lowered.Fields, func(fd *ir.FieldDef) bool {
+			return fd != nil && fd.Name == name && fd.InheritedFrom == "" && !fd.Owned()
+		})
+	}
+	if !slices.ContainsFunc(lowered.Fields, func(fd *ir.FieldDef) bool { return fd != nil && fd.Key }) {
+		if own(Key) {
+			return nil, fmt.Errorf("type %s has a field %s and marks no field key: development mode keys a row by %s, a UUID the database makes, when no field is marked key (D117); mark %s key, or rename it", td.Name, Key, Key, Key)
+		}
+		key := &ir.FieldDef{Name: Key, TypeRef: ir.TypeRef{Name: keyScalar}, Required: true, Key: true, AutoGenerated: true}
+		lowered.Fields = append([]*ir.FieldDef{key}, lowered.Fields...)
+	}
+
+	anchored := map[string]string{}
+	for _, ref := range lowered.Behaviors {
+		if ref.Field != "" {
+			anchored[ref.Field] = ref.Name
+		}
+	}
+	for i, ref := range lowered.Behaviors {
+		if ref.Field != "" || ref.Implements {
+			continue
+		}
+		value := ""
+		if values != nil {
+			value = values(ref.Name)
+		}
+		if value == "" {
+			lowered.Behaviors[i].Implements = true
+			continue
+		}
+		if own(value) {
+			return nil, fmt.Errorf("type %s has a field %s, and its %s lowers to the field form %s: %s<{ ... }>, which its declaration names its value field (D117): rename the field", td.Name, value, ref.Name, value, ref.Name)
+		}
+		if other, ok := anchored[value]; ok {
+			return nil, fmt.Errorf("type %s anchors %s on the field %s, and its %s lowers to the field form %s: %s<{ ... }> (D117): anchor one of them on another field", td.Name, other, value, ref.Name, value, ref.Name)
+		}
+		lowered.Behaviors[i].Field = value
+		anchored[value] = ref.Name
+	}
+	// TypeScript states the behaviors a class implements in its heritage
+	// and its field behaviors in its body, and reads them in that order,
+	// so the table lists them so too: its columns are then the ones a
+	// build of the class writes, in the same order.
+	slices.SortStableFunc(lowered.Behaviors, func(a, b ir.BehaviorRef) int {
+		switch {
+		case !a.FieldAnchored() && b.FieldAnchored():
+			return -1
+		case a.FieldAnchored() && !b.FieldAnchored():
+			return 1
+		}
+		return 0
+	})
+	return &lowered, nil
+}
+
+// Document returns a copy of a General document with each of its types
+// that composes a behavior on the type lowered to its table (Type), as
+// the TypeScript writer writes it: a document of kind DB, its other types
+// a DB's embedded types, and its description its instance type's comment
+// (described). A General document whose types compose no behavior on the
+// type is returned as it is.
+func Document(doc *schemafile.Document, values Values) (*schemafile.Document, error) {
+	if doc == nil || doc.Kind != ir.SchemaKindGeneral {
+		return doc, nil
+	}
+	var lowered *schemafile.Document
+	for _, name := range slices.Sorted(maps.Keys(doc.Types)) {
+		td := doc.Types[name]
+		if td == nil || !Composes(td) {
+			continue
+		}
+		table, err := Type(td, values)
+		if err != nil {
+			return nil, err
+		}
+		if lowered == nil {
+			lowered = copyDocument(doc)
+			lowered.Kind = ir.SchemaKindDB
+		}
+		lowered.Types[name] = table
+		withKeyScalar(lowered, table)
+	}
+	if lowered == nil {
+		return doc, nil
+	}
+	if instance, ok := Instance(doc); ok {
+		described(lowered, instance.Name)
+	}
+	return lowered, nil
+}
+
+// described moves a lowered document's description onto its instance
+// type's comment, before any comment it has: a General schema of D16's
+// describes its one type, the documents of one DB service share one
+// description, and a schema file in TypeScript has no form for one.
+func described(doc *schemafile.Document, name string) {
+	instance := doc.Types[name]
+	if doc.Description == "" || instance == nil {
+		return
+	}
+	withComment := *instance
+	withComment.Comment = commented(doc.Description, withComment.Comment)
+	doc.Description = ""
+	doc.Types[name] = &withComment
+}
+
+// commented is a description followed by a comment, each where it is
+// given.
+func commented(description, comment string) string {
+	switch {
+	case description == "":
+		return comment
+	case comment == "":
+		return description
+	}
+	return description + "\n" + comment
+}
+
+// Documents lowers development mode's General documents to the documents
+// of one DB service: each document's instance type its table (Type), each
+// document of kind DB and named after the service. A document that is not
+// General, and one with no instance type, are refused.
+func Documents(docs []*schemafile.Document, service string, values Values) ([]*schemafile.Document, error) {
+	if service == "" {
+		return nil, fmt.Errorf("the documents lower into no DB service: name one")
+	}
+	out := make([]*schemafile.Document, len(docs))
+	for i, doc := range docs {
+		if doc.Kind != ir.SchemaKindGeneral {
+			return nil, fmt.Errorf("%s is of kind %s: only development mode's General documents lower to tables", doc.Name, doc.Kind)
+		}
+		instance, ok := Instance(doc)
+		if !ok {
+			return nil, fmt.Errorf("%s has no instance type: development mode serves the type named like the document, or its only type, as a table (D117)", doc.Name)
+		}
+		table, err := Type(instance, values)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", doc.Name, err)
+		}
+		lowered := copyDocument(doc)
+		lowered.Kind = ir.SchemaKindDB
+		lowered.Name = service
+		lowered.Types[instance.Name] = table
+		described(lowered, instance.Name)
+		out[i] = lowered
+	}
+	// The documents of one service declare a scalar once.
+	if !slices.ContainsFunc(out, func(doc *schemafile.Document) bool { return doc.Scalars[keyScalar] != nil }) {
+		for i, doc := range out {
+			if instance, _ := Instance(docs[i]); withKeyScalar(doc, doc.Types[instance.Name]) {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// Service names the DB service General documents lower into: the one
+// named, else the name every document shares. Documents of several names
+// need one named.
+func Service(names []string, named string) (string, error) {
+	if named != "" {
+		return named, nil
+	}
+	distinct := slices.Compact(slices.Sorted(slices.Values(names)))
+	switch len(distinct) {
+	case 0:
+		return "", fmt.Errorf("no documents to lower")
+	case 1:
+		return distinct[0], nil
+	}
+	return "", fmt.Errorf("the documents are development mode's General schemas %s, which lower to the tables of one DB service (D117): name the service", joinNames(distinct))
+}
+
+// copyDocument copies a document with a types map of its own.
+func copyDocument(doc *schemafile.Document) *schemafile.Document {
+	out := *doc
+	out.Types = make(map[string]*ir.TypeDef, len(doc.Types))
+	for name, td := range doc.Types {
+		out.Types[name] = td
+	}
+	if doc.Scalars != nil {
+		out.Scalars = make(map[string]*ir.ScalarDef, len(doc.Scalars))
+		for name, scalar := range doc.Scalars {
+			out.Scalars[name] = scalar
+		}
+	}
+	return &out
+}
+
+// withKeyScalar declares the scalar of a UUID key in the document, as
+// format --to=json declares each scalar a file uses, unless the document
+// declares it, and reports whether the document declares it now.
+func withKeyScalar(doc *schemafile.Document, table *ir.TypeDef) bool {
+	if doc.Scalars[keyScalar] != nil {
+		return true
+	}
+	for _, fd := range table.Fields {
+		if fd != nil && fd.Key && fd.TypeRef.Name == keyScalar {
+			if doc.Scalars == nil {
+				doc.Scalars = map[string]*ir.ScalarDef{}
+			}
+			doc.Scalars[keyScalar] = &ir.ScalarDef{Name: keyScalar, LanguagePrimitive: "string"}
+			return true
+		}
+	}
+	return false
+}
+
+// joinNames lists names as prose: a, b and c.
+func joinNames(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}

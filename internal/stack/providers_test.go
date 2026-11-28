@@ -159,3 +159,77 @@ func dropField(svc *stack.Service, name string) {
 	}
 	svc.Config.Fields = fields
 }
+
+// secretsOf lists the fields of the environment's secrets that start with
+// prefix.
+func secretsOf(env *ir.ResolvedEnvironment, prefix string) string {
+	var got []string
+	for _, s := range env.Secrets {
+		if strings.HasPrefix(s.Field, prefix) {
+			got = append(got, s.Field)
+		}
+	}
+	return strings.Join(got, ",")
+}
+
+// TestASecretSettingIsAnEnvironmentsWhenItsProviderReadsIt (D159, #608):
+// a secret setting of a slot is a secret of an environment, which `stack
+// secrets set` asks for and a deploy waits on, when the provider the
+// environment names in the slot reads it. An environment that leaves the
+// slot unset, or names a provider with no such key, has no such secret;
+// a slot's default names its provider as a literal does; and a required
+// secret field stays a secret of every environment, since the config
+// needs it at start.
+func TestASecretSettingIsAnEnvironmentsWhenItsProviderReadsIt(t *testing.T) {
+	build := func(env map[string]ir.EnvValue, edit func(*stack.Service)) (*ir.Stack, []stack.Service) {
+		s, services := providerShop(false, map[string]map[string]ir.EnvValue{"Staging": env})
+		api := service(services, "shop-api")
+		// relay-b alone signs its requests, with a secret key.
+		for _, p := range api.Providers {
+			if p.Name == "relay-b" {
+				p.Config = append(p.Config, ir.ProviderConfigKey{Key: "SIGNING_KEY", Secret: true})
+			}
+		}
+		api.Config.Fields = append(api.Config.Fields, stack.ConfigField{Name: "SMS_SIGNING_KEY", Secret: true})
+		if edit != nil {
+			edit(api)
+		}
+		return s, services
+	}
+	relayA := map[string]ir.EnvValue{"SMS": literal("relay-a"), "SMS_URL": literal("u")}
+	relayB := map[string]ir.EnvValue{"SMS": literal("relay-b"), "SMS_URL": literal("u"), "SMS_ACCOUNT": literal("AC1")}
+	for name, tc := range map[string]struct {
+		env  map[string]ir.EnvValue
+		edit func(*stack.Service)
+		want string
+	}{
+		"the slot unset":           {want: ""},
+		"the slot empty":           {env: map[string]ir.EnvValue{"SMS": literal("")}, want: ""},
+		"a provider of one secret": {env: relayA, want: "SMS_TOKEN"},
+		"a provider of two":        {env: relayB, want: "SMS_SIGNING_KEY,SMS_TOKEN"},
+		"the slot's default": {
+			env: map[string]ir.EnvValue{"SMS_URL": literal("u")},
+			edit: func(api *stack.Service) {
+				dropField(api, "SMS")
+				def := "relay-a"
+				api.Config.Fields = append(api.Config.Fields, stack.ConfigField{Name: "SMS", Default: &def})
+			},
+			want: "SMS_TOKEN",
+		},
+		"a required secret": {
+			edit: func(api *stack.Service) {
+				dropField(api, "SMS_TOKEN")
+				api.Config.Fields = append(api.Config.Fields, stack.ConfigField{Name: "SMS_TOKEN", Secret: true, Required: true})
+			},
+			want: "SMS_TOKEN",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, services := build(tc.env, tc.edit)
+			env := mustResolve(t, assemble(t), s, services, "Staging")
+			if got := secretsOf(env, "SMS_"); got != tc.want {
+				t.Errorf("Staging's secrets of slot SMS = [%s], want [%s]", got, tc.want)
+			}
+		})
+	}
+}

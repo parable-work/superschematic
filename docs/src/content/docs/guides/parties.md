@@ -15,15 +15,18 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
-| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
+| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage; a generated TypeScript server that builds it into its `Deps` and mounts each relay's inbound route ([below](#take-what-comes-in)) | the same in a generated Go or Rust server |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
-| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
+| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | |
+| a held message settled onto a party from triage, its address entered by hand or verified by a code (TypeScript, [below](#settle-a-held-message-onto-a-party)) | the same in Go and Rust |
+| the triage as generated routes, SDK methods and MCP tools (`@triageOperations`, [below](#serve-triage-as-routes)), run by a generated TypeScript server, and a Topcoat console's pages over them | the routes' handlers in a generated Go or Rust server, which keep them the implementation's |
+| a messaging bridge's inbound, with a key that can only relay messages (`examples/runtime-providers`'s `chat-bridge`) | the bridge as a Go or Rust provider module |
 | messages as rows, with their files and the rows they are about | |
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
 | a message's trust narrowing the agent run that takes its request: a sender entered by hand asks before every write ([agent runs](/superschematic/guides/agent-runs/)) | |
-| the Go runtime's `inbound` package, on Postgres | |
+| the Go runtime's `inbound` package, on Postgres, which a generated Go server builds into its `Deps` with its relay callbacks and its run requests' worker | |
 | the Rust runtime's `orm::parties` and `orm::inbound`, on Postgres | |
 
 [D157](https://github.com/parable-work/superschematic/issues/606)
@@ -72,6 +75,18 @@ app.post("/webhooks/sms/inbound", async c =>
   c.json(await inbound.inbound("SMS", { headers: Object.fromEntries(c.req.raw.headers), body: await c.req.text() })));
 ```
 
+A generated TypeScript server of an API over a Postgres database with the
+conversations and a run requests queue does this itself: `deps.inbound` is
+`createInbound` over `deps.orm`, `deps.notifier` and the queue, with the
+channel slots of `deps.providers`, and `POST /webhooks/<slot>/inbound`
+hands each relay's request to it. The bucket, the inbound address and the
+approval policy of a send are the implementation's `createRuntimeOptions`'
+(`inbound: { bucket: deps.files, inboundAddress, approve }`); with the
+agent orchestration the approval policy is the dispatcher's
+`sendApproval`, which the server wires. A `@worker` of the run requests
+is the dispatcher's where the database uses the orchestration, and the
+implementation's otherwise ([act on a run request](#act-on-a-run-request)).
+
 The adapter reads the request, fetches a text's photos and reports an
 email's authentication. The core decides who sent it:
 
@@ -92,9 +107,91 @@ of the text it answers. A message that names neither party is held in
 triage.
 
 The office reads triage and settles it with `parties.triage`:
-`inbound.triage(principal)` and `inbound.settle(principal, message)`.
+`inbound.triage(principal, { limit?, offset?, channel? })`,
+`inbound.attachmentsOf(principal, message)` and
+`inbound.settle(principal, message)`, or the generated routes
+([below](#serve-triage-as-routes)).
 `inbound.timeline(principal, party)` lists a party's messages on every
 channel.
+
+### Settle a held message onto a party
+
+A message from an address no one holds can be a party's: a contractor
+texting from a new phone. `settleOnto` adds the sender's address as the
+party's identity, and files the message as if it had come from the party
+(#606):
+
+```ts
+await inbound.settleOnto(staff, message, { party: { table: "Contact", key }, trust: "entered" });
+```
+
+| `trust` | What happens |
+| --- | --- |
+| `entered` | The address is the party's at once, entered by hand: the lowest trust, so a run on its messages asks before every write. The message is filed now. |
+| `verified` | A code goes to the address, and the message waits (`verifying`). When the address answers it, the message is filed at the trust of a verified address. |
+
+Filed means as the path files a party's message: the party's
+conversation on the channel, a reference to the party's row, and with an
+active grant a run request and triage closed; with none, the party's
+timeline and triage still open. The settler holds `parties.triage` and
+reads the party's row, as a sender does. An address that is a user's is
+refused: a user shares an address with no one.
+
+### Serve triage as routes
+
+An API serves the triage to its staff from a class with no members
+marked `@triageOperations`, naming the `@party` table a held message is
+settled onto (#746). `refersTo` names the API's type its listing
+operation lists the party rows as, so a UI offers them to pick from:
+
+```ts
+@triageOperations(Contact, { refersTo: ContactView })
+@requirePermission(["parties.triage"])
+export abstract class Triage {}
+```
+
+The build adds four operations, an SDK method each, and an MCP tool for
+the two reads:
+
+| Operation | Route (below `/api`) | What it does |
+| --- | --- | --- |
+| `triage` | `GET triage` | The held messages, newest first, 20 a page (at most 100); `channel` keeps one kind of channel (`sms`, `email`, `chat`). |
+| `triageMessage` | `GET triage/{message}` | One message that was held, open or settled: its sender's address, channel, body, files and what became of it. |
+| `settleOnto` | `POST triage/{message}/settle` | `settleOnto` with `{ party, trust }`; answers `run`, `timeline` or `verifying`. |
+| `dismiss` | `POST triage/{message}/dismiss` | Closes the message's triage: it stays on its conversation, settled onto no one. |
+
+Each route needs the class's `@requirePermission`, `parties.triage` when
+it names none, and the inbound path checks its own triage permission
+again; `@publicRoute` on the class is refused. A message never held is
+404, a settle or dismiss of one no longer held is 409, a party the caller
+cannot read is 404, and an address that is a user's is 422. The settle
+and the dismiss are no tools: each decides who a sender is, which is a
+person's call.
+
+A generated TypeScript server runs them through `Deps.inbound`
+(`RouterOptions.inbound`), with no implementation method. A Go or Rust
+server keeps each a method of the implementation, which calls its
+runtime's inbound path.
+
+A [Topcoat console](/superschematic/guides/topcoat/#generated-pages)
+serves them as a resource of its own, the held messages at
+`/console/triage`: the list, paged and filtered by channel; a message's
+page, with its files and the settle and dismiss forms, the settle's party
+a picker of the `refersTo` type's rows and its trust a select. The nav
+offers the list only to a caller who holds the triage permission.
+
+### A messaging bridge
+
+A messaging network's inbound side can be a bridge: a process that
+connects outward, to the network and to the app, so its host needs no
+open port. `examples/runtime-providers`'s `chat-bridge` is one. The app
+sends through the network's API. The bridge's loop (`runBridge`) posts
+each message the network received to `POST /webhooks/<slot>/inbound`
+with the slot's relay key, which the adapter checks. The API resolves
+that key to the provider's own principal (`extensionAuthenticator`),
+whose role is `messages.relay`, so it can relay messages and nothing
+else. A sender is a handle, which a channel identity of kind `handle`
+names, and its message takes the same path as a text's.
 
 ## Act on a run request
 
@@ -119,6 +216,10 @@ const queue = inbound.runWorker(pool, async request => {
 written as the party, so it lands only where the grant's role reaches.
 `file` points the row at the message, so the row lists it among its
 backlinks, and files the message's photos onto it with no second upload.
+A row of a table with no `@attachments` gets the reference alone, and so
+does every row when the messages table has no `@attachments`. Filing is
+idempotent: a run request whose handler failed after `file` runs again,
+and filing the message again adds no second reference or file.
 
 ## Send to a party
 
@@ -198,15 +299,33 @@ message is filed onto are read through their repository as the caller.
 The approval policy is a `SendApproval`: the app's (`ApprovalFunc`), or
 the agent dispatcher, which is built before the path and given it
 (`SetInbound`). A run request's message and grant are in base62, as the
-repositories write a key. A Go server over a database that lists `sqlite`
-first is refused the parties' tables, which run on SQLite and D1 in
-TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+repositories write a key.
+
+On SQLite the Go runtime runs the same inbound path (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Orchestration()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). A message's
+files go through the SQLite database's attachments, and `RunQueue` claims
+the run requests on SQLite.
+
+A stack's Go server builds the path into `Deps.Inbound` itself, after the
+notifier and with the dispatcher as its send approval when the database
+has agents, and the bucket, the inbound address and the rest its
+implementation's `NewWiring` answers in `Wiring.Inbound`. A relay's
+callback at `POST /webhooks/<slot>/inbound` takes the path, which hands a
+user's reply to the notifier, and a `@worker` of the `@runRequests` queue
+hands each request to the dispatcher, with no method of the
+implementation's. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
+lists the whole wiring.
 
 ## In Rust
 
 The Rust HTTP runtime's `orm::parties` and `orm::inbound` are the same
-path, on Postgres (D193). The Postgres definition of a generated Rust
-types crate carries each table's `@party` and its conversations part, so
+path, on Postgres (D193) and on a SQLite file (#618). Each definition of
+a generated Rust types crate carries each table's `@party` and its
+conversations part, so
 `Inbound::new` finds the conversations, the messages and the channel
 identities by itself, and the crate re-exports both modules. It takes the
 database's `Tables`, the notifier (D191) and the `@runRequests` queue's
@@ -238,6 +357,11 @@ party's address. Rust has no ambient caller, so a read as the sender or
 the party opens the repositories for it (`with_access`). The approval
 policy is a `SendApproval`: the app's, or the agent dispatcher's
 `send_approval`. A run request's message and grant are in base62, as the
-repositories write a key. A Rust types crate that lists `sqlite` is
-refused `@party`, the conversations and the run requests, which run on
-SQLite and D1 in TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+repositories write a key. On SQLite `Inbound::new` takes
+`orm::sqlite::tables(database)`, the path's transactions are held writes
+of the file ([in Rust](/superschematic/guides/notifications/#in-rust)), a
+message's files go through the SQLite attachments, and `run_queue()`
+claims the run requests on the file. `party_principal` and
+`identity_lapsed` take an `orm::store::Db` of either dialect. A generated
+Rust server over a database that lists `sqlite` first does not wire the
+path yet (#725).

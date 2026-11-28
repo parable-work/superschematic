@@ -8,7 +8,6 @@ import (
 
 	"github.com/parable-work/superschematic/docs"
 	"github.com/parable-work/superschematic/internal/agentcatalog"
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/packages"
 )
 
@@ -34,8 +33,8 @@ its extensions included:
                 and its type in Go, TypeScript, Python and Rust
   decorators    every decorator, with its TypeScript declaration, where it may
                 sit and the kinds that may use it, and the type wrappers
-  behaviors     every engine behavior, its config, and the fields and
-                operations it adds to a type
+  behaviors     every behavior, its config, what it requires, and the
+                fields and operations it adds to a type
   capabilities  each thing a backend needs, the declaration that gives it,
                 what the build generates and what is left to write
 
@@ -47,19 +46,12 @@ with the binary it runs.`,
 			return runCatalog(cmd, a, flags, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names), for a binary whose extensions read it")
+	addNamingFlag(cmd, &flags.namingPath, "(default: built-in names), for a binary whose extensions read it")
 	return cmd
 }
 
 func runCatalog(cmd *cobra.Command, a *app, flags *catalogFlags, name string) error {
-	names := naming.Default()
-	if flags.namingPath != "" {
-		var err error
-		if names, err = resolveNaming(flags.namingPath, ""); err != nil {
-			return err
-		}
-	}
-	reg, err := a.resolveRegistry(names)
+	reg, err := a.flagRegistry(flags.namingPath)
 	if err != nil {
 		return err
 	}

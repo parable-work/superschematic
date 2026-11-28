@@ -113,6 +113,16 @@ type RepositoryOperation struct {
 	// scope schema: its method takes no key, and runs as a command without
 	// a row (rules.RunTableOperation).
 	Table bool
+	// Writes is an operation that writes, as the core's declaration has
+	// it: on a row of a held table (D156, D180) its caller must reach the
+	// row to write it, and to read it for one that writes nothing.
+	Writes bool
+	// AnswersRow is, of an operation of the table as a whole, the member of
+	// its answer that names one of the table's rows (Aliased's resolve's
+	// row, registry.TableOperationRow), which a database whose reads keep
+	// to the caller answers null to a caller who may not read the row
+	// (D156); "" for any other.
+	AnswersRow string
 }
 
 // MethodDoc is the doc comment of the operation's method: its
@@ -253,6 +263,29 @@ func (c CoreOwnColumn) Present(variable string) string {
 		return "!reflect.ValueOf(" + member + ").IsZero()"
 	}
 	return ""
+}
+
+// CoreOwnDefaults reports whether one of the repository's own columns the
+// core reads takes a default when its member is "" (CoreOwnColumn's
+// EnumDefault), which coreOwn hands the core.
+func (r Repository) CoreOwnDefaults() bool {
+	for _, c := range r.CoreOwn {
+		if c.EnumDefault() != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// EnumDefault is the default the core is handed for the column's field
+// when variable's member holds "", as createColumns binds it
+// (Field.EnumDefault): an enum's, or an @audience table's audience or
+// agent access (D156); "" for a column with none, and a to-one relation.
+func (c CoreOwnColumn) EnumDefault() string {
+	if c.Column == nil {
+		return ""
+	}
+	return c.Column.EnumDefault
 }
 
 // Value is the core's value of the column's field in variable, a
@@ -409,6 +442,21 @@ func (r Repository) WireKey(id string) string {
 		return id + ".String()"
 	}
 	return "fmt.Sprint(" + id + ")"
+}
+
+// AnswersRows reports whether one of the table's operations of the table
+// as a whole answers one of its rows (RepositoryOperation.AnswersRow): in
+// a database whose reads keep to the caller (D156), the repository keeps
+// such an answer to the caller (keepAnsweredRow).
+func (r Repository) AnswersRows() bool {
+	for _, use := range r.Uses {
+		for _, op := range use.Operations {
+			if op.AnswersRow != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // KeyParse is the function that reads a UUID key from its wire form,
@@ -822,6 +870,10 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			if err != nil {
 				return fmt.Errorf("ormgen: table %s: use %s: operation %s's result: %w", repo.TypeName, use.ID, op.Name, err)
 			}
+			answersRow := ""
+			if op.Table {
+				answersRow = registry.TableOperationRow(use.Behavior, op.Name)
+			}
 			ru.Operations = append(ru.Operations, RepositoryOperation{
 				Name:           op.Name,
 				GoName:         opGo,
@@ -830,6 +882,8 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 				Result:         result,
 				ResultIsStruct: isStruct,
 				Table:          op.Table,
+				Writes:         op.Writes,
+				AnswersRow:     answersRow,
 			})
 		}
 		ru.Enums, ru.Structs = b.enums, b.structs

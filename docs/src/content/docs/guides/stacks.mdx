@@ -38,8 +38,8 @@ on the embedded target builds as one binary.
 | the gcp target, with `stack bootstrap`, `secrets set`, `prepare`, `build`, `plan`, `deploy`, `destroy`, `outputs`, `unlock` and `queue`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers and behavior workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger and are woken through a Workflow for a message due sooner, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself |
-| [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server and worker of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; an API over the user model, its identity store on the database's file; `stack dev` | jobs, buckets, memory stores and an engine in the binary; installing, signing and updating it |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [Postgres databases through Hyperdrive](#databases-on-hyperdrive), pgvector included, migrated from the deploying machine on their origin, APIs over the user model on them, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers), run once through a Workflow for `stack run` and on every deploy, [TypeScript queue workers and behavior workers](#queue-workers-on-cron-triggers) that drain their Postgres queues at each firing of a Cron Trigger or over D1 and are woken through a Workflow for a message due sooner, trace export when the environment's `telemetry` names a collector, and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; a Hyperdrive config the deploy makes itself |
+| [the embedded target](#build-one-binary): an environment that is one binary, with every Rust server and worker of it in one process, each database a SQLite file under one data directory and the site compiled in; `stack build` with the plans a release records (`--release`), which the binary migrates its files with as it starts; calls between its APIs in the process, with the loopback credential; an API over the user model, its identity store on the database's file; `stack dev` | jobs, buckets, memory stores and derivers in the binary; installing, signing and updating it |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [runtime providers](/superschematic/guides/runtime-providers/): a provider slot per environment in the deployable's `env`, checked against the providers its API lists, each deployable's `providers` in `environment.json`, and the refusal of an environment that runs a feature with no provider of the interface it needs, [notifications](/superschematic/guides/notifications/) and [agent runs](/superschematic/guides/agent-runs/) among them ([Environments](#environments)) | a generated server that builds the providers into `Deps` |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
@@ -48,7 +48,7 @@ on the embedded target builds as one binary.
 | [memory stores](/superschematic/guides/memory-stores/): the `MemoryStore` kind with its `@channel` and `@key` declarations, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, `enabled: false`, typed definitions and a store in `Deps` in Go, TypeScript and Rust, a rate limit the replicas share, Valkey under `stack dev`, and on gcp a Memorystore for Valkey instance | a memory store on cloudflare; a run on gcp |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger, which `stack run` and a deploy run through its Workflow | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
-| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool, or, in [drain mode](#drain-mode), a Cloud Run job that an enqueue or a behavior's command wakes, for a worker of any language and a behavior worker; on cloudflare a TypeScript worker's Worker that drains its queue at each firing of a Cron Trigger | claims on D1; a drain worker over a SQLite file, and a wake from a raw SQL write |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool, or, in [drain mode](#drain-mode), a Cloud Run job that an enqueue or a behavior's command wakes, for a worker of any language and a behavior worker; on cloudflare a TypeScript worker's Worker that drains its queue at each firing of a Cron Trigger, on Postgres through Hyperdrive or on D1 | a drain worker over a SQLite file, and a wake from a raw SQL write |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -572,7 +572,7 @@ TypeScript twin.
 | `<target>` | the target's values, under the target's name: `gcp: { project, projectNumber, region, production, telemetry }`, `cloudflare: { accountId, workersSubdomain, secretsStoreId, telemetry }`, `embedded: { port }`, or `local: { postgresImage, postgresPort, storageImage, storagePort, storageCorsHeaders, memoryStoreImage, memoryStorePort }` |
 | `domain` | where exposed servers are reached; each gets the host `<server>.<domain>` |
 | `dns` | the DNS platform that holds the domain's records and its values, as its one key: `{ "gcp.clouddns": {...} }` or `{ cloudflare: {...} }`. Without it, the target's default |
-| `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency`, `enabled`, `mode` and `idle` ([Queues and workers](#queues-and-workers)); an engine's runner's names it beside its database's handle, `{ of: ShopDb, runner: true }`, and takes `enabled` ([The engine's runner](#the-engines-runner)); a deriver's names it beside its API's handle, `{ of: ShopCart, deriver: "TriageTickets" }`, and takes `enabled`, `instances` and `concurrency` ([Derivers](#derivers)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)) |
+| `settings` | per deployable: `of` a handle, a Bucket's or a MemoryStore's among them, or an `@server` or `@database` class, platform settings as the other keys, `env`, and optionally `platform` to place it on another platform than the target's. A job's element names the job beside its API's handle, `{ of: ShopOrders, job: "ShipOrders" }`, and takes `schedule`, `timeZone` and `enabled` too ([Jobs](#jobs)); a worker's names the worker, `{ of: ShopOrders, worker: "FulfilOrders" }`, and takes `instances`, `concurrency`, `enabled`, `mode` and `idle` ([Queues and workers](#queues-and-workers)); a deriver's names it beside its API's handle, `{ of: ShopCart, deriver: "TriageTickets" }`, and takes `enabled`, `instances` and `concurrency` ([Derivers](#derivers)); an app's names it beside its API's handle, `{ of: ShopStock, app: "Backoffice" }`, and takes `enabled` ([Apps](#apps)); a memory store's takes `enabled`, and `enabled: false` runs the environment without it ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)). `runner: true` beside a DB's handle, which named an engine's runner, is refused: a table's deadlines and changes are its API's `@behaviorWorker`'s, which an element names as it names a worker (D103) |
 | `parameters` | makes the environment a family, one member per value |
 
 `env` binds the server's `@envVars` fields, each to a literal or to
@@ -853,9 +853,9 @@ messages waiting, no rule running and no deadline firing, so the build
 refuses the environment, naming the database, the table and the queue
 (D151): declare a behavior worker for each such table and run it there. A Rust API's behavior worker claims on a SQLite file
 (D116): its process drains the table's queues, deadlines first, on
-connections of its own, and prunes each as any worker does. No TypeScript
-or Go one claims on SQLite yet, and none on D1, so there a hearing
-table's change queue grows by a message per write until one does.
+connections of its own, and prunes each as any worker does. A TypeScript
+one claims on the SQLite file too, and on D1 on Workers, through its D1
+binding (#702). No Go one claims on SQLite yet.
 
 ### Drain mode
 
@@ -942,38 +942,13 @@ If your database is reached through a pooler that hands a connection back
 between transactions, a session's lock does not hold, and every start
 drains: keep `instances` in mind as a hint there, not a bound.
 
-## The engine's runner
-
-A DB service whose types compose behaviors is an engine database: every
-server, job and worker of an API that connects to it opens the
-[engine](/superschematic/guides/engine/) on it. Its runner, which runs the
-reactions that follow a commit, the schedules, Timers' deadlines and the
-event log's retention, is a deployable of its own, `<db>-engine-runner`,
-in the language of the first API, by name, that connects to it. It runs
-one instance, which runs while it holds the runner's lock on Postgres, so
-a second would only wait. An element names it beside its database's
-handle:
-
-```ts
-settings: [{ of: ShopDb, runner: true, enabled: false }]
-```
-
-It takes `enabled`, a `platform` and the platform's settings, and no
-`instances` or `env`. A runner that is off runs no instance: no reaction,
-schedule, Timers deadline or retention pass runs until it is on again,
-when each reaction reads on from its cursor, a schedule that came due runs
-once and every overdue deadline fires. On gcp it is a Cloud Run worker
-pool of one instance, and on `local` a process with no port.
-
 ## Derivers
 
-A deriver fills the Derived fields of a database's types: a model outside
-the framework computes them, and the deriver hands each stale field to
-your code and settles the answer. The types are tables that implement
-Derived
-([Database tables](/superschematic/guides/database-tables/#fields-a-model-fills-and-who-set-each)),
-or an engine database's types that compose it
-([Engine behaviors](/superschematic/guides/engine-behaviors/#derived)).
+A deriver fills the Derived fields of a database's tables: a model
+outside the framework computes them, and the deriver hands each stale
+field to your code and settles the answer. The tables implement Derived
+(D146,
+[Database tables](/superschematic/guides/database-tables/#fields-a-model-fills-and-who-set-each)).
 Declare it on an empty class of an API that connects to the database:
 
 ```ts
@@ -1020,42 +995,29 @@ func (t *triage) TicketCategory(ctx context.Context, item deriver.DerivedItem[ap
 per deriver, and a method takes a `DerivedItem` of its inputs' struct and
 answers a `DerivedAnswer` of the field's type.
 
-`schemas` names the types by string, and every type of the database that
-composes Derived when it is absent. Nothing in `Derivers` says which
-store a deriver runs over: the methods of a deriver of tables and of one
-of engine types have the same shape, each typed by its field.
+`schemas` names the tables by string, and every table of the database
+that implements Derived when it is absent. A name that is no such table
+is refused, and so is a deriver over a database with none.
 
-The deriver is a deployable of its own, `<api>-<deriver>`. It runs as the
-deployable's name, and what it pulls from depends on its schemas:
-
-- **Tables** (D146). A TypeScript, Rust or Go API's deriver opens the
-  database's repositories as itself, holding each Derived config's
-  `permission`, and runs its HTTP runtime's loop over each table's
-  `staleDerivations` and `settleDerivations`: read a page of stale
-  fields, hand each to its method, settle the answers by the hash it
-  pulled. Every answer goes through the behaviors' core, as the table's
-  own operations do. A Rust deriver opens the repositories in a
-  transaction of its pool for each pull and each settle. When a pass
-  settles nothing it pulls again after five seconds, and each pull scans
-  the table. An answer of no shape a settle takes fails its own field. A
-  pull or a settle that fails for a reason time cures has its table
-  waited out, a second, doubling to thirty, while the other tables go
-  on; one the core refuses for good, a caller without the permission
-  among them, ends the deriver with the error. The database lists
-  `postgres` first, since the repositories a deriver runs over are
-  Postgres's.
-- **Engine types** (D74). A TypeScript or a Rust API's deriver opens the
-  engine and holds each derived type's name and its Derived `permission`,
-  so a `{ rules }` policy needs a rule for it, which the build checks. A
-  Go API's deriver of engine types is refused:
-
-  ```ts
-  { subject: ["shop-cart-triage-tickets"], schema: ["Ticket"], action: ["read", "write"], allow: true }
-  ```
-
-A deriver fills one kind. Over a database that has both, declare a
-deriver for each and name its schemas. A Rust API's derivers all fill
-one kind, so put the others on a second API.
+The deriver is a deployable of its own, `<api>-<deriver>`, on a
+TypeScript, Rust or Go API. It runs as the deployable's name, opens the
+database's repositories as itself, holding each Derived config's
+`permission`, and runs its HTTP runtime's loop over each table's
+`staleDerivations` and `settleDerivations`: read a page of stale fields,
+hand each to its method, settle the answers by the hash it pulled. Every
+answer goes through the behaviors' core, as the table's own operations
+do. A Rust deriver opens the repositories in a transaction of its pool
+for each pull and each settle. When a pass settles nothing it pulls
+again after five seconds, and each pull scans the table. An answer of no
+shape a settle takes fails its own field. A pull or a settle that fails
+for a reason time cures has its table waited out, a second, doubling to
+thirty, while the other tables go on; one the core refuses for good, a
+caller without the permission among them, ends the deriver with the
+error. The database lists `postgres` first, since the repositories a
+deriver runs over are Postgres's. A TypeScript or Go deriver of a table
+with `@audience` reads and settles every row, as a job does, and the
+rows keep to their audience for every other caller
+([A table's audience](/superschematic/guides/api-routes/#a-tables-audience)).
 
 An element sets `enabled`, `instances` (0 or 1) and `concurrency`:
 
@@ -1071,7 +1033,7 @@ one, `TriageTickets`, whose keyword rules stand in for a model.
 
 An app is your own HTTP program over a Rust API: its routes are yours,
 and it runs beside the API's servers as a deployable of its own, with the
-API's connections, implementations, identity and engine. A
+API's connections, implementations and identity. A
 [Topcoat](/superschematic/guides/topcoat/#run-the-app-in-a-stack) app's
 pages are the case it was made for. Declare it on an empty class of the
 API, naming the extensions its build needs:
@@ -1099,7 +1061,6 @@ The API crate's generated `apps` module declares the parts:
 | --- | --- |
 | `deps` | the API's `Deps`, which its implementation was built from |
 | `implementations` | the API's implementations as its router takes them, with its authenticator and its service authenticator |
-| `engine` | the engine of the API's engine database, open, when it has one |
 | `addr` | every interface at `PORT`, or 8080 when `PORT` is unset |
 
 `serve` binds `parts.addr` and serves until the process should exit. A
@@ -1110,11 +1071,8 @@ you write it. A crate whose `src/lib.rs` declares no `serve` is refused.
 
 The stack's build writes the app's entrypoint to
 `server/<stack>/<api>-<app>/`. Its `main` builds the API's `Deps` and
-implementations as the API's server does, waits for the engine, then
-calls `serve`, and exits 1 when `serve` returns an error. The app opens
-the engine without deploying its document: it waits until the API's
-server has deployed the document the app was built with, and logs
-`engine not open` until then. So an app rolls out in the wave after its
+implementations as the API's server does, then calls `serve`, and exits
+1 when `serve` returns an error. An app rolls out in the wave after its
 API's servers. Its image is built from the server's Dockerfile, with
 every crate your crate reaches by path, a Topcoat crate under
 `schemas/dist/topcoat/` among them.
@@ -1136,8 +1094,8 @@ export abstract class Shop {}
 Exposing an app exposes its address apart from its API's. A Topcoat
 app's `<service>_with_parts` serves the pages alone, which call the API
 in-process, so an API the stack keeps internal stays internal;
-`<service>_with_parts_and_api` mounts the JSON API and the engine's
-routes on the app's address too
+`<service>_with_parts_and_api` mounts the JSON API on the app's address
+too
 ([Run the app in a stack](/superschematic/guides/topcoat/#run-the-app-in-a-stack)).
 
 An element names it the same way and takes `enabled`, `env`, a
@@ -1325,8 +1283,7 @@ malformed declarations and names nothing registers.
 on a default Rust server, and `shop-cart` and `shop-storefront`, each on a
 default TypeScript server, and exposes all five; `shop-db`, the `authDb`
 of `shop-api`, `shop-orders`, `shop-stock` and `shop-cart`, joins as their
-database, and its engine types (D70) bring its engine runner,
-`shop-db-engine-runner`, in `shop-api`'s Go; `shop-media`, the bucket
+database; `shop-media`, the bucket
 `shop-api` lists, as a bucket; `shop-cache`, the memory store `shop-api`
 lists and counts its rate limits in, as a memory store; `shop-orders`' `FulfilOrders`, which
 handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
@@ -1347,16 +1304,15 @@ runs `ShipOrders` and `SettlePayments` every minute, and turns
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
 
 `shop-stock` also declares an app, `Backoffice`: a Topcoat app over
-`shop-stock`'s crate at `apps/backoffice`, with its pages under `/stock`
-and the engine console over `shop-db` under `/stock/engine`, which the
-stack exposes ([Apps](#apps)). Its build needs the Topcoat extension, so
+`shop-stock`'s crate at `apps/backoffice`, with its pages under `/stock`,
+which the stack exposes ([Apps](#apps)). Its build needs the Topcoat extension, so
 the example builds its tree and runs `stack dev` with
 `superschematic-topcoat`; the installed `superschematic` still inits and
 plans the stack. `stack dev`'s summary prints where the app is,
 `app shop-stock-backoffice http://127.0.0.1:<port>, Backoffice of
 shop-stock`. Sign in at `/stock/sign-in` as a `shop-db` user who holds
-`stock.write`, then receive stock on a product's Inventory page,
-`/stock/engine/Inventory/{id}`, through its Stock panel.
+`stock.write`, then receive stock on a product's page,
+`/stock/stock/{productId}`, through its receive form.
 
 Each API's implementation lives at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_paths)
@@ -1391,7 +1347,7 @@ product's image to `shop-media` through the URL `shop-api` signs, sees
 `shop-cache` wake a request waiting for the image, refuse an upload
 another replica claims and count `getProduct`'s rate limit, counts
 the product's stock on `shop-stock` as staff, low at two, opens a
-collection point through `shop-db`'s engine routes, fills a cart on
+collection point, fills a cart on
 `shop-cart` and picks a pickup slot, starts the checkout on `shop-orders`,
 which holds the units and the slot, sees another checkout beyond the
 stock refused, pays at acmepay, the fake provider in `go/acmepay`, whose
@@ -1400,8 +1356,8 @@ written and the sale reported to `shop-stock` in one trace, a sale
 reported with a shopper's session alone refused 401, the worker fulfil
 the order and `ReorderStock` file the product's restock request, a member
 of staff who holds `stock.write` sign in to `Backoffice` at
-`/stock/sign-in` and receive five units through the Stock panel's form on
-`/stock/engine/Inventory/{id}`, which `shop-stock`'s `GetStock` then
+`/stock/sign-in` and receive five units through the receive form on
+`/stock/stock/{productId}`, which `shop-stock`'s `GetStock` then
 counts, and a
 refund two members of staff sign off made by `SettlePayments`, run with
 `stack run`; reads a cart from the storefront and the site and its
@@ -1432,8 +1388,8 @@ job's `NewJobs` in `go/shop-orders/jobs.go`:
 ([Rust servers](#rust-servers)). Its worker and job are
 `create_workers` and `create_jobs` in `rust-impl/shop-stock/src/lib.rs`.
 The worker files one open restock request per product, which a unique
-index in `shop-db` holds it to, and the job files one for each product the
-engine lists low (`Stock.low`) and orders each open one, watching the
+index in `shop-db` holds it to, and the job files one for each product
+whose stock is low (`Stock.low`) and orders each open one, watching the
 `Shutdown` its entrypoint cancels on SIGTERM. Both write `shop-db` through
 the repositories its Rust types carry, on a connection of the pool `Deps`
 holds, so neither writes a statement by hand:
@@ -1505,17 +1461,6 @@ keeps them in your cache directory, and builds with `CGO_LDFLAGS`
 pointing at them, after any you set; `stack run` does the same.
 `eval "$(superschematic env)"` sets the same `CGO_LDFLAGS` for a `go
 build` you run yourself ([`env`](/superschematic/reference/cli/#env-variable)).
-
-A server, job, worker or engine runner on an engine database whose types
-compose the work queue's behaviors or an extension's opens the engine
-built from the project's engine crate, which the database's build writes
-under `dist/engine/rust/<db>`. `stack dev` builds it with cargo first, the
-static archive for a Go one, which the Go build links in the core's place,
-and the Node-API addon for a TypeScript one, which its process loads
-through `SUPERSCHEMATIC_ENGINE_ADDON`; you set neither. It keeps cargo's
-work in the program's directory, so a later run rebuilds only what
-changed. The crate builds against a checkout's engine crates, which the
-naming file's `[paths]` engine keys name, since a release ships none yet.
 
 Each checkout of the repository runs an environment with containers and
 ports of its own, so two worktrees run `stack dev` on one stack at once.
@@ -1774,15 +1719,11 @@ runs, brings the copy up to date. A crate that inherits from a workspace
 (`workspace = true`) is refused, since the copy belongs to none.
 
 `examples/acme-shop`'s `shop-stock` is a Rust server. Its implementation,
-`rust-impl/shop-stock`, keeps the stock in `shop-db`'s `Inventory`, which
-the engine keeps (D70): it calls the engine in-process, through the
-`Background` its `Deps` holds, on the blocking pool, since the engine is
-synchronous. It reads `shop-db`'s products through the repositories
-`shop-db`'s Rust types carry (D116), on a connection of the pool its
-`Deps` holds, and enqueues `StockLow` with the runtime's
-`queue::enqueue` and the descriptor `shop-db`'s Rust types hold:
-
-<Snippet file="rust-impl/shop-stock/src/lib.rs" symbol="engine_call" />
+`rust-impl/shop-stock`, keeps the stock in `shop-db`'s `Inventory`. It
+reads `shop-db`'s products through the repositories `shop-db`'s Rust
+types carry (D116), on a connection of the pool its `Deps` holds, and
+enqueues `StockLow` with the runtime's `queue::enqueue` and the
+descriptor `shop-db`'s Rust types hold.
 
 The example commits `schemas/dist/Cargo.lock`, and its check fails when a
 build changes it. The Dockerfile builds the
@@ -1842,7 +1783,7 @@ export abstract class Shop {}
 
 `of` names the deployable as a settings element does: an API's handle for
 its server, an `@server` class, or a `job`, `worker`, `deriver` or `app`
-beside an API's handle, or `runner: true` beside a DB's. Each deployable
+beside an API's handle. Each deployable
 has an image of its own, so a server and its API's worker are named
 apart, each once. The stack names an image's additions, not an
 environment: one image serves every environment, so no environment's
@@ -1925,11 +1866,10 @@ every environment with Cloud Run.
 | schedule | a Cloud Scheduler job, named as the job is, on the job's cron in its time zone, that runs the Cloud Run job through the Cloud Run Admin API as the job's own account, which may run that job and no other. A job whose schedule is off has none, and runs only on demand |
 | worker | a Cloud Run worker pool with its own service account, named after the worker (`shop-orders-fulfil-orders`), with its API's config, secrets and connections and `WORKER_CONCURRENCY`; no port and no URL, scaled by hand to the worker's `instances`, zero when it is off. A `grace` of ten seconds or more is refused, since Cloud Run stops an instance ten seconds after SIGTERM |
 | worker in [drain mode](#drain-mode) | a Cloud Run job in the pool's place, named and configured as the pool would be, of one task with no retries, with `WORKER_MODE`, `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`; a Cloud Scheduler job, named as the worker is, that runs it every `tick` as the worker's own account; and, for each deployable that may enqueue to its queue, `roles/run.invoker` on the job for that deployable's account, whose config holds the job's run method in `QUEUE_WAKES` |
-| runner | a Cloud Run worker pool with its own service account, named after the runner (`shop-db-engine-runner`), with its database's connection as its one config; scaled by hand to one instance, zero when it is off |
 | app | a Cloud Run service with its own service account, named after the app (`shop-stock-backoffice`), with its API's config, secrets and connections, as a server; a TCP startup probe and a TCP liveness probe on its port, and no HTTP probe. Internal only and reachable by no one unless exposed. When it is off, its account and grants alone, with no service and no image ([Apps](#apps)) |
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user, which the migration job gives read and write privileges on the DB service's tables. On an engine database it also grants the user a role of the database's own, `<database>_engine`, which owns the engine's schema, `engine`, so each deployable that opens the engine, as its own user, may change what another created there; and it creates the `unaccent` extension the engine's Search needs. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user, which the migration job gives read and write privileges on the DB service's tables. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
 | http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback, with the server's own loopback credential ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)) |
 | bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's, job's or worker's account, so it signs URLs as itself, in Go, TypeScript or Rust. The derived value is the bucket's name |
 | memory store | a Memorystore for Valkey instance `<project>-<stack>-<store>`, cluster mode disabled with one shard, TLS and IAM authentication, which creates its Private Service Connect endpoint under a service connection policy the environment's stores share ([Memory stores](/superschematic/guides/memory-stores/#on-google-cloud)) |
@@ -1959,7 +1899,7 @@ shortened, so a deployed resource keeps its name.
 
 | Name | Made from | Limit | Shortened |
 | --- | --- | --- | --- |
-| a server's, job's, worker's, runner's, deriver's or app's Cloud Run resource, its account, its scheduler job, its exposed load balancer's nodes and host | the deployable's name: its API's, with its class's or its database's | 30, the account id's | to 30, with the label on the Cloud Run resource; a deployable the stack declares by name is refused instead, naming it |
+| a server's, job's, worker's, deriver's or app's Cloud Run resource, its account, its scheduler job, its exposed load balancer's nodes and host | the deployable's name: its API's, with its class's | 30, the account id's | to 30, with the label on the Cloud Run resource; a deployable the stack declares by name is refused instead, naming it |
 | a bucket, `<project>-<stack>-<bucket>`, and a site's bucket, `<project>-<site>` | the project, the stack and the service | 63 | to 63, with the label on the bucket |
 | a memory store's instance | the project, the stack and the store | 63 | to 63, with the label on the instance |
 | a database, `<db service>` in snake case | the DB service | 63 | to 63, with an underscore before the hash |
@@ -1976,8 +1916,7 @@ Settings and their defaults:
 | `gcp.cloudrunjob` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudrunworker` | `cpu`, `memory` | `1`, `512Mi` |
 | `gcp.cloudrunworker` | `tick` | `5m`: how often a worker in [drain mode](#drain-mode) is started; a pool's worker takes none |
-| `gcp.cloudrunrunner` | `cpu`, `memory` | `1`, `512Mi` |
-| `gcp.cloudrun`, `gcp.cloudrunjob`, `gcp.cloudrunworker`, `gcp.cloudrunrunner` | `telemetry` | the environment's: export when its `telemetry` is set |
+| `gcp.cloudrun`, `gcp.cloudrunjob`, `gcp.cloudrunworker` | `telemetry` | the environment's: export when its `telemetry` is set |
 | `gcp.cloudsql` | `tier` | `db-custom-1-3840` |
 | `gcp.cloudsql` | `highAvailability` | false: a zonal instance |
 | `gcp.cloudsql` | `version` | `POSTGRES_16` |
@@ -2483,9 +2422,9 @@ repository's write of several statements goes as one batch
 An API over the user model keeps its users on the file too, its identity
 store beside the repositories (D116), and on Workers it is refused: no
 identity store runs over D1. Resolution refuses a TypeScript, Rust or Go
-server or job whose database runs in another dialect than its first, and
-a Go worker on a SQLite database, since it claims its queue on Postgres
-alone.
+server, job or worker whose database runs in another dialect than its
+first. A Go worker of a sqlite-first database claims its queue on the
+file, as a Rust or TypeScript one does (#717).
 
 A deploy migrates each D1 database from your machine, or the CI job's,
 between its steps: it finds `superschematic-migrate` on `PATH`, or where
@@ -2694,7 +2633,7 @@ retention and dead messages are as on gcp
 
 | Setting | Default | |
 | --- | --- | --- |
-| `drainSeconds` | `50`, or less for a behavior worker | how long each firing claims; it and the grace must fit in a Cron Trigger's 15 minutes, and a behavior worker's in its `cpuMs` |
+| `drainSeconds` | `50`, or what `cpuMs` leaves | how long each firing claims; it and the grace must fit in its `cpuMs` |
 | `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: handlers' work counts, waits do not |
 | `logs` | `true` | Workers Logs |
 | `telemetry` | the environment's | `false` or `true`: whether it exports its traces |
@@ -2707,13 +2646,17 @@ worker does not resolve, and neither does one whose queue is on D1.
 `mode: "drain"` ([Drain mode](#drain-mode)) changes nothing here: each
 firing already drains the queue and stops.
 
+A firing's window and grace fit within the CPU time a firing may take,
+30 seconds unless `cpuMs` says, since wall time bounds CPU time, so a
+firing ends before Cloudflare stops it whatever its handlers do (D151,
+#600): the window is 50 seconds or what the CPU time leaves, 22 seconds
+with the defaults, and a `drainSeconds` that does not fit does not
+resolve. Set `cpuMs` to give a worker its 50 seconds.
+
 A `@behaviorWorker` is a drainer too (D151). Its `drain.ts` runs its
 table's deadline, change and event queues at each firing, all at once,
-with the handlers its `main.ts` runs under `stack dev`. Its window and
-grace fit within the CPU time a firing may take, 30 seconds unless
-`cpuMs` says, since wall time bounds CPU time: the window is 50 seconds or
-what the CPU time leaves, 22 seconds with the defaults, and a
-`drainSeconds` that does not fit does not resolve. A claim takes up to
+with the handlers its `main.ts` runs under `stack dev`, its window held
+to its CPU time as every drainer's is. A claim takes up to
 `concurrency` messages of a queue. A firing that ends with messages left
 logs `backlog left for the next firing`, naming the queue and how many it
 handled; the next firing takes the rest.
@@ -2727,8 +2670,16 @@ instance sleeps until the message is due, then runs one firing as a
 drain, which stops once the queues are idle. So an urgent deadline fires
 within seconds of its time, and anything later at the firing after it,
 within a minute. A change a trigger writes, which a Reaction hears, waits
-for the next firing, and so does what one worker's handlers leave
-another.
+for the next firing.
+
+A drainer's handlers wake another drainer as a server does, through the
+other's wake relay (#600): a Worker of the woken drainer's own, named as
+its Worker with `-wake` after it, workers.dev off, which runs a script the
+extension embeds and hands each wake to the drainer's Workflow. The
+waking drainer holds a service binding to the relay, which waits for
+nothing, so two drainers over one database, which each wake the other,
+leave no cycle in the deploy's graph. A drainer no other drainer writes
+to has no relay.
 
 ### Sites on Workers
 
@@ -2821,7 +2772,7 @@ is the site's, on one origin.
 | --- | --- |
 | a Go or TypeScript server | refused: the binary runs Rust |
 | a database with no sqlite dialect | refused |
-| a job, a bucket, a memory store, an app, an engine | refused, each with its reason |
+| a job, a bucket, a memory store, a deriver, an app | refused, each with its reason |
 | an API over the user model | its users, their sessions and their API keys are kept in the identity store on the database's file, and its session cookie goes without `Secure`, since the binary serves plain HTTP on the machine it is installed on |
 | a `@worker` or a `@behaviorWorker` of one of its APIs | it runs inside the binary, claiming its queue on the database's file; a write the binary commits wakes it |
 | a table that composes behaviors | its writes, its `@tableOperation`s' among them, go through the behaviors' core on the database's file, and its `@behaviorOperations` are routes of its API |

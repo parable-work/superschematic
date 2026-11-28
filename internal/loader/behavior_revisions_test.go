@@ -32,7 +32,7 @@ func TestRevisionsFixtureLoads(t *testing.T) {
 		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
 	}
 	policy, note := db.Types["Policy"], db.Types["Note"]
-	if policy == nil || policy.IsEngineType() || !policy.Optimistic || note == nil || !note.Optimistic {
+	if policy == nil || len(policy.TypeBehaviors()) > 0 || !policy.Optimistic || note == nil || !note.Optimistic {
 		t.Fatalf("Policy = %s, Note = %s", marshal(t, policy), marshal(t, note))
 	}
 	if refs := policy.Behaviors; len(refs) != 1 || refs[0].Name != "Revisions" || refs[0].Field != "" ||

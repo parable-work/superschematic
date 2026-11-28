@@ -107,7 +107,8 @@ pub struct ContractFilter {
 /// a while after it was last done, or a while before its contract ends. Each
 /// occurrence opens two weeks before it is due, reminds three days before,
 /// and is missed a day after. A filing's due dates move to the next business
-/// day of its holiday calendar. Each occurrence is on the calendar.
+/// day of its holiday calendar. Each occurrence is on the calendar, for a
+/// caller who may work filings (#601).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FilingRow {
     pub id: IdentityUUID,
@@ -241,14 +242,25 @@ pub struct HolidayFilter {
     pub any_of: Vec<HolidayFilter>,
 }
 
+/// FilingRecurrenceAnchor is an anchor Filing's Recurrence takes for a row's recurrence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FilingRecurrenceAnchor {
+    #[serde(rename = "calendar")]
+    Calendar,
+    #[serde(rename = "afterDone")]
+    AfterDone,
+    #[serde(rename = "relative")]
+    Relative,
+}
+
 /// FilingRecurrenceSetRecurrenceParams types the parameters of Filing's's setRecurrence.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FilingRecurrenceSetRecurrenceParams {
     /// How a due date on a weekend day or a holiday moves; the config's when absent. One of "none", "before", "after".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adjust: Option<String>,
-    /// calendar, afterDone or relative. One of "calendar", "afterDone", "relative".
-    pub anchor: String,
+    /// calendar, afterDone or relative.
+    pub anchor: FilingRecurrenceAnchor,
     /// An ISO 8601 duration: an afterDone recurrence's interval after the last completion, or a relative one's between anniversaries of its date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub every: Option<String>,
@@ -326,6 +338,9 @@ pub struct FilingRecurrenceCompleteResult {
     /// When it falls due, in epoch milliseconds.
     #[serde(rename = "dueAt")]
     pub due_at: i64,
+    /// When it fell due while not done or skipped, in epoch milliseconds.
+    #[serde(default, rename = "fellDueAt", skip_serializing_if = "Option::is_none")]
+    pub fell_due_at: Option<i64>,
     /// Its nominal wall date-time, its key.
     pub key: String,
     /// True once moveOne moved it.
@@ -397,6 +412,9 @@ pub struct FilingRecurrenceSkipResult {
     /// When it falls due, in epoch milliseconds.
     #[serde(rename = "dueAt")]
     pub due_at: i64,
+    /// When it fell due while not done or skipped, in epoch milliseconds.
+    #[serde(default, rename = "fellDueAt", skip_serializing_if = "Option::is_none")]
+    pub fell_due_at: Option<i64>,
     /// Its nominal wall date-time, its key.
     pub key: String,
     /// True once moveOne moved it.
@@ -467,6 +485,9 @@ pub struct FilingRecurrenceMoveOneResult {
     /// When it falls due, in epoch milliseconds.
     #[serde(rename = "dueAt")]
     pub due_at: i64,
+    /// When it fell due while not done or skipped, in epoch milliseconds.
+    #[serde(default, rename = "fellDueAt", skip_serializing_if = "Option::is_none")]
+    pub fell_due_at: Option<i64>,
     /// Its nominal wall date-time, its key.
     pub key: String,
     /// True once moveOne moved it.
@@ -552,6 +573,9 @@ pub struct FilingRecurrenceListOccurrencesResultItemsItem {
     /// When it falls due, in epoch milliseconds.
     #[serde(rename = "dueAt")]
     pub due_at: i64,
+    /// When it fell due while not done or skipped, in epoch milliseconds.
+    #[serde(default, rename = "fellDueAt", skip_serializing_if = "Option::is_none")]
+    pub fell_due_at: Option<i64>,
     /// Its nominal wall date-time, its key.
     pub key: String,
     /// True once moveOne moved it.
@@ -956,7 +980,12 @@ pub const POSTGRES: &str = r#"{
           "recurrenceNextDueAt",
           "recurrenceLastDoneAt"
         ],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "recurrence": [
+            "listOccurrences"
+          ]
+        }
       },
       "calendar": [
         {
@@ -964,6 +993,7 @@ pub const POSTGRES: &str = r#"{
           "kind": "deadline",
           "title": "title",
           "color": "filing",
+          "permission": "filings.work",
           "occurrences": {
             "table": "filing_recurrence_occurrences",
             "row": "filing_id",
@@ -1458,6 +1488,14 @@ pub const SQLITE: &str = r#"{
           "target": "Filing",
           "column": "contractId"
         }
+      ],
+      "calendar": [
+        {
+          "name": "contract",
+          "kind": "renewal",
+          "title": "title",
+          "field": "endsOn"
+        }
       ]
     },
     {
@@ -1658,8 +1696,30 @@ pub const SQLITE: &str = r#"{
           "recurrenceNextDueAt",
           "recurrenceLastDoneAt"
         ],
-        "noUpsert": true
-      }
+        "noUpsert": true,
+        "reads": {
+          "recurrence": [
+            "listOccurrences"
+          ]
+        }
+      },
+      "calendar": [
+        {
+          "name": "filing",
+          "kind": "deadline",
+          "title": "title",
+          "color": "filing",
+          "permission": "filings.work",
+          "occurrences": {
+            "table": "filing_recurrence_occurrences",
+            "row": "filing_id",
+            "key": "key",
+            "due": "due",
+            "dueAt": "due_at",
+            "state": "state"
+          }
+        }
+      ]
     },
     {
       "name": "Holiday",
@@ -1802,6 +1862,9 @@ pub mod sqlite {
     use super::*;
 
     pub use orm::sqlite::rusqlite;
+    // The calendar read, feed and routes over the database's calendar
+    // sources on SQLite (D152, #615).
+    pub use orm::calendar::sqlite as calendar;
 
     /// The repository of `Contract` on a SQLite connection.
     pub type ContractRepository<'a> =

@@ -219,6 +219,11 @@ type TypeDef struct {
 	// for every other type. See [RoleSeed].
 	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
 
+	// SeedRows are the rows a DB table's @seedRows declares (#625, #667),
+	// which create.sql inserts and a migration plan inserts when new. Nil
+	// for every other type. See [SeedRows].
+	SeedRows *SeedRows `json:"seedRows,omitempty" yaml:"seedRows,omitempty"`
+
 	// Mergeable marks a DB table whose repository folds one row into
 	// another, the core Mergeable trait (D147): mergeInto repoints every
 	// relation of the schema that references the row merged away, deletes
@@ -343,6 +348,12 @@ type TypeDef struct {
 	// triggers and the runtime's indexing write, and for which no
 	// repository is generated.
 	SearchIndex bool `json:"searchIndex,omitempty" yaml:"searchIndex,omitempty" jsonschema:"-"`
+
+	// SearchFolds marks a search index whose words fold diacritics
+	// (outputs.sql.search.foldDiacritics, #740): on Postgres its GIN
+	// expression and a search's query are in [SearchFoldedConfig], and on
+	// SQLite its FTS5 table removes diacritics.
+	SearchFolds bool `json:"searchFolds,omitempty" yaml:"searchFolds,omitempty" jsonschema:"-"`
 
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
@@ -558,13 +569,9 @@ type FieldDef struct {
 	// declared dependency.
 	PlatformDefault string `json:"platformDefault,omitempty" yaml:"platformDefault,omitempty"`
 
-	// ValidateMin is the minimum numeric value allowed for this field
-	// (@validateMin). Nil means no minimum.
-	ValidateMin *float64 `json:"validateMin,omitempty" yaml:"validateMin,omitempty"`
-
-	// ValidateMax is the maximum numeric value allowed for this field
-	// (@validateMax). Nil means no maximum.
-	ValidateMax *float64 `json:"validateMax,omitempty" yaml:"validateMax,omitempty"`
+	// ValueRules are the field's Validate rules: min, max, minLength,
+	// maxLength, listMin, listMax and pattern.
+	ValueRules `yaml:",inline"`
 
 	// ValidateUploadMaxBytes is the largest multipart upload, in bytes, the
 	// generated API accepts for this field (Validate<T, { uploadMaxBytes }>).
@@ -579,26 +586,6 @@ type FieldDef struct {
 	// type; nil for every other field. A field of a file-upload scalar
 	// takes the scalar's FileUpload instead.
 	FileUpload *FileUploadConfig `json:"fileUpload,omitempty" yaml:"fileUpload,omitempty"`
-
-	// ValidateMinLength is the minimum character length for string-like fields
-	// (@validateMinLength). Nil means no minimum.
-	ValidateMinLength *int `json:"validateMinLength,omitempty" yaml:"validateMinLength,omitempty"`
-
-	// ValidateMaxLength is the maximum character length for string-like fields
-	// (@validateMaxLength). Nil means no maximum.
-	ValidateMaxLength *int `json:"validateMaxLength,omitempty" yaml:"validateMaxLength,omitempty"`
-
-	// ValidateListMin is the minimum list cardinality (item count)
-	// (@validateListMin). Nil means no minimum.
-	ValidateListMin *int `json:"validateListMin,omitempty" yaml:"validateListMin,omitempty"`
-
-	// ValidateListMax is the maximum list cardinality (item count)
-	// (@validateListMax). Nil means no maximum.
-	ValidateListMax *int `json:"validateListMax,omitempty" yaml:"validateListMax,omitempty"`
-
-	// ValidatePattern is the regex pattern enforced for this field
-	// (@validatePattern). Empty string means no pattern.
-	ValidatePattern string `json:"validatePattern,omitempty" yaml:"validatePattern,omitempty"`
 
 	// ValidatePrecision and ValidateScale bound a Generic.Decimal field
 	// (Validate<Generic.Decimal, { precision, scale }>, D84): its value has at
@@ -772,6 +759,20 @@ type FieldDef struct {
 	// Nil for every authored operation. The data forms have no key for
 	// it. See [GraphOperation].
 	GraphOperation *GraphOperation `json:"graphOperation,omitempty" yaml:"graphOperation,omitempty" jsonschema:"-"`
+
+	// RowFeatureOperation marks an operation the loader added for a
+	// @rowFeatureOperations set (#723, D154): a server routes it to a
+	// generated handler that runs it through the database's references
+	// and attachments. Nil for every authored operation. The data forms
+	// have no key for it. See [RowFeatureOperation].
+	RowFeatureOperation *RowFeatureOperation `json:"rowFeatureOperation,omitempty" yaml:"rowFeatureOperation,omitempty" jsonschema:"-"`
+
+	// TriageOperation marks an operation the loader added for a
+	// @triageOperations set (#746, D157): a TypeScript server routes it to
+	// a generated handler that runs it through the inbound path. Nil for
+	// every authored operation. The data forms have no key for it. See
+	// [TriageOperation].
+	TriageOperation *TriageOperation `json:"triageOperation,omitempty" yaml:"triageOperation,omitempty" jsonschema:"-"`
 
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build
@@ -971,8 +972,7 @@ var IndexMethods = []string{IndexMethodBTree, IndexMethodGIN, IndexMethodGIST, I
 
 // HasTableOptions reports whether the index sets an option only a table's
 // index has (D83): a method, an operator class, a predicate, an expression,
-// the concurrency of its build or a vector method's parameter (D84). The
-// engine indexes an engine type's listed fields and reads none of them.
+// the concurrency of its build or a vector method's parameter (D84).
 func (idx IndexDef) HasTableOptions() bool {
 	return idx.Method != "" || idx.Ops != "" || idx.Where != "" || idx.Expression != "" || idx.Concurrently != nil ||
 		idx.M != nil || idx.EFConstruction != nil || idx.Lists != nil
@@ -1061,33 +1061,9 @@ type ArgumentDef struct {
 	// Default is the default value (nil means no default).
 	Default *string `json:"default,omitempty" yaml:"default,omitempty"`
 
-	// ValidateMin is the minimum numeric value allowed for this argument
-	// (@validateMin). Nil means no minimum.
-	ValidateMin *float64 `json:"validateMin,omitempty" yaml:"validateMin,omitempty"`
-
-	// ValidateMax is the maximum numeric value allowed for this argument
-	// (@validateMax). Nil means no maximum.
-	ValidateMax *float64 `json:"validateMax,omitempty" yaml:"validateMax,omitempty"`
-
-	// ValidateMinLength is the minimum character length for string-like
-	// arguments (@validateMinLength). Nil means no minimum.
-	ValidateMinLength *int `json:"validateMinLength,omitempty" yaml:"validateMinLength,omitempty"`
-
-	// ValidateMaxLength is the maximum character length for string-like
-	// arguments (@validateMaxLength). Nil means no maximum.
-	ValidateMaxLength *int `json:"validateMaxLength,omitempty" yaml:"validateMaxLength,omitempty"`
-
-	// ValidateListMin is the minimum list cardinality (item count) for array
-	// arguments (@validateListMin). Nil means no minimum.
-	ValidateListMin *int `json:"validateListMin,omitempty" yaml:"validateListMin,omitempty"`
-
-	// ValidateListMax is the maximum list cardinality (item count) for array
-	// arguments (@validateListMax). Nil means no maximum.
-	ValidateListMax *int `json:"validateListMax,omitempty" yaml:"validateListMax,omitempty"`
-
-	// ValidatePattern is the regex pattern enforced for this argument
-	// (@validatePattern). Empty string means no pattern.
-	ValidatePattern string `json:"validatePattern,omitempty" yaml:"validatePattern,omitempty"`
+	// ValueRules are the argument's Validate rules: min, max, minLength,
+	// maxLength, listMin, listMax and pattern.
+	ValueRules `yaml:",inline"`
 
 	// IsQuery indicates this argument should be a URL query parameter instead
 	// of a path parameter (@query).

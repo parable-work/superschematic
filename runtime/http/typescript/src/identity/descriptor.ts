@@ -61,6 +61,70 @@ export interface IdentityDescriptor {
       readonly revokedAt: string;
     };
   };
+  /** Absent in a descriptor written before the OAuth tables (#695): its store serves no OAuth. */
+  readonly oauth?: {
+    readonly client: {
+      readonly table: string;
+      readonly columns: {
+        readonly id: string;
+        readonly clientId: string;
+        readonly kind: string;
+        readonly name: string;
+        readonly uri: string;
+        readonly redirectUris: string;
+        readonly createdAt: string;
+        readonly refreshedAt: string;
+        readonly freshUntil: string;
+        readonly lastUsedAt: string;
+      };
+    };
+    readonly grant: {
+      readonly table: string;
+      readonly columns: {
+        readonly id: string;
+        readonly user: string;
+        readonly client: string;
+        readonly permissions: string;
+        readonly resource: string;
+        readonly createdAt: string;
+        readonly expiresAt: string;
+        readonly lastUsedAt: string;
+        readonly revokedAt: string;
+      };
+    };
+    readonly code: {
+      readonly table: string;
+      readonly columns: {
+        readonly id: string;
+        readonly client: string;
+        readonly user: string;
+        readonly grant: string;
+        readonly redirectUri: string;
+        readonly codeChallenge: string;
+        readonly state: string;
+        readonly scope: string;
+        readonly resource: string;
+        readonly nonce: string;
+        readonly codeHash: string;
+        readonly createdAt: string;
+        readonly expiresAt: string;
+        readonly usedAt: string;
+      };
+    };
+    readonly token: {
+      readonly table: string;
+      readonly columns: {
+        readonly id: string;
+        readonly grant: string;
+        readonly kind: string;
+        readonly tokenHash: string;
+        readonly createdAt: string;
+        readonly expiresAt: string;
+        readonly usedAt: string;
+        readonly revokedAt: string;
+      };
+    };
+  };
   /** Absent when the schema has no UserRole table, and roleGrant with it. */
   readonly role?: {
     readonly type: string;
@@ -93,6 +157,20 @@ const SHAPE: Record<string, Shape> = {
   session: { table: 'name', columns: columns('id', 'user', 'tokenHash', 'createdAt', 'expiresAt', 'lastSeenAt', 'revokedAt') },
   credential: { table: 'name', columns: columns('id', 'user', 'passwordHash', 'passwordChangedAt', 'disabledAt', 'pendingAt') },
   apiKey: { table: 'name', columns: columns('id', 'user', 'name', 'tokenHash', 'permissions', 'createdAt', 'expiresAt', 'lastUsedAt', 'revokedAt') },
+  oauth: {
+    client: {
+      table: 'name',
+      columns: columns('id', 'clientId', 'kind', 'name', 'uri', 'redirectUris', 'createdAt', 'refreshedAt', 'freshUntil', 'lastUsedAt'),
+    },
+    grant: { table: 'name', columns: columns('id', 'user', 'client', 'permissions', 'resource', 'createdAt', 'expiresAt', 'lastUsedAt', 'revokedAt') },
+    code: {
+      table: 'name',
+      columns: columns(
+        'id', 'client', 'user', 'grant', 'redirectUri', 'codeChallenge', 'state', 'scope', 'resource', 'nonce', 'codeHash', 'createdAt', 'expiresAt', 'usedAt'
+      ),
+    },
+    token: { table: 'name', columns: columns('id', 'grant', 'kind', 'tokenHash', 'createdAt', 'expiresAt', 'usedAt', 'revokedAt') },
+  },
   role: { type: 'name', table: 'name', columns: columns('key', 'name', 'permissions'), keyScalar: 'name' },
   roleGrant: { table: 'name', columns: columns('id', 'user', 'role', 'grantedAt') },
 };
@@ -117,7 +195,8 @@ function check(value: unknown, shape: Shape, path: string): void {
  * any version but 1, unknown members, an empty name, a role table without
  * its grant table or the other way round, and a name holding a NUL, which
  * no quoting can carry. A descriptor without apiKey is one written before
- * D114, and is read as it was.
+ * D114, and one without oauth one written before #695; each is read as it
+ * was.
  */
 export function parseIdentityDescriptor(input: string | unknown): IdentityDescriptor {
   let value: unknown = input;
@@ -138,9 +217,22 @@ export function parseIdentityDescriptor(input: string | unknown): IdentityDescri
   const hasGrant = d.roleGrant !== undefined && d.roleGrant !== null;
   if (hasRole !== hasGrant) throw new IdentityDescriptorError('role and roleGrant are present together or not at all');
   const hasApiKey = d.apiKey !== undefined && d.apiKey !== null;
-  for (const member of ['user', 'session', 'credential', ...(hasApiKey ? ['apiKey'] : []), ...(hasRole ? ['role', 'roleGrant'] : [])]) {
+  const hasOAuth = d.oauth !== undefined && d.oauth !== null;
+  for (const member of [
+    'user',
+    'session',
+    'credential',
+    ...(hasApiKey ? ['apiKey'] : []),
+    ...(hasOAuth ? ['oauth'] : []),
+    ...(hasRole ? ['role', 'roleGrant'] : []),
+  ]) {
     check(d[member], SHAPE[member]!, member);
   }
-  const { apiKey, role, roleGrant, ...rest } = d;
-  return { ...rest, ...(hasApiKey ? { apiKey } : {}), ...(hasRole ? { role, roleGrant } : {}) } as unknown as IdentityDescriptor;
+  const { apiKey, oauth, role, roleGrant, ...rest } = d;
+  return {
+    ...rest,
+    ...(hasApiKey ? { apiKey } : {}),
+    ...(hasOAuth ? { oauth } : {}),
+    ...(hasRole ? { role, roleGrant } : {}),
+  } as unknown as IdentityDescriptor;
 }

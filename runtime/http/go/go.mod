@@ -3,11 +3,11 @@ module github.com/parable-work/superschematic/runtime/http/go
 go 1.27.3
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/go-chi/httprate v0.16.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd
+	github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0
 	github.com/stretchr/testify v1.12.1

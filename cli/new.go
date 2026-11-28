@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/buildplan"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/sentinel"
 	"github.com/parable-work/superschematic/internal/stackinit"
 	ir "github.com/parable-work/superschematic/ir"
@@ -95,7 +96,7 @@ Examples:
 	}
 	cmd.Flags().StringVar(&flags.kind, "kind", "", "the service's kind: DB, API, General, Bucket, Site, MemoryStore or Tasks")
 	cmd.Flags().StringVar(&flags.root, "root", "", "the schemas root (default: the working directory when it holds superschematic.toml, else ./schemas)")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <schemas-root>/superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <schemas-root>/superschematic.toml)")
 	_ = cmd.MarkFlagRequired("kind")
 	return cmd
 }
@@ -147,11 +148,7 @@ func runNewService(cmd *cobra.Command, a *app, flags *newServiceFlags, name stri
 	if _, err := os.Stat(filepath.Join(schemasRoot, initTSConfigBase)); err != nil {
 		return fmt.Errorf("%s has no %s for the service's tsconfig.json to extend; superschematic init writes a schemas root, or --root names one", displayPath(schemasRoot), initTSConfigBase)
 	}
-	names, err := resolveNaming(flags.namingPath, schemasRoot)
-	if err != nil {
-		return err
-	}
-	reg, err := a.resolveRegistry(names)
+	names, reg, err := a.openNaming(flags.namingPath, schemasRoot)
 	if err != nil {
 		return err
 	}
@@ -179,7 +176,7 @@ func runNewService(cmd *cobra.Command, a *app, flags *newServiceFlags, name stri
 			return err
 		}
 	}
-	for _, other := range []string{"schema.config.json", "schema.config.yaml"} {
+	for _, other := range []string{schemaconfig.FormJSON.FileName(), schemaconfig.FormYAML.FileName()} {
 		if _, err := os.Stat(filepath.Join(dir, other)); err == nil {
 			exist = append(exist, displayPath(filepath.Join(dir, other)))
 		}

@@ -63,7 +63,7 @@ func PrincipalRateLimit(
 	principalOf PrincipalReader,
 	getLogger LoggerGetter,
 ) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
+	return countsRuns(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal := principalOf(r)
 			if principal == "" {
@@ -94,7 +94,7 @@ func PrincipalRateLimit(
 
 			next.ServeHTTP(w, r)
 		})
-	}
+	})
 }
 
 // retryAfterSeconds rounds up to whole seconds, the unit Retry-After takes,

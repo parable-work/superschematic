@@ -3,10 +3,13 @@ import { envelopeResponse, requestIdOf } from '../envelope.js';
 import { honoPath, mountManualOperation, type RouterRuntimeOptions } from '../hono.js';
 import type { OperationAuth, OperationSpec, RequestContext } from '../operation.js';
 import { HttpProblem, badRequest, internal, problemResponse } from '../problem.js';
+import { readCapped } from '../read-capped.js';
 import { identityAuthenticator, identityPrincipalOf } from './authenticator.js';
 import { hasNonIntegerLexeme } from './config.js';
 import { corsAnswer, requestHost, type CorsAnswer } from './crossorigin.js';
-import { bodyRefusal, crossOrigin } from './errors.js';
+import { bodyRefusal, crossOrigin, identityNotFound } from './errors.js';
+import type { ApproveOAuthRequestInput, DenyOAuthRequestInput, OAuthServer } from './oauth.js';
+import { oauthBaseOf } from './oauth-hono.js';
 import {
   PERMISSION_ROLES_READ,
   PERMISSION_ROLES_WRITE,
@@ -84,6 +87,12 @@ export interface IdentityOperation {
    * apiKeyAdministration).
    */
   readonly apiKeys?: boolean;
+  /**
+   * True for an OAuth operation (#695), which its set has only when the
+   * service turns OAuth on for it (IdentityServiceOptions.oauth and
+   * oauthAdministration).
+   */
+  readonly oauth?: boolean;
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   readonly path: string;
   readonly rule: IdentityRule;
@@ -115,7 +124,14 @@ export type IdentityOperationName =
   | 'grantRole'
   | 'revokeRole'
   | 'listUserApiKeys'
-  | 'revokeUserApiKey';
+  | 'revokeUserApiKey'
+  | 'getOAuthRequest'
+  | 'approveOAuthRequest'
+  | 'denyOAuthRequest'
+  | 'listOAuthGrants'
+  | 'revokeOAuthGrant'
+  | 'listUserOAuthGrants'
+  | 'revokeUserOAuthGrant';
 
 /** The requests per minute login, register, changePassword and createApiKey allow per client, as ir/identity_routes.go states them. */
 export const LOGIN_RATE_LIMIT = 10;
@@ -152,6 +168,13 @@ export const identityOperations: readonly IdentityOperation[] = [
   { name: 'revokeRole', administration: true, method: 'DELETE', path: 'users/{id}/roles/{roleId}', rule: PERMISSION_ROLES_WRITE },
   { name: 'listUserApiKeys', administration: true, apiKeys: true, method: 'GET', path: 'users/{id}/keys', rule: PERMISSION_USERS_READ },
   { name: 'revokeUserApiKey', administration: true, apiKeys: true, method: 'DELETE', path: 'users/{id}/keys/{keyId}', rule: PERMISSION_USERS_WRITE },
+  { name: 'getOAuthRequest', administration: false, oauth: true, method: 'GET', path: 'oauth/requests/{id}', rule: 'caller' },
+  { name: 'approveOAuthRequest', administration: false, oauth: true, method: 'POST', path: 'oauth/requests/{id}/approve', rule: 'caller' },
+  { name: 'denyOAuthRequest', administration: false, oauth: true, method: 'POST', path: 'oauth/requests/{id}/deny', rule: 'caller' },
+  { name: 'listOAuthGrants', administration: false, oauth: true, method: 'GET', path: 'oauth/grants', rule: 'caller' },
+  { name: 'revokeOAuthGrant', administration: false, oauth: true, method: 'DELETE', path: 'oauth/grants/{id}', rule: 'caller' },
+  { name: 'listUserOAuthGrants', administration: true, oauth: true, method: 'GET', path: 'users/{id}/oauth/grants', rule: PERMISSION_USERS_READ },
+  { name: 'revokeUserOAuthGrant', administration: true, oauth: true, method: 'DELETE', path: 'users/{id}/oauth/grants/{grantId}', rule: PERMISSION_USERS_WRITE },
 ];
 
 /** The default route prefixes of the two sets. */
@@ -176,27 +199,17 @@ const CREATE_USER_FIELDS = { login: 'string', name: 'string', password: 'string'
 const SET_PASSWORD_FIELDS = { password: 'string' } as const;
 const ROLE_FIELDS = { name: 'string', permissions: 'strings' } as const;
 const CREATE_API_KEY_FIELDS = { name: 'string', expiresInSeconds: 'optionalInteger', permissions: 'optionalStrings' } as const;
+const APPROVE_OAUTH_FIELDS = { nonce: 'string', permissions: 'optionalStrings' } as const;
+const DENY_OAUTH_FIELDS = { nonce: 'string' } as const;
 
 /** The bound of the int64 Go reads an integer member into: a number at or past it is no member's value. */
 const INT64_BOUND = 2 ** 63;
 
 /** Reads the request's body, at most MAX_BODY_BYTES of it. */
 async function readBody(request: Request): Promise<string> {
-  if (!request.body) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel();
-      throw bodyRefusal('http: request body too large');
-    }
-    chunks.push(value);
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks));
+  const bytes = await readCapped(request.body, MAX_BODY_BYTES);
+  if (!bytes) throw bodyRefusal('http: request body too large');
+  return new TextDecoder().decode(bytes);
 }
 
 /**
@@ -411,9 +424,46 @@ export function identityHandler<E extends Env = Env>(service: IdentityService, o
         await service.revokeUserApiKey(p, id, pathParam(c, 'keyId'));
         return done(requestId);
       });
+    case 'getOAuthRequest':
+      return authed(async (c, requestId, p) => ok(await oauthOf(service).getRequest(p, pathParam(c, 'id')), requestId));
+    case 'approveOAuthRequest':
+      return authed(async (c, requestId, p) => {
+        const id = pathParam(c, 'id');
+        const input = await decodeBody<ApproveOAuthRequestInput>(c.req.raw, APPROVE_OAUTH_FIELDS);
+        return ok(await oauthOf(service).approve(p, id, input, oauthBaseOf(service, c.req.raw)), requestId);
+      });
+    case 'denyOAuthRequest':
+      return authed(async (c, requestId, p) => {
+        const id = pathParam(c, 'id');
+        const input = await decodeBody<DenyOAuthRequestInput>(c.req.raw, DENY_OAUTH_FIELDS);
+        return ok(await oauthOf(service).deny(p, id, input, oauthBaseOf(service, c.req.raw)), requestId);
+      });
+    case 'listOAuthGrants':
+      return authed(async (_c, requestId, p) => ok(await oauthOf(service).listGrants(p), requestId));
+    case 'revokeOAuthGrant':
+      return authed(async (c, requestId, p) => {
+        await oauthOf(service).revokeGrant(p, pathParam(c, 'id'));
+        return done(requestId);
+      });
+    case 'listUserOAuthGrants':
+      return authed(async (c, requestId, p) =>
+        ok(await oauthOf(service).listUserGrants(p, pathParam(c, 'id'), PERMISSION_USERS_READ), requestId)
+      );
+    case 'revokeUserOAuthGrant':
+      return authed(async (c, requestId, p) => {
+        const id = pathParam(c, 'id');
+        await oauthOf(service).revokeUserGrant(p, id, pathParam(c, 'grantId'), PERMISSION_USERS_WRITE);
+        return done(requestId);
+      });
     default:
       return undefined;
   }
+}
+
+/** The service's OAuth server; one without is the 404 of an OAuth route. */
+function oauthOf(service: IdentityService): OAuthServer {
+  if (!service.oauth) throw identityNotFound('OAuth is not available: this API serves no OAuth');
+  return service.oauth;
 }
 
 /** Every operation's handler, by name. */
@@ -457,12 +507,14 @@ export function identityRoutes<E extends Env = Env>(service: IdentityService, op
     if (op.administration) {
       if (!administration) continue;
       if (op.apiKeys && !service.apiKeyAdministration) continue;
+      if (op.oauth && !(service.oauth && service.oauthAdministration)) continue;
       base = administration.path || DEFAULT_USER_ADMINISTRATION_PATH;
     } else {
       if (!sessions) continue;
       if (sessions.noLogin && (op.name === 'login' || op.name === 'logout' || op.name === 'changePassword' || op.name === 'register')) continue;
       if (!sessions.register && op.name === 'register') continue;
       if (op.apiKeys && !service.apiKeys) continue;
+      if (op.oauth && (sessions.noLogin || !service.oauth)) continue;
       base = sessions.path || DEFAULT_USER_SESSIONS_PATH;
     }
     out.push({ operation: op.name, method: op.method, path: `/${base.replace(/^\/+|\/+$/gu, '')}/${op.path}`, handler: identityHandler<E>(service, op.name)! });

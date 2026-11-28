@@ -68,6 +68,10 @@ func (o TxOptions) begin() (string, error) {
 // it is nested in.
 func (db *Database) txOf(tx pgx.Tx, depth int, commit *txCommit) *Tx {
 	wrapped := &Tx{tx: tx, db: db, depth: depth, commit: commit}
+	wrapped.OAuthClient = &OAuthClientRepository{tx: tx, txDB: db}
+	wrapped.OAuthCode = &OAuthCodeRepository{tx: tx, txDB: db}
+	wrapped.OAuthGrant = &OAuthGrantRepository{tx: tx, txDB: db}
+	wrapped.OAuthToken = &OAuthTokenRepository{tx: tx, txDB: db}
 	wrapped.Role = &RoleRepository{tx: tx, txDB: db}
 	wrapped.Session = &SessionRepository{tx: tx, txDB: db}
 	wrapped.User = &UserRepository{tx: tx, txDB: db}

@@ -52,7 +52,8 @@ type reactionsTerminal struct {
 // and, like the core, the first reported: the status, which its
 // declaration's references state and configReferencesHold holds first
 // (D103's step 5), then each changes rule's field, then each holds and
-// revised rule, which wait for step 4,
+// revised rule, which wait for the core (a revised rule for its read of a
+// version graph),
 // then each rule's read of the status, then each rule's cross-table facts,
 // its when's linking table and relation and its then's target. These are
 // the rules of Reactions' config that read the IR, which the build checks
@@ -98,7 +99,7 @@ func checkReactionsConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef,
 			fail("rule %d: when.holds names rollup %s: a rule that hears a rollup waits for Rollups on the core (D103's order of the work, step 4)", i+1, *rule.When.Holds)
 			return
 		case rule.When.Revised != nil:
-			fail("rule %d: when.revised names link %s: a rule that hears a revision or a release waits for Revisions and Branches on the core (D103's order of the work, step 4)", i+1, rule.When.Revised.Link)
+			fail("rule %d: when.revised names link %s: a rule that hears a revision or a release waits for the core to hear one on a table: a release is a @versioned table's since Branches folded into @versioned (D103), and the core reads no version graph", i+1, rule.When.Revised.Link)
 			return
 		}
 	}
@@ -220,7 +221,7 @@ func reactionsChangesField(schema *ir.Schema, td *ir.TypeDef, name string) strin
 // one Workflow, whose terminal states the rule reads.
 func reactionsLinking(schema *ir.Schema, td *ir.TypeDef, form string, terminal *reactionsTerminal) string {
 	linking := schema.Types[terminal.Schema]
-	if linking == nil || linking.Role != ir.RoleDBTable || linking.JsonField || linking.IsEngineType() {
+	if linking == nil || linking.Role != ir.RoleDBTable || linking.JsonField {
 		return fmt.Sprintf("when.%s names %s, which is not a table of %s", form, terminal.Schema, schema.Name)
 	}
 	link := fieldNamedIn(linking, terminal.Link)

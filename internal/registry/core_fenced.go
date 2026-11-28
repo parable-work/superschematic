@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -42,7 +44,7 @@ func fenceOf(typeName string, args []any) (*ir.Fence, error) {
 		return nil, ArgErrorf(0, "@fenced on %s names no field; name the integer field every covered write advances, as field: \"version\"", typeName)
 	}
 	where := fmt.Sprintf("@fenced on %s.%s", typeName, field)
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		switch key {
 		case "field", "covers":
 		default:

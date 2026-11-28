@@ -1,0 +1,248 @@
+import { Contract, Document, Folder, Request, Unit } from "@schemas/fixture-access-go-db";
+import { Authenticated, HttpMethod, SearchQuery, docs as apiDocs, mcp, paginated, requirePermission, rest, tableOperation } from "@superschematic/api";
+import { Nullable, Validate, decrypted, source } from "@superschematic/schema";
+import { Identity } from "superscalar";
+
+// A contract, its terms opened only for a caller who may reveal them.
+@source(Contract)
+export abstract class ContractView {
+  id: Identity.UUID;
+
+  name: string;
+
+  status: string;
+
+  @decrypted({ permission: "contracts.reveal" })
+  terms: Nullable<string>;
+}
+
+// What a caller sets to write a document.
+@source(Document)
+export abstract class CreateDocumentInput {
+  folderId: Nullable<Identity.UUID>;
+
+  title: string;
+
+  audience: Nullable<string>;
+
+  agentAccess: Nullable<string>;
+}
+
+// What a caller sets to make a folder: it owns it.
+@source(Folder)
+export abstract class CreateFolderInput {
+  name: string;
+
+  owner: Identity.UUID;
+
+  audience: Nullable<string>;
+}
+
+// What a caller sets to make a request of the unit the path names.
+@source(Request)
+export abstract class CreateRequestInput {
+  title: Validate<string, { minLength: 1 }>;
+}
+
+// A document, with who may see it and what an agent run may do with it.
+@source(Document)
+export abstract class DocumentView {
+  id: Identity.UUID;
+
+  folderId: Nullable<Identity.UUID>;
+
+  title: string;
+
+  audience: string;
+
+  agentAccess: string;
+
+  createdBy: Identity.UUID;
+}
+
+// A folder, with who may see it.
+@source(Folder)
+export abstract class FolderView {
+  id: Identity.UUID;
+
+  name: string;
+
+  owner: Identity.UUID;
+
+  audience: string;
+}
+
+// A request about a unit.
+@source(Request)
+export abstract class RequestView {
+  id: Identity.UUID;
+
+  unitId: Identity.UUID;
+
+  title: string;
+}
+
+// A unit of a contract.
+@source(Unit)
+export abstract class UnitView {
+  id: Identity.UUID;
+
+  name: string;
+
+  contractId: Identity.UUID;
+}
+
+// What a caller may change of a document.
+@source(Document)
+export abstract class UpdateDocumentInput {
+  title: Nullable<string>;
+
+  audience: Nullable<string>;
+
+  agentAccess: Nullable<string>;
+}
+
+// What a caller may change of a folder: its name and who may see it.
+@source(Folder)
+export abstract class UpdateFolderInput {
+  name: Nullable<string>;
+
+  audience: Nullable<string>;
+}
+
+export class Folders extends Authenticated {
+  // The folders the caller may see.
+  @apiDocs({ title: "List folders", description: "The folders the caller may see.", capability: "folders.list-folders", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_folders", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "folders")
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listFolders(): FolderView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // A new folder.
+  @apiDocs({ title: "Create folder", description: "A new folder.", capability: "folders.create-folder", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "create_folder", invocationPolicy: "auto" })
+  @rest(HttpMethod.POST, "folders")
+  @tableOperation()
+  createFolder(input: CreateFolderInput): FolderView {
+    throw new Error("schema declaration only");
+  }
+
+  // Changes a folder's name or who may see it: its owner alone.
+  @apiDocs({ title: "Update folder", description: "Changes a folder's name or who may see it: its owner alone.", capability: "folders.update-folder", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "update_folder", invocationPolicy: "auto" })
+  @rest(HttpMethod.PATCH, "folders/{id}")
+  @tableOperation({ by: ["owner"] })
+  updateFolder(id: Identity.UUID, input: UpdateFolderInput): FolderView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Documents extends Authenticated {
+  // The documents the caller may see, searched by their titles.
+  @apiDocs({ title: "List documents", description: "The documents the caller may see, searched by their titles.", capability: "documents.list-documents", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_documents", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "documents")
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listDocuments(q: SearchQuery<string>): DocumentView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // One document.
+  @apiDocs({ title: "Get document", description: "One document.", capability: "documents.get-document", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "get_document", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "documents/{id}")
+  @tableOperation()
+  getDocument(id: Identity.UUID): DocumentView {
+    throw new Error("schema declaration only");
+  }
+
+  // A new document.
+  @apiDocs({ title: "Create document", description: "A new document.", capability: "documents.create-document", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "create_document", invocationPolicy: "auto" })
+  @rest(HttpMethod.POST, "documents")
+  @tableOperation()
+  createDocument(input: CreateDocumentInput): DocumentView {
+    throw new Error("schema declaration only");
+  }
+
+  // Changes a document.
+  @apiDocs({ title: "Update document", description: "Changes a document.", capability: "documents.update-document", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "update_document", invocationPolicy: "auto" })
+  @rest(HttpMethod.PATCH, "documents/{id}")
+  @tableOperation()
+  updateDocument(id: Identity.UUID, input: UpdateDocumentInput): DocumentView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Contracts extends Authenticated {
+  // One contract.
+  @apiDocs({ title: "Get contract", description: "One contract.", capability: "contracts.get-contract", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "get_contract", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "contracts/{id}")
+  @requirePermission(["contracts.read"])
+  @tableOperation()
+  getContract(id: Identity.UUID): ContractView {
+    throw new Error("schema declaration only");
+  }
+
+  // The units the caller reaches.
+  @apiDocs({ title: "List units", description: "The units the caller reaches.", capability: "contracts.list-units", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_units", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "units")
+  @requirePermission(["requests.read"])
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listUnits(): UnitView[] {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Requests extends Authenticated {
+  // The requests about the units of the contracts the caller is a party
+  // to: a row rule through three relations (D108).
+  @apiDocs({ title: "List my requests", description: "The requests about the units of the contracts the caller is a party to: a row rule through three relations (D108).", capability: "requests.list-my-requests", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_my_requests", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "my/requests")
+  @requirePermission(["requests.read"])
+  @tableOperation({ by: ["unit.contract.parties.party"], overridePermission: "requests.admin" })
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listMyRequests(): RequestView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // The requests the caller reaches.
+  @apiDocs({ title: "List requests", description: "The requests the caller reaches.", capability: "requests.list-requests", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_requests", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "requests")
+  @requirePermission(["requests.read"])
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listRequests(): RequestView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // One request.
+  @apiDocs({ title: "Get request", description: "One request.", capability: "requests.get-request", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "get_request", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "requests/{id}")
+  @requirePermission(["requests.read"])
+  @tableOperation()
+  getRequest(id: Identity.UUID): RequestView {
+    throw new Error("schema declaration only");
+  }
+
+  // A new request about the unit the path names.
+  @apiDocs({ title: "Create request", description: "A new request about the unit the path names.", capability: "requests.create-request", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "create_request", invocationPolicy: "auto" })
+  @rest(HttpMethod.POST, "units/{unitId}/requests")
+  @requirePermission(["requests.write"])
+  @tableOperation()
+  createRequest(unitId: Identity.UUID, input: CreateRequestInput): RequestView {
+    throw new Error("schema declaration only");
+  }
+}

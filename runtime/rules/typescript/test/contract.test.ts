@@ -413,8 +413,8 @@ test('declarations are the registered files, each field typed and the value fiel
   // runs as a command without a row.
   expect(lease.operations?.find(o => o.name === 'expireHolder')?.scope).toBe('schema');
   expect(declarations.filter(d => (d.events ?? []).length > 0).map(d => d.name)).toEqual(['Schedules', 'Pool', 'Recurrence']);
-  // Recurrence (D153) raises an occurrence's opened, reminded and missed.
-  expect((byName('Recurrence').events ?? []).map(e => e.kind)).toEqual(['opened', 'reminded', 'missed']);
+  // Recurrence (D153) raises an occurrence's opened, reminded, due (#601) and missed.
+  expect((byName('Recurrence').events ?? []).map(e => e.kind)).toEqual(['opened', 'reminded', 'due', 'missed']);
   // Comments keeps its messages, draft chunks, read markers, follows,
   // deliveries, edits and reactions in sub-tables of the row and each
   // conversation's high-water marks in a table of the table as a whole;

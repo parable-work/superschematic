@@ -46,6 +46,7 @@ package behaviorfields
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -188,7 +189,7 @@ func ExpandFields(schema *ir.Schema, reg *registry.Registry) []string {
 		return nil
 	}
 	var scalars []string
-	for _, name := range sortedNames(schema.Types) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		td := schema.Types[name]
 		if td == nil || td.Role != ir.RoleDBTable || len(td.TableBehaviors()) == 0 {
 			continue
@@ -354,7 +355,7 @@ func HeardBy(schema *ir.Schema, reg *registry.Registry) map[string][]string {
 		return nil
 	}
 	out := map[string][]string{}
-	for _, name := range sortedNames(schema.Types) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		td := schema.Types[name]
 		if td == nil || td.Role != ir.RoleDBTable {
 			continue
@@ -522,16 +523,6 @@ func changeQueue(td *ir.TypeDef, key *ir.FieldDef, hearing, heardBy []string) *i
 			{Name: behaviorlayout.ChangeAfterField, Description: "The row's columns after the write, by column, as JSON; null for a delete.", TypeRef: ir.TypeRef{Name: "Generic.JSON"}},
 		},
 	}
-}
-
-// sortedNames are types' names, sorted.
-func sortedNames(types map[string]*ir.TypeDef) []string {
-	names := make([]string, 0, len(types))
-	for name := range types {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // subTable is the type of the sub-table table that the use keeps on the

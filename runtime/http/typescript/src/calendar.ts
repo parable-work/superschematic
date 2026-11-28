@@ -1,7 +1,9 @@
 import type { Principal } from './auth.js';
 import { GRANT_TOKEN_PREFIX, grantEnded, grantTokenHash, issueGrant, revokeGrant, type GrantRow } from './access.js';
+import { requestIdOf } from './envelope.js';
+import { badRequest, notFound, problemResponse, unauthorized, type HttpProblem } from './problem.js';
 import { sha256 } from './sha256.js';
-import { ormDialect } from './orm.js';
+import { ormDialect, type PlainRepository } from './orm.js';
 import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb } from './uuid.js';
 
@@ -17,7 +19,8 @@ of the row. readCalendar reads every source in a window, each row through
 its table's repository as the caller (orm.as(principal)), so a row's
 audience and the caller's grants hold as they hold on any read (D156); an
 occurrence is shown only when its row is. A source a caller lacks the
-permission of (CalendarOptions.permissions) is left out.
+permission of is left out: the schema's (@calendarSource's permission,
+#601), or the one CalendarOptions.permissions names for it, which wins.
 
 The feed is for a calendar client, which sends no Authorization header: its
 URL holds a token. The token is a grant (D156) of the database's
@@ -55,6 +58,8 @@ export interface CalendarSourceDefinition {
   readonly field?: string;
   readonly end?: string;
   readonly owner?: string;
+  /** The permission the schema's source needs (#601); CalendarOptions.permissions may name another, which wins. */
+  readonly permission?: string;
   readonly occurrences?: CalendarOccurrencesDefinition;
 }
 
@@ -90,22 +95,13 @@ export interface CalendarRead {
 
 /** What the calendar takes beside the ORM. */
 export interface CalendarOptions {
-  /** The permission each source needs, by its name: a caller without it reads none of its entries. A source not named needs none beyond its table's audience and grants. */
+  /** The permission each source needs, by its name: a caller without it reads none of its entries. A source not named needs the schema's (its definition's permission), or none beyond its table's audience and grants. */
   readonly permissions?: Readonly<Record<string, string>>;
 }
 
 type Values = Record<string, unknown>;
 
-interface RepositoryShape {
-  readonly def?: {
-    readonly name?: string;
-    readonly key?: string;
-    readonly calendar?: readonly CalendarSourceDefinition[];
-    readonly columns?: readonly { readonly name: string; readonly timestamp?: boolean; readonly uuid?: boolean }[];
-  };
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-  findOne(filter: Values): Promise<Values | null>;
-}
+type RepositoryShape = Pick<PlainRepository, 'def' | 'findMany' | 'findOne'>;
 
 interface OrmShape {
   as(principal: Principal | null | undefined): OrmShape;
@@ -155,7 +151,7 @@ export async function readCalendar(orm: object, principal: Principal | null, rea
     const def = repository.def!;
     for (const source of def.calendar ?? []) {
       if (read.sources && !read.sources.includes(source.name)) continue;
-      const permission = options.permissions?.[source.name];
+      const permission = options.permissions?.[source.name] ?? source.permission;
       if (permission !== undefined && !(principal?.permissions ?? []).includes(permission)) continue;
       if (read.scope === 'mine' && (source.owner === undefined || principal === null)) continue;
       const owned: Values = read.scope === 'mine' && source.owner !== undefined && principal !== null ? { [source.owner]: { eq: principal.subject } } : {};
@@ -446,8 +442,9 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function problem(status: number, title: string, detail: string): Response {
-  return new Response(JSON.stringify({ type: 'about:blank', title, status, detail }), { status, headers: { 'content-type': 'application/problem+json' } });
+/** The refusal of a request, through the shared problem envelope, which carries its requestId and code. */
+function problem(request: Request, refusal: HttpProblem): Response {
+  return problemResponse(refusal, requestIdOf(request));
 }
 
 /**
@@ -471,7 +468,7 @@ export function calendarRoutes(options: CalendarRoutesOptions): (request: Reques
     const feed = /^\/feed\/([^/]+?)(?:\.ics)?$/u.exec(rest);
     if (request.method === 'GET' && feed) {
       const resolved = await calendarFeedOf(options.orm, decodeURIComponent(feed[1]!), now());
-      if ('refused' in resolved) return problem(401, 'Unauthorized', resolved.refused);
+      if ('refused' in resolved) return problem(request, unauthorized(resolved.refused));
       const at = now();
       const { entries } = await readCalendar(
         options.orm,
@@ -486,24 +483,24 @@ export function calendarRoutes(options: CalendarRoutesOptions): (request: Reques
       return new Response(calendarIcs(entries, resolved.scope.detail, at), { status: 200, headers: { 'content-type': 'text/calendar; charset=utf-8', 'cache-control': 'private, max-age=300' } });
     }
     const principal = await options.authenticate(request);
-    if (!principal) return problem(401, 'Unauthorized', 'Authentication required');
+    if (!principal) return problem(request, unauthorized());
     if (request.method === 'GET' && rest === '') {
       const from = url.searchParams.get('from');
       const to = url.searchParams.get('to');
-      if (!from || !to) return problem(400, 'Bad Request', 'from and to are required');
+      if (!from || !to) return problem(request, badRequest('from and to are required'));
       const sources = url.searchParams.getAll('sources').flatMap(s => s.split(',')).filter(Boolean);
       const scope = url.searchParams.get('scope') === 'mine' ? 'mine' : 'all';
       try {
         const read = await readCalendar(options.orm, principal, { from, to, scope, ...(sources.length > 0 ? { sources } : {}) }, options);
         return json(200, { data: read });
       } catch (error) {
-        if (error instanceof TypeError) return problem(400, 'Bad Request', error.message);
+        if (error instanceof TypeError) return problem(request, badRequest(error.message));
         throw error;
       }
     }
     if (request.method === 'POST' && rest === '/feeds') {
       const body = (await request.json().catch(() => ({}))) as { role?: unknown; detail?: unknown; sources?: unknown; days?: unknown };
-      if (typeof body.role !== 'string' || (body.detail !== 'full' && body.detail !== 'busy')) return problem(400, 'Bad Request', 'a feed takes role, a UserRole, and detail, full or busy');
+      if (typeof body.role !== 'string' || (body.detail !== 'full' && body.detail !== 'busy')) return problem(request, badRequest('a feed takes role, a UserRole, and detail, full or busy'));
       const days = typeof body.days === 'number' && body.days > 0 && body.days <= 3660 ? body.days : CALENDAR_FEED_DAYS;
       const sources = Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === 'string') : undefined;
       const issued = await issueCalendarFeed((options.orm as OrmShape).as(principal), {
@@ -518,12 +515,12 @@ export function calendarRoutes(options: CalendarRoutesOptions): (request: Reques
     const one = /^\/feeds\/([^/]+?)(\/rotate)?$/u.exec(rest);
     if (one && request.method === 'POST' && one[2]) {
       const rotated = await rotateCalendarFeed((options.orm as OrmShape).as(principal), principal.subject, decodeURIComponent(one[1]!));
-      return rotated ? json(200, { data: { id: rotated.id, token: rotated.token, path: `${base}/feed/${rotated.token}.ics`, endsAt: rotated.endsAt.toISOString() } }) : problem(404, 'Not Found', 'no such feed of yours');
+      return rotated ? json(200, { data: { id: rotated.id, token: rotated.token, path: `${base}/feed/${rotated.token}.ics`, endsAt: rotated.endsAt.toISOString() } }) : problem(request, notFound('no such feed of yours'));
     }
     if (one && request.method === 'DELETE' && !one[2]) {
-      return (await revokeCalendarFeed(options.orm, principal.subject, decodeURIComponent(one[1]!))) ? new Response(null, { status: 204 }) : problem(404, 'Not Found', 'no such feed of yours');
+      return (await revokeCalendarFeed(options.orm, principal.subject, decodeURIComponent(one[1]!))) ? new Response(null, { status: 204 }) : problem(request, notFound('no such feed of yours'));
     }
-    return problem(404, 'Not Found', 'no such calendar route');
+    return problem(request, notFound('no such calendar route'));
   };
 }
 

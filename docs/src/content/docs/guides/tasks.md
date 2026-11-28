@@ -30,7 +30,9 @@ and a test that runs its tasks across commits and reuses work by key.
 
 A Tasks service is a directory with a schema config, as every service is.
 Its `outputs.tasks.install` is the path the task file is committed at,
-from the repository root. The directory must exist.
+from the repository root. The directory must exist. Its
+`outputs.tasks.ci` names the CI the tasks run on, when a workflow is
+[written from them](#run-the-tasks-on-github-actions).
 
 ```ts
 // schemas/services/repo-tasks/schema.config.ts
@@ -191,13 +193,32 @@ may read of the commit:
   other's directory name or package name, in its config, its schema
   files or a sidecar document;
 - every tracked file of the schemas root that belongs to no service: the
-  naming file, the workspace's manifests and the shared files;
+  workspace's manifests and the shared files;
+- what the naming file says, and not its bytes;
 - each file the naming file's `[cache] inputs` lists.
+
+The naming file is read by value: its tables and keys, in one order.
+A comment, the layout and the order of its keys are no part of the
+input, and neither is `[deps]`, which says where `build-all` copies the
+dependency graph and nothing of what a service generates. A root with
+no naming file says what an empty one does. Any other edit changes
+every schema input of the root, as it changes every service's build
+cache key: nothing says which keys one service's generators read.
+
+It leaves out what a build writes and a tool keeps, wherever it sits
+under the root: the directories named `dist`, `node_modules`, `bin`,
+`target`, `.venv`, `__pycache__`, `.pytest_cache` and `.ruff_cache`, and
+the copy of the dependency graph the naming file's `[deps] copy` names.
+They are the names the build cache leaves out of a service's digest, so
+a file in one cannot change what a service generates. A lockfile
+committed under the output root is one: a build of the generated
+workspace reads it, and a build of the schemas does not. Name it as a
+`path` input of the task that installs from it.
 
 The set is found from tracked text alone, with no schema loaded. It is
 wider than what one build reads and never narrower by design. Give
 `root` when the repository has two schemas roots with a service of that
-name.
+name. [Measure it](#measure-a-schema-inputs-reach) on your own history.
 
 A resolver runs before anything is generated: the plan comes first, and
 the output root is not tracked. So every resolver follows four rules.
@@ -210,6 +231,9 @@ follows them too.
   a path dependency has not been generated yet.
 - It uses no network and executes nothing the tree holds.
 - It reads at most 1 MiB of one file.
+
+`tasks plan --sandbox` [holds the process to these rules](#the-sandbox)
+while it resolves.
 
 When a manifest names a path that no tracked file holds, such as a
 workspace member a build writes, the resolver reports it. The plan then
@@ -228,6 +252,7 @@ inputs: [
   { kind: "go-module", spec: { dir: "go/shop-api" } },
   { kind: "rust-crate", spec: { dir: "crates/shop" } },
   { kind: "js-package", spec: { dir: "web/shop" } },
+  { kind: "js-package", spec: { dir: "typescript/shop-cart", workspace: "schemas/dist" } },
   { kind: "image", spec: { dockerfile: "docker/api.Dockerfile", context: "." } }
 ]
 ```
@@ -236,8 +261,8 @@ inputs: [
 | --- | --- |
 | `go-module` | the module's files, without the modules nested in it; each module a `replace` of its `go.mod` points at by a path; the `go.work` above it, and each module that workspace uses that the module requires |
 | `rust-crate` | the crate's files, without the crates nested in it; each crate its dependency tables name by a path, `workspace = true` read from the workspace's own table; each crate a `[patch]` points at; the workspace's `Cargo.toml` and `Cargo.lock`; the `.cargo/config.toml` and `rust-toolchain.toml` above it. A workspace's directory is every member |
-| `js-package` | the package's files, without the workspace members nested in it; each member of its workspace it depends on by name; each package it names by `file:`, `link:` or `portal:`; the workspace root's `package.json`, lockfiles and package manager configuration; each tsconfig it extends by a path |
-| `image` | the Dockerfile and its context's `.dockerignore`; each file of the context a `COPY` or an `ADD` names; each file a `RUN --mount=type=bind` mounts. The context is the Dockerfile's directory unless `context` names one |
+| `js-package` | the package's files, without the workspace members nested in it; each member of its workspace it depends on by name; each package it names by `file:`, `link:` or `portal:`; the workspace root's `package.json`, lockfiles and package manager configuration; each tsconfig it extends by a path; each project its tsconfigs reference |
+| `image` | the Dockerfile and its ignore file; each file of the context a `COPY` or an `ADD` names; each file a `RUN --mount=type=bind` mounts; less what the ignore file leaves out. The context is the Dockerfile's directory unless `context` names one |
 
 Each follows a unit to the units it names, and those in turn. Each
 parses manifests and runs nothing: no `go list`, no `cargo metadata`, no
@@ -265,24 +290,57 @@ tracked file of the commit holds. Output generated of task schema-build
 covers it: add `uses: [{ task: schema-build, output: "generated" }]`
 ```
 
-Three cases need a word:
+Six cases need a word:
 
 - **A JS dependency on a generated package.** A workspace often lists a
   directory a build writes, as `schemas/dist/types/typescript/*`. A
   dependency whose version is `workspace:` or `*`, and whose name no
-  tracked member has, may be one of those packages, so the directory of
-  each member pattern that names no tracked package is reported as
-  generated. Any other dependency is the registry's, which the lockfile
-  holds to what was installed.
+  tracked member has, may be one of those packages, and the workspace's
+  lockfile says which. The resolver reads `bun.lock`,
+  `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml` and
+  `yarn.lock`. A name the lockfile resolves to a directory of the
+  workspace is that directory, reported as generated when the commit
+  does not hold it. A name it resolves to a version of the registry is
+  the registry's. A name it does not resolve, and a workspace with no
+  lockfile the resolver reads, fall back to a wider rule: the directory
+  of each member pattern that names no tracked package is reported as
+  generated. Yarn 1's lockfile holds no member, so it settles the
+  registry's names and leaves a member's to the wider rule. bun's binary
+  `bun.lockb` is not read: its format is bun's own and unwritten, and
+  `bun install --save-text-lockfile` writes `bun.lock` in its place.
+- **A JS workspace whose root is not above the package.** A workspace
+  is found at or above a package. A generator that owns an output root
+  writes the workspace's root there and lists the project's packages as
+  `../` members, so the root is not above them, and the commit may not
+  hold it at all. `workspace` names the root's directory. A root the
+  commit holds is read as any other. A root it does not hold is
+  reported as generated, so the task uses the output that writes it,
+  and the lockfile the project commits beside it says what the manifest
+  would: a member the commit holds is taken as a package, and one it
+  does not hold is reported at its directory. With no lockfile the
+  resolver reads, a `workspace:` dependency is refused, since nothing
+  tracked says where a member is.
+- **A tsconfig's project references.** A referenced directory that
+  holds a `package.json` is taken as a package, with what it depends on.
+  Any other is taken with the files under it. One the commit does not
+  hold is reported as generated.
+- **An ignore file.** The image resolver applies the Dockerfile's own
+  `<Dockerfile>.dockerignore` when the commit holds one, and the
+  context's `.dockerignore` otherwise, as BuildKit chooses. Its lines
+  are read as Docker reads them: a pattern from the context's root, a
+  matched directory with all under it, `**` across directories, and `!`
+  to take files back in, the last matching line deciding. The
+  Dockerfile and both ignore files stay in the set whatever the lines
+  say.
 - **A source with a variable.** `COPY ${DIR} /app` cannot be read from
-  the Dockerfile, so the whole context is taken.
+  the Dockerfile, so the whole context is taken, less what the ignore
+  file leaves out.
 - **What a unit reads from outside itself and names in no manifest**,
   as `include_str!("../../x")` does, is a `path` input's.
 
 A resolver's set is wider than what one build reads and never narrower
-by design. The `.dockerignore` is taken as a file and not applied, and a
-`COPY --from` another stage, an `ADD` of a URL and a base image are not
-the commit's.
+by design. A `COPY --from` another stage, an `ADD` of a URL and a base
+image are not the commit's.
 
 ## The task file
 
@@ -358,15 +416,19 @@ and follows.
 A key covers, in order:
 
 1. the key version, with the repository's object format in it, as
-   `1:sha1`;
+   `2:sha1`;
 2. the task's **work hash**: the SHA-256 of its work fields in canonical
    JSON, with the image and the platform in effect;
-3. for each input, a digest of the tracked files it resolves to;
+3. for each input, a digest of what it resolves to;
 4. for each `uses` edge, the upstream task's key.
 
 The digest of an input is the SHA-256 over the sorted lines
 `<mode> <path> <object id>` of the files it matches in the commit's
 tree. Git already holds those ids, so the plan hashes no file contents.
+A resolver may also give a value: what a tracked file says, where its
+bytes say more than a build reads. A value is a line of its own,
+`value <sha256> <name>`. The `schema` resolver gives one, the naming
+file's.
 
 - The mode is in the line, so an executable bit, a symbolic link and a
   submodule's commit change the key.
@@ -384,6 +446,62 @@ at once.
 `tasks plan` is the code that must be trusted for keys. Ship it in the
 image the task file names, and have your forge accept a plan only from
 an image on its own list.
+
+`--keys` prints the keys alone, a line for each task that has one, as
+`<task>=<key>`. It is what a CI step appends to the file its job's
+outputs are read from.
+
+### The sandbox
+
+```sh
+superschematic tasks plan HEAD --file ci/tasks.json --sandbox
+```
+
+A resolver reads tracked files, starts no process and uses no network.
+`--sandbox` holds the process to that while it resolves. The plan first
+reads the commit's tree and starts the one git process that serves file
+contents. From then on the kernel refuses the process a new program, a
+socket, and any file it would open, create, rename or remove. A
+resolver that breaks a rule fails the plan with the kernel's refusal.
+
+The sandbox is a seccomp filter. It works on Linux, on amd64 and arm64,
+and the flag fails anywhere else. It needs no privilege. It is a guard
+against a resolver that drifts from its rules, such as one that reads a
+generated file from the checkout, which would key a task on bytes no
+commit holds. It is not a defence against a binary built to escape it:
+the plan command is trusted code either way.
+
+The plan with `--sandbox` is the plan without it. Run it in the job
+that computes keys.
+
+### What a plan costs
+
+```sh
+superschematic tasks plan HEAD --file ci/tasks.json --profile
+```
+
+`--profile` writes the plan's cost to standard error: the time to read
+the commit, and for each resolver kind the inputs the tasks name, how
+many of those differ, the tracked files they hold and the time.
+
+```
+tasks plan: 1000 tasks over 12429 tracked files
+  read the task file and the tree       146.3ms
+  resolve the inputs and key              447ms
+    go-module      184 inputs,    16 resolved,    95242 files    207.2ms
+    js-package     987 inputs,    82 resolved,     1338 files     15.3ms
+    path          1000 inputs,  1000 resolved,    16715 files     34.6ms
+    rust-crate     170 inputs,    14 resolved,     1391 files     10.9ms
+    schema         659 inputs,    49 resolved,     1358 files     97.5ms
+```
+
+Tasks that name one input share one resolution and one digest, so a
+plan's cost follows the units a repository has more than the tasks that
+name them. On superschematic's own repository, 12,429 tracked files,
+with synthetic task files over its 161 real units, a plan took 0.6
+seconds for 10 tasks, 0.8 for 100, 1.1 for 1,000, 2.0 for 5,000 and 4.6
+for 20,000, of which the last spends 1.4 seconds decoding a 16 MB task
+file.
 
 ### A change that edits a task
 
@@ -453,6 +571,198 @@ Two things belong in a forge and not in the file, because they are trust
 and not graph: which images it trusts to compute keys, and whose passes
 count for a trigger.
 
+## Run the tasks on GitHub Actions
+
+The core's `github` renderer writes a workflow from the task file: a
+job per task. With `reuse` the workflow also plans the commit and keeps
+each task's pass under its input key, as a forge that reads the plan
+does.
+
+```ts
+// schemas/services/repo-tasks/schema.config.ts
+outputs: {
+  tasks: { install: "ci/tasks.json", ci: { github: {} } }
+}
+```
+
+What is GitHub's and not the graph's is the `github` section: when the
+workflow runs, and where the image is pulled from.
+
+```ts
+@tasks({
+  image: "sha256:6a1f...2918",
+  platform: "linux/amd64",
+  sections: {
+    github: {
+      on: { pull_request: { branches: ["main"] }, push: { branches: ["main"] } },
+      imageRepository: "ghcr.io/acme/ci"
+    }
+  }
+})
+export abstract class Repo {}
+
+@task({
+  run: ["scripts/deploy.sh"],
+  after: [GoTest],
+  hermetic: false,
+  sections: { github: { if: "github.event_name == 'push'", timeoutMinutes: 30 } }
+})
+export abstract class Deploy {}
+```
+
+| Section field | On | Meaning |
+| --- | --- | --- |
+| `on` | `@tasks` | the workflow's triggers, written as GitHub writes `on`. Required |
+| `name` | `@tasks` | the workflow's name. The service's name unless given |
+| `permissions` | `@tasks` | the workflow's permissions. `contents: read` unless given |
+| `imageRepository` | `@tasks` | the repository the tasks' image is pulled from by its digest. Required when a task runs from an image |
+| `runsOn` | `@tasks`, `@task` | the runner. Unless given it is the hosted runner of the task's platform: `ubuntu-latest` for `linux/amd64`, `ubuntu-24.04-arm` for `linux/arm64` |
+| `reuse` | `@tasks` | keep each task's pass under its input key. See [Reuse a pass](#reuse-a-pass) |
+| `timeoutMinutes` | `@task` | the job's timeout |
+| `if` | `@task` | the job's condition, written as GitHub writes `if` |
+
+The build writes `<out>/tasks/<service>/ci/github/<service>.yml`, and
+`build-all` installs it in `.github/workflows`, or in the directory
+`outputs.tasks.ci.github.install` names. The directory must exist.
+`tasks --check` holds the workflow current as it holds the task file.
+
+What the workflow does with each part of a task:
+
+| Of a task | In the workflow |
+| --- | --- |
+| `run` | one step. The argument list is quoted, so the step's shell splits and expands nothing |
+| `uses` and `after` | the job's `needs`. GitHub has one kind of edge |
+| a paths output | a tar archive, uploaded as the artifact `<task>.<output>`. Each job that uses it downloads it and unpacks it at the repository root before its command starts. A declared output that matches no file fails the job |
+| a value or an image output | a job output. The command writes it, one line, to the file `$TASK_OUTPUTS/<output>`. A job that uses it reads the file `$TASK_USES/<task>/<output>` |
+| `image` | the job's `container`, as `<imageRepository>@<digest>` |
+| `services` | the job's service containers, each by its image |
+| `env` | the environment of the step that runs the command |
+
+The renderer refuses what the workflow cannot carry, and names the task:
+a command or a variable that holds `${{`, which GitHub would read as an
+expression; a platform with no hosted runner and no `runsOn`; an image
+with no `imageRepository`; a variable named `TASK_OUTPUTS`, `TASK_USES`,
+`TASK_ARTIFACTS`, `TASK_PASS` or `TASK_KEY`, which the workflow sets.
+
+Three things to know:
+
+- **Every run runs every task, unless the section asks for reuse.**
+- **The file does not say how a command hands a runner a value.** The
+  two directories above are this renderer's rule. Another runner may
+  have another.
+- **A paths output needs `tar` in the image, and `bash` to expand its
+  patterns.**
+
+The workflow is a pure function of the task file. It names no release
+of superschematic, so an upgrade does not make the committed file stale.
+
+An extension registers a renderer for another CI with `RenderTasks` on
+its `CIRendererSpec`, and names it under `outputs.tasks.ci`.
+
+### Reuse a pass
+
+```ts
+github: {
+  on: { pull_request: { branches: ["main"] }, push: { branches: ["main"] } },
+  imageRepository: "ghcr.io/acme/ci",
+  reuse: { command: ["acme-schematic"] }
+}
+```
+
+With `reuse` the workflow has one more job, `plan`. It runs
+`tasks plan HEAD --file <the committed task file> --keys` in the image
+`@tasks` names and gives each task's key as a job output. `command` is
+the plan command's first words, `["superschematic"]` unless given: the
+binary that links the resolvers your inputs name, as the image calls
+it.
+
+Each task that has a key then does this:
+
+1. It looks for a pass in GitHub's cache, under the service, the task
+   and the key.
+2. When it finds one, it runs nothing. It hands on what the pass left:
+   the archives of its paths outputs as artifacts, and its values as
+   job outputs. A job that uses them reads what it would have read had
+   the task run.
+3. When it finds none, it checks out, puts what it uses in place, runs,
+   and keeps the pass: its outputs, and the key it passed under.
+
+A task that is not hermetic has no key, and its job is the job of a
+workflow that reuses nothing.
+
+What may read a pass is GitHub's rule. A cache entry a pull request's
+run saved is read by that pull request's runs alone. One a run on the
+default branch saved is read by every branch. So a pull request reuses
+the default branch's passes and its own, and leaves none for the branch
+it lands on.
+
+On a pull request the plan is given a base: the merge commit's first
+parent, the commit the change lands on, when that commit holds the task
+file. A task whose definition the change edits is then keyed on both
+definitions, as [a change that edits a task](#a-change-that-edits-a-task)
+has it.
+
+`reuse` needs three things, and the renderer refuses a service that
+lacks one: the task file committed (`outputs.tasks.install`), since the
+plan reads it from the commit; an image on `@tasks`, since the plan
+command ships in it; and `imageRepository`. The image also needs `git`.
+
+Things to know:
+
+- **A reused job still starts.** GitHub starts the job's container and
+  its service containers before the first step, so a pass saves the
+  task's run and not the job's start.
+- **A cache entry may be evicted.** GitHub keeps a repository's cache to
+  a size and drops an entry no run has read for a week. A pass that is
+  gone is a task that runs.
+- **The key decides, not the result's age.** A pass is kept only after
+  the task's command and every declared output succeeded.
+
+## Measure a schema input's reach
+
+```sh
+superschematic tasks reach schemas
+```
+
+A schema input's set is wider than what one build reads. How much wider
+decides what the input is worth: a set that every commit changes keys
+every task that reads schemas on every commit, and reuses nothing.
+`tasks reach` measures it on a repository's own history. It walks the
+commits that changed a schemas root, back along first parents, and for
+each one compares every service's schema input with its parent's.
+
+```
+examples/acme-shop/schemas: 46 commits that changed it, back from HEAD (1 more left out: no parent, or the root begins there)
+  changed every schema input's digest          14   30%
+  changed some                                 23   50%
+  changed none                                  9   20%
+  changed a file that belongs to no service    13   28%
+  median services edited                        1 of 9
+  median schema inputs changed                  6 of 9
+```
+
+Read it this way:
+
+- **Changed every input** is the cost of what the root shares. A shared
+  file is in every service's set, and so is what the naming file says,
+  so a commit that edits a value of the naming file or a shared
+  tsconfig changes them all.
+- **Changed some** is the input working: the commit changed the
+  services that reach what it edited, and no other.
+- **Changed none** is a commit that touched only what a build writes,
+  or a comment of the naming file, or its `[deps]`.
+
+A high first line means what the root shares changes often. The numbers
+above are from this repository, whose examples edit their naming files
+in a quarter of their commits. Before the set left out what a build
+writes, the first line was 60 percent: half of it was lockfiles
+committed under the output root. Reading the naming file by value moved
+one commit of the 78 the two example roots had between them, an edit
+to `[deps]`: every other edit to a naming file here changed a value.
+
+It reads commits through git, loads no schema and runs no build.
+`--commits` bounds the walk and `--json` writes every measured commit.
+
 ## Check a schema input after a build
 
 ```sh
@@ -471,9 +781,18 @@ Tasks service never runs it, so a build changes for no one else.
 
 ## What is not built
 
-- A CI renderer that writes a workflow from a Tasks schema.
-- A resolver that follows a tsconfig's project references or applies a
-  `.dockerignore`'s exclusions. Both leave a set wider, never narrower.
+- A schema input that knows which keys of the naming file a service's
+  generators read. An edit to a value of the naming file changes every
+  schema input of its root, as it changes every service's build cache
+  key.
+- A JS workspace whose root a build writes and whose lockfile the
+  commit does not hold. Nothing tracked says where its members are, so
+  a `workspace:` dependency fails the resolver, which says so. Commit
+  the lockfile, or name the package's files with a `path` input.
+- A reader of bun's binary `bun.lockb`. A workspace that has only that
+  keeps the wider rule for a generated member.
+- A reusing workflow on a merge queue. The plan is given a base on a
+  pull request alone.
 
 [D203](https://github.com/parable-work/superschematic/issues/692) lists
 these under Left.

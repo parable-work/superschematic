@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -28,9 +29,23 @@ export async function find(db: SqlDatabase, q: string): Promise<SearchResult> {
 
 // searchSQLiteCases are the cases search_sqlite.test.ts runs: D155's
 // "done when" in the generated repositories on SQLite, and the refusal of
-// embeddings there.
-var searchSQLiteCases = append(append([]string{}, searchCases[:len(searchCases)-1]...),
-	"embeddings are Postgres's alone: a search or an indexing on SQLite that asks for them is refused, and reindexSearch builds every row again")
+// embeddings there. The file processor's case is search.test.ts's alone:
+// its pass is the runtime's, the same on every dialect, and its own test
+// covers it (file-processing.test.ts).
+var searchSQLiteCases = append(searchCasesWithout(searchFileProcessorCase, searchCases[len(searchCases)-1]),
+	"embeddings are Postgres's alone: a search or an indexing on SQLite that asks for them is refused, and reindexSearch builds every row again",
+	searchParityCase)
+
+// searchCasesWithout returns searchCases less the cases named.
+func searchCasesWithout(names ...string) []string {
+	out := make([]string, 0, len(searchCases))
+	for _, name := range searchCases {
+		if !slices.Contains(names, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
 
 // TestSearchTablesEndToEndOnSQLite generates fixture-search-db's
 // TypeScript package with its ./orm/sqlite entry, type-checks it against
@@ -55,7 +70,8 @@ func TestSearchTablesEndToEndOnSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write %s's SQLite create.sql: %v", searchFixture, err)
 	}
-	files := map[string]string{"sqlite/create.sql": createSQL}
+	files := searchParityFiles(t)
+	files["sqlite/create.sql"] = createSQL
 	for _, name := range []string{"harness.ts", "search_sqlite.test.ts"} {
 		source, err := ormTests.ReadFile("testdata/orm/" + name)
 		if err != nil {

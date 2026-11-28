@@ -125,6 +125,12 @@ type EndpointInfo struct {
 	// other: the router's handler runs it through the graph's facade
 	// (src/graphs.rs), and its namespace's trait has no method for it.
 	Graph *GraphInfo
+
+	// RowFeature is the row feature operation the endpoint is (#723), nil
+	// for every other: the router's handler runs it through the
+	// repositories' references and attachments (src/rowfeatures.rs), and
+	// its namespace's trait has no method for it.
+	RowFeature *RowFeatureInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -480,18 +486,25 @@ type APIOutput struct {
 	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
 	// PostgresFeatures are the features of the databases the API reads
-	// that a Rust server serves on Postgres alone (D188, D193): a table
-	// that composes Recurrence and a calendar source (D152), a @party
+	// that a Rust server wires on Postgres alone (D193, #725): a @party
 	// table, the conversations and the run requests (D157), and the agent
-	// orchestration's tables (D158), each "Type: feature". A Deps whose
-	// database lists sqlite first is refused them.
+	// orchestration's tables (D158), each "Type: feature". The runtime
+	// serves them on SQLite too (#618); a Deps whose database lists sqlite
+	// first is refused them until the server's wiring builds them there.
+	// Recurrence and a calendar source (D152) are served on SQLite too
+	// (#615).
 	PostgresFeatures []string
 	// ReadsAcrossTables is whether a database the API reads has a calendar
 	// source (D152) or a @searchable table (D155): the crate's dependency
 	// on its Rust types then turns on their repositories, whose definition
 	// the runtime's orm::calendar and orm::search_tables read and an app's
-	// routes for them open (D188).
+	// routes for them open, on Postgres (D188) or SQLite (#615).
 	ReadsAcrossTables bool
+	// heldDatabases are the databases the API reads whose rows keep to a
+	// caller (D156): an @audience table or grants. A behavior operation on
+	// one checks the caller's reach of the row before the core runs
+	// (BehaviorsHeld).
+	heldDatabases map[string]bool
 	// Providers are the API's runtime providers (D159, D185): its slots,
 	// the provider crates its config lists, which Cargo.toml depends on,
 	// and the config fields they read. src/providers.rs holds them, and
@@ -546,6 +559,13 @@ type APIOutput struct {
 	// core, by functions src/behaviors.rs holds, and has no method of the
 	// Workers trait nor of the scaffold.
 	BehaviorWorkers []WorkerInfo
+	// RuntimeWorkers are the API's @worker classes of a queue the runtime
+	// handles, sorted by name (#620, #622, #617): the notifier's dispatch
+	// queue, the agent dispatcher's requests queue, the inbound path's run
+	// requests queue and a @searchable declaration's queue. Each runs
+	// through src/wiring.rs and has no method of the Workers trait nor of
+	// the scaffold. SetDeps moves them out of Workers.
+	RuntimeWorkers []WorkerInfo
 	// Derivers are the API's derivers, sorted by name: a trait each in
 	// deps.rs, which the implementation's create_derivers builds with the
 	// API's Deps (D74). The dispatch layer sets them with SetDerivers.
@@ -554,6 +574,10 @@ type APIOutput struct {
 	// src/apps.rs, which the app's entrypoint builds and hands to the
 	// app's program (D78).
 	Apps []AppInfo
+
+	// databases are the DB schemas the API reads, by name, which SetDeps
+	// reads the wiring of its database from (wiringOf).
+	databases map[string]*ir.Schema
 }
 
 // HasIdempotent reports whether a route the router mounts is @idempotent
@@ -872,9 +896,11 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	// A feature of D152 to D159 the Rust server does not serve yet, of the
 	// API or of a database it reads, is refused, not dropped (D181).
 	var databases []*ir.Schema
+	held := map[string]bool{}
 	for _, name := range sortedSchemaNames(opts.Dependencies) {
 		if dep := opts.Dependencies[name]; dep != nil && dep.Kind == ir.SchemaKindDB {
 			databases = append(databases, dep)
+			held[name] = len(dep.AudienceTables()) > 0 || dep.AccessGrantsTable() != nil
 		}
 	}
 	if err := verify.RefuseRustServer(schema, databases...); err != nil {
@@ -902,6 +928,13 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 	output.PostgresFeatures = postgresFeaturesOf(databases)
+	output.databases = map[string]*ir.Schema{}
+	for name, dep := range opts.Dependencies {
+		if dep != nil && dep.Kind == ir.SchemaKindDB {
+			output.databases[name] = dep
+		}
+	}
+	output.heldDatabases = held
 	for _, database := range databases {
 		for _, td := range database.Types {
 			output.ReadsAcrossTables = output.ReadsAcrossTables || len(td.CalendarSources) > 0 || td.Searchable != nil
@@ -998,6 +1031,14 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		// (D138): its namespace has no method for it either.
 		if info.Behavior == nil && info.Table == nil {
 			if info.Graph, err = b.graphInfo(endpoint, info, graphSets); err != nil {
+				return nil, err
+			}
+		}
+		// A row feature operation's handler runs it through the
+		// repositories' references and attachments (#723): its namespace
+		// has no method for it either.
+		if info.Behavior == nil && info.Table == nil && info.Graph == nil {
+			if info.RowFeature, err = rowFeatureInfo(endpoint, info); err != nil {
 				return nil, err
 			}
 		}
@@ -1190,7 +1231,10 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{output.BehaviorsTemplate(), "behaviors.rs", output.HasBehaviors()},
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
+		{"rowfeatures.tmpl", RowFeaturesFile, output.HasRowFeatureOperations()},
+		{"files.tmpl", FilesFile, output.HasFileProcessing()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
+		{"wiring.tmpl", WiringFile, output.HasWiring()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {
@@ -1341,9 +1385,9 @@ func templateFuncs() template.FuncMap {
 	})
 }
 
-// rustString renders a Rust string literal.
+// rustString renders a Rust string literal (rustutil.Quote).
 func rustString(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s) + `"`
+	return rustutil.Quote(s)
 }
 
 // SetReplacePaths computes dependency path fields for generated Cargo.toml.

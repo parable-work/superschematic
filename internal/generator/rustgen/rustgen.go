@@ -286,11 +286,6 @@ type ModuleOutput struct {
 	// src/identity.rs. Empty when the schema has no User table.
 	IdentityDescriptor string
 
-	// EngineDocument is the schema's engine document (D58) as a Rust raw
-	// string literal, the ENGINE_DOCUMENT constant of src/engine.rs.
-	// Empty when no type of the DB schema composes a behavior.
-	EngineDocument string
-
 	// Queues are the schema's @queue classes, sorted by name, each with
 	// the descriptor src/queues.rs holds or why it leaves the queue out
 	// (D65). Nil writes no src/queues.rs.
@@ -373,11 +368,6 @@ type Options struct {
 	// none.
 	Registry *registry.Registry
 
-	// EngineDocument is the schema's engine document (D58), as
-	// GenerateContext.EngineDocument builds it, which src/engine.rs holds.
-	// Nil writes no src/engine.rs.
-	EngineDocument []byte
-
 	// SQLite is whether the DB service lists the sqlite dialect, whose
 	// statements each queue's descriptor in queues.rs then carries beside
 	// Postgres's (D53, amended), and each table's definition in orm.rs
@@ -398,9 +388,6 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	// refused, not dropped (D181).
 	if err := verify.RefuseRustTypes(schema, opts.SQLite); err != nil {
 		return nil, fmt.Errorf("rustgen: %w", err)
-	}
-	if err := refuseNotifierOnSQLite(schema, opts.SQLite); err != nil {
-		return nil, err
 	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
@@ -528,9 +515,6 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	if output.StateMachines, err = stateMachines(schema, defaultEnums); err != nil {
 		return nil, err
-	}
-	if opts.EngineDocument != nil {
-		output.EngineDocument = rustutil.RawString(strings.TrimSuffix(string(opts.EngineDocument), "\n"))
 	}
 	if output.ORM, err = rustORM(schema, opts, output); err != nil {
 		return nil, err

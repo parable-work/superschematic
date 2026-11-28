@@ -23,14 +23,21 @@ import (
 
 // CrossTablesModel is what crosstable.go is generated from: the
 // definitions as the JSON crosstable.MustParse reads, each "" for none.
+// SQLiteSearchable is the search definition on SQLite, for a database
+// whose DB service lists the sqlite dialect (D186, #615): Postgres's, its
+// words the FTS5 table beside the index in place of the weighed document,
+// its key's type SQLite's and its index's audience compared through
+// json_each, as tsgen's sqliteSearchable writes it.
 type CrossTablesModel struct {
-	Calendar   string
-	Searchable string
+	Calendar         string
+	Searchable       string
+	SQLiteSearchable string
 }
 
 // crossTablesOf is the cross-table model of schema's tables, nil for a
-// database with no calendar source and no @searchable table.
-func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel) (*CrossTablesModel, error) {
+// database with no calendar source and no @searchable table; with sqlite,
+// it holds the search definition on SQLite too.
+func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel, sqlite bool) (*CrossTablesModel, error) {
 	byType := map[string]*sqlutil.TableModel{}
 	for i := range tables {
 		byType[tables[i].Type] = &tables[i]
@@ -70,12 +77,17 @@ func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel) (*CrossTables
 			def := calendarTableDef{Table: t.Quoted, Live: sourceLive(t)}
 			def.Key, def.KeyType, def.UUID = keyOf(t)
 			for i, source := range td.CalendarSources {
-				entry := calendarSourceDef{Name: ir.CalendarSourceName(td, i), Kind: source.Kind, Color: source.Color}
+				entry := calendarSourceDef{Name: ir.CalendarSourceName(td, i), Kind: source.Kind, Color: source.Color, Permission: source.Permission}
 				title, err := column(name, source.Title)
 				if err != nil {
 					return nil, err
 				}
 				entry.Title = title.Quoted
+				// A title of an Encrypted<T> field is its envelope, which the
+				// read opens under the database's keys (#616).
+				if title.Def != nil && title.Def.EncryptedAtRest {
+					entry.TitleSealed, entry.TitleField = true, source.Title
+				}
 				if source.Field != "" {
 					field, err := column(name, source.Field)
 					if err != nil {
@@ -136,8 +148,29 @@ func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel) (*CrossTables
 			return nil, err
 		}
 		model.Searchable = string(data)
+		if sqlite {
+			onSQLite := make(map[string]searchableDef, len(searchable))
+			for name, def := range searchable {
+				def.Document = ""
+				def.Config = ""
+				def.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
+				def.KeyType = "text"
+				def.IndexAudience = &searchIndexAudienceDef{Contains: sqlutil.SQLiteAudienceContains, Placeholder: sqlutil.SQLiteAudiencePlaceholder}
+				onSQLite[name] = def
+			}
+			if data, err = json.Marshal(onSQLite); err != nil {
+				return nil, err
+			}
+			model.SQLiteSearchable = string(data)
+		}
 	}
 	return model, nil
+}
+
+// searchIndexAudienceDef is crosstable.SearchIndexAudience.
+type searchIndexAudienceDef struct {
+	Contains    string `json:"contains"`
+	Placeholder string `json:"placeholder"`
 }
 
 // calendarTableDef is crosstable.CalendarTable.
@@ -161,6 +194,9 @@ type calendarSourceDef struct {
 	Timestamp   bool                    `json:"timestamp,omitempty"`
 	Owner       string                  `json:"owner,omitempty"`
 	OwnerUUID   bool                    `json:"ownerUuid,omitempty"`
+	Permission  string                  `json:"permission,omitempty"`
+	TitleSealed bool                    `json:"titleSealed,omitempty"`
+	TitleField  string                  `json:"titleField,omitempty"`
 	Occurrences *calendarOccurrencesDef `json:"occurrences,omitempty"`
 }
 
@@ -226,8 +262,12 @@ func occurrencesOf(schema *ir.Schema, td *ir.TypeDef, byType map[string]*sqlutil
 
 // searchableDef is crosstable.Searchable, tsgen's SearchableDefinition.
 type searchableDef struct {
-	Index     string             `json:"index"`
-	Document  string             `json:"document"`
+	Index    string `json:"index"`
+	Document string `json:"document"`
+	// Config is the text search configuration the index's words are in
+	// on Postgres, when it is not simple: search_unaccent, which folds
+	// diacritics (#740).
+	Config    string             `json:"config,omitempty"`
 	Table     string             `json:"table"`
 	Key       string             `json:"key"`
 	KeyType   string             `json:"keyType"`
@@ -239,6 +279,9 @@ type searchableDef struct {
 	Audience  *searchAudienceDef `json:"audience,omitempty"`
 	Comments  *searchCommentsDef `json:"comments,omitempty"`
 	Files     *searchFilesDef    `json:"files,omitempty"`
+	// FTS and IndexAudience are the definition's on SQLite alone (D186).
+	FTS           string                  `json:"fts,omitempty"`
+	IndexAudience *searchIndexAudienceDef `json:"indexAudience,omitempty"`
 }
 
 type searchAudienceDef struct {
@@ -278,7 +321,8 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, byType map[string]*sqlutil.
 	key := table.KeyColumn()
 	out := searchableDef{
 		Index:    index.Quoted,
-		Document: ir.SearchDocument("si"),
+		Document: ir.SearchDocumentIn(schema.SearchConfig(), "si"),
+		Config:   searchConfigOf(schema),
 		Table:    table.Quoted,
 		Key:      key.Quoted,
 		KeyType:  strings.ToLower(key.Type),
@@ -344,4 +388,13 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, byType map[string]*sqlutil.
 		}
 	}
 	return out, nil
+}
+
+// searchConfigOf is the schema's search index's text search configuration
+// when it is not simple (#740), "" when it is.
+func searchConfigOf(schema *ir.Schema) string {
+	if config := schema.SearchConfig(); config != ir.SearchTextConfig {
+		return config
+	}
+	return ""
 }

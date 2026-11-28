@@ -94,25 +94,7 @@ impl Param {
 /// The text `Date.prototype.toISOString` writes for epoch milliseconds,
 /// which a SQLite date-time column holds and a Postgres `TIMESTAMPTZ` reads.
 pub fn iso(millis: i64) -> String {
-    let days = millis.div_euclid(86_400_000);
-    let of_day = millis.rem_euclid(86_400_000);
-    // Howard Hinnant's civil_from_days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        of_day / 3_600_000,
-        of_day / 60_000 % 60,
-        of_day / 1000 % 60,
-        of_day % 1000
-    )
+    superschematic_rules::civil::iso_of(millis).expect("an instant a Date holds")
 }
 
 /// The `@optimistic` trigger sqlgen writes on Postgres, which bumps
@@ -761,6 +743,7 @@ pub fn job_table() -> Table {
         operations: vec![
             Operation::new("find", false),
             Operation::of_table("rows", false),
+            Operation::of_table("permissions", false),
         ],
         tables: Vec::new(),
     };
@@ -1285,7 +1268,9 @@ impl Behavior for Echo {
 /// answers the page of `{type, use, field, value, after}`. Its read-only
 /// operation of the table as a whole, `rows` (D104), answers the page of a
 /// read across a table, `{type, equal, tables, after}`, as Pool's pick
-/// reads its members.
+/// reads its members. Its read-only operation of the table as a whole,
+/// `permissions` (D200), answers the permissions each of `{subjects}`
+/// holds now, as Approvals' recheckPermission reads them.
 pub struct Finder;
 
 impl Behavior for Finder {
@@ -1295,6 +1280,7 @@ impl Behavior for Finder {
         Declaration::new("Finder")
             .operation("find", false)
             .table_operation("rows", false)
+            .table_operation("permissions", false)
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
@@ -1303,6 +1289,14 @@ impl Behavior for Finder {
 
     fn operation(&self, cx: &Cx<'_, Value>, name: &str, params: &Value) -> Hook<Value> {
         let param = |name: &str| params.get(name).and_then(Value::as_str);
+        if name == "permissions" {
+            let subjects: Vec<String> = params
+                .get("subjects")
+                .and_then(|subjects| serde_json::from_value(subjects.clone()).ok())
+                .unwrap_or_default();
+            let held = cx.permissions_of(&subjects)?;
+            return Ok(serde_json::to_value(held).unwrap_or_default());
+        }
         if name == "rows" {
             let equal = params
                 .get("equal")
@@ -1430,9 +1424,10 @@ pub mod pg {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use bytes::BytesMut;
-    use tokio_postgres::types::{to_sql_checked, Format, IsNull, ToSql, Type};
-    use tokio_postgres::{Client, NoTls};
+    use superschematic_engine_pg::tls_for;
+    pub use superschematic_rules_adapter::sql::Text;
+    use tokio_postgres::types::ToSql;
+    use tokio_postgres::Client;
 
     use super::Param;
 
@@ -1448,9 +1443,11 @@ pub mod pg {
         }
     }
 
-    /// A connection, its search path the schema's when one is named.
+    /// A connection, with the TLS the URL's sslmode asks for, its search
+    /// path the schema's when one is named.
     pub async fn connect(url: &str, schema: Option<&str>) -> Client {
-        let (client, connection) = tokio_postgres::connect(url, NoTls)
+        let (url, tls) = tls_for(url).expect("the TLS");
+        let (client, connection) = tokio_postgres::connect(&url, tls)
             .await
             .expect("Postgres connects");
         tokio::spawn(async move {
@@ -1517,37 +1514,6 @@ pub mod pg {
             }
             panic!("the test's task did not finish: {error}");
         }
-    }
-
-    /// A parameter sent as text, which Postgres reads into the type it
-    /// meets, or NULL.
-    #[derive(Debug)]
-    pub struct Text(Option<String>);
-
-    impl ToSql for Text {
-        fn to_sql(
-            &self,
-            _ty: &Type,
-            out: &mut BytesMut,
-        ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-            match &self.0 {
-                Some(text) => {
-                    out.extend_from_slice(text.as_bytes());
-                    Ok(IsNull::No)
-                }
-                None => Ok(IsNull::Yes),
-            }
-        }
-
-        fn accepts(_ty: &Type) -> bool {
-            true
-        }
-
-        fn encode_format(&self, _ty: &Type) -> Format {
-            Format::Text
-        }
-
-        to_sql_checked!();
     }
 
     pub fn texts(values: &[Param]) -> Vec<Text> {

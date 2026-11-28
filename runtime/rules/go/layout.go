@@ -34,6 +34,11 @@ type Layout struct {
 	// none for a layout whose uses name none.
 	Declarations []json.RawMessage `json:"declarations,omitempty"`
 
+	// Permissions is where a permissions read is answered (D200): the
+	// database's identity tables; nil for a layout that names none, whose
+	// reads answer no subject.
+	Permissions *Permissions `json:"permissions,omitempty"`
+
 	// checks is the define check of each type, made once per core a
 	// command runs on over this layout.
 	checks layoutChecks
@@ -189,8 +194,15 @@ type Column struct {
 	// Type is its IR type's name: string, number, boolean or a scalar
 	// (Temporal.DateTime, Identity.UUID, Generic.JSON).
 	Type string `json:"type"`
-	// Convert is how the adapter converts it; ConvertNone for none.
+	// Convert is how the adapter converts it; ConvertNone for none, and
+	// for a list, whose elements it converts by Type alone.
 	Convert Convert `json:"convert,omitempty"`
+	// List is true for a column that holds a list of Type: a Postgres
+	// array, which pgx scans as a []any, or a jsonb list, and on SQLite
+	// the JSON text of one. An @audience table's audience ids are one, a
+	// uuid[] (D156), which the adapter converts element by element. False
+	// for one value, and for a map.
+	List bool `json:"list,omitempty"`
 }
 
 // OwnedField is a behavior's declared field and the column it takes.

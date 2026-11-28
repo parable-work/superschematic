@@ -2,6 +2,7 @@ package topcoat
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -197,7 +198,7 @@ func viewsOf(schemas schemaSet, records []record) ([]view, []enumLabel, error) {
 	}
 	labels := make([]enumLabel, 0, len(b.enums))
 	funcs := map[string]string{}
-	for _, name := range sortedKeys(b.enums) {
+	for _, name := range slices.Sorted(maps.Keys(b.enums)) {
 		label := b.enums[name]
 		if other, taken := funcs[label.Func]; taken {
 			return nil, nil, fmt.Errorf("topcoat: enums %s and %s both name the function %s", other, name, label.Func)
@@ -538,7 +539,7 @@ func (b *viewBuilder) nestsItself(typeName string) bool {
 	seen := map[string]bool{}
 	var walk func(string) bool
 	walk = func(name string) bool {
-		for _, nested := range sortedKeys(b.nests[name]) {
+		for _, nested := range slices.Sorted(maps.Keys(b.nests[name])) {
 			if nested == typeName {
 				return true
 			}
@@ -732,8 +733,8 @@ func (c *crate) ViewsUse(fn string) bool {
 }
 
 // HasViews reports whether the crate writes views.rs: it has display
-// components, or something calls views::money_text (WritesMoney), an
-// engine panel's amount or a form's (D44, amended). Without components
+// components, or something calls views::money_text (WritesMoney), a
+// form's amount (D44, amended). Without components
 // views.rs holds money_text alone.
 func (c *crate) HasViews() bool { return len(c.Views) > 0 || c.WritesMoney() }
 

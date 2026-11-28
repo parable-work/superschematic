@@ -139,10 +139,6 @@ func TestSQLNamesRefusals(t *testing.T) {
 			s.Types["Category"].SQLName = "cat"
 		},
 			"a version graph's runtimes name its tables themselves (support follows)"},
-		{"an engine type", func(s *ir.Schema) {
-			s.Types["Category"].Behaviors = []ir.BehaviorRef{{Name: "Workflow"}}
-			s.Types["Category"].Fields[1].SQLName = "labelText"
-		}, "Category.label: @column names a column the ORMs keep, and Category: it composes behaviors"},
 		{"a @jsonField type", func(s *ir.Schema) {
 			s.Types["Address"] = &ir.TypeDef{Name: "Address", Role: ir.RoleDBTable, JsonField: true, SQLName: "address", Fields: []*ir.FieldDef{{Name: "line", TypeRef: str}}}
 		}, "Address: @table names a table, and Address is none"},

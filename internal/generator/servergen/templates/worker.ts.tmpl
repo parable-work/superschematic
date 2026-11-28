@@ -31,13 +31,10 @@
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 {{- if .PostgresDatabases }}
-import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres{{ if not $db.SQLite }}, postgresQueue{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ if .CloudSQL }}{{ end }}connectPostgres{{ if not $db.SQLite }}, postgresQueue{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 {{- end }}
 {{- if .SQLiteDatabases }}
-import { openSqlite, sqliteFile{{ if $db.SQLite }}, sqliteQueue{{ end }}, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
-{{- end }}
-{{- if .Engines }}
-import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
+import { {{ if $db.SQLite }}claimsOver, {{ end }}openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
 import { runWorker, workerConcurrency, workerDrain } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
@@ -57,9 +54,6 @@ import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
-{{- range .Engines }}
-import { engineDocument as {{ .Document }} } from '{{ .DocumentModule }}';
-{{- end }}
 
 /** How long a stopping worker lets its running handlers finish. */
 const GRACE_MS = {{ .Worker.GraceSeconds }} * 1000;
@@ -70,22 +64,26 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, worker: {{ tsQuote .N
  * Builds the worker from the environment and claims and handles messages
  * until signal aborts, when SIGTERM or SIGINT arrives, then stops within
  * the grace. Each pool it opens goes in pools, which main ends, and so does
- * its telemetry, which main flushes.{{ if .Engines }} Each engine it opens goes in
- * engines, which main closes.{{ end }}
+ * its telemetry, which main flushes.
  */
-async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .Engines }}, engines: { close(): void }[]{{ end }}): Promise<void> {
+async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
 {{- template "ts-background-connections" . }}
 
   // {{ $api.Service }}: its workers, built from its Deps.
   {{ template "ts-deps" $api }}
-{{- if .Worker.Dispatcher }}
-  // A queue of the agent dispatcher's (D158, D183): its Deps' dispatcher
-  // takes each message as it is, and the implementation has no method for it.
+{{- if .Worker.Handler }}
+  // A queue of {{ .Worker.HandlerPiece }}: its handler takes each
+  // message as it is, and the implementation has no method for it.
 {{- else }}
   const workers = await construct({{ tsQuote $api.Service }}, 'workers', () => {{ $api.Impl }}.createWorkers({{ $api.Deps }}));
 {{- end }}
   const concurrency = workerConcurrency({{ .Worker.Concurrency }});
-  const queue = {{ if $db.SQLite }}sqliteQueue{{ else }}postgresQueue{{ end }}({{ $db.Var }}, {{ .Worker.Definition }});
+  const queue = {{ if $db.SQLite }}claimsOver{{ else }}postgresQueue{{ end }}({{ $db.Var }}, {{ .Worker.Definition }});
+{{- if .Worker.Upkeep }}
+  // The notifier's upkeep beside the queue's prune: every channel adapter's
+  // health on its schedule, and the deliveries past their retention.
+  const upkeep = {{ $api.Module }}.notifierUpkeepOf({{ $api.Deps }});
+{{- end }}
   logger.info('worker started', { api: {{ tsQuote $api.Service }}, class: {{ tsQuote .Worker.Name }}, queue: queue.name, concurrency });
   await runWorker(
     {
@@ -96,13 +94,13 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
           id: claim.id,
           token: claim.token,
           attempt: claim.attempt,
-          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => {{ if .Worker.Dispatcher }}{{ $api.Module }}.dispatchAgentMessage({{ $api.Deps }}, claim.message){{ else }}workers.{{ .Worker.Method }}(claim.message, handlerSignal){{ end }}),
+          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => {{ if .Worker.Handler }}{{ $api.Module }}.{{ .Worker.Handler }}({{ $api.Deps }}, claim.message{{ if .Worker.HandlerOptions }}, {{ $api.RuntimeOptions }}{{ end }}){{ else }}workers.{{ .Worker.Method }}(claim.message, handlerSignal){{ end }}),
         })),
       extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
       complete: (id, token) => queue.complete(id, token),
       fail: (id, token, cause) => queue.fail(id, token, cause),
       release: (id, token) => queue.release(id, token),
-      prune: {{ if .Worker.Transcripts }}async limit => (await queue.prune(limit)) + (await {{ $api.Deps }}.agents.prune(limit)){{ else }}limit => queue.prune(limit){{ end }},
+      prune: {{ if .Worker.Transcripts }}async limit => (await queue.prune(limit)) + (await {{ $api.Deps }}.agents.prune(limit)){{ else if .Worker.Upkeep }}async limit => (await queue.prune(limit)) + (await upkeep(limit)){{ else }}limit => queue.prune(limit){{ end }},
 {{- if not $db.SQLite }}
       slot: slots => queue.slot(slots),
       nextDue: () => queue.nextDue(),
@@ -127,10 +125,6 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
 {{- if .SQLiteDatabases }}
 
 {{ template "ts-open-sqlite" . }}
-{{- end }}
-{{- if .Engines }}
-
-{{ template "ts-engine" . }}
 {{- end }}
 {{- template "ts-clients" . }}
 

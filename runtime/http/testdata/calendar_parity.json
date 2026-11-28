@@ -1,0 +1,241 @@
+{
+  "comment": "The calendar's pure parts (D152, #616): references is a busy entry's reference number, eight characters of base32 (ABCDEFGHJKLMNPQRSTUVWXYZ23456789, each byte mod 32) of the SHA-256 of its source, key and occurrence key, joined by NUL (Go's crosstable.CalendarReference, TypeScript's calendarReference, Rust's orm::calendar::calendar_reference); feeds is the iCalendar text of entries at a detail, full or busy, stamped at now (epoch milliseconds) under a calendar's name, its lines CRLF-ended and folded at 75 octets on a character's boundary (CalendarICS, calendarIcs, calendar_ics). An entry is the wire form a calendar read answers. runtime/schema/go/crosstable writes the wants with go test -run TestCalendarParityVectors -update.",
+  "references": [
+    {
+      "name": "an entry of a row",
+      "entry": {
+        "source": "contract",
+        "kind": "renewal",
+        "type": "Contract",
+        "key": "c1",
+        "title": "Renew; the lease, now\\then\nand again\r\nonce more",
+        "start": "2027-01-05",
+        "end": "2027-01-08",
+        "allDay": true
+      },
+      "want": "LDYR9CRX"
+    },
+    {
+      "name": "an occurrence",
+      "entry": {
+        "source": "filing",
+        "kind": "deadline",
+        "color": "filing",
+        "type": "Filing",
+        "key": "3vQB7B6MrGQZaxCuFg4oh",
+        "title": "A filing whose title runs long enough that its summary line passes seventy-five octets and folds",
+        "start": "2027-01-31T17:00:00.000Z",
+        "occurrence": {
+          "key": "2027-01-31T17:00",
+          "due": "2027-01-29T17:00",
+          "state": "upcoming"
+        }
+      },
+      "want": "4S4854AZ"
+    },
+    {
+      "name": "another occurrence of the same row",
+      "entry": {
+        "source": "filing",
+        "kind": "deadline",
+        "color": "filing",
+        "type": "Filing",
+        "key": "3vQB7B6MrGQZaxCuFg4oh",
+        "title": "Quarterly return",
+        "start": "2027-04-30T16:00:00Z",
+        "occurrence": {
+          "key": "2027-04-30T17:00",
+          "due": "2027-04-30T17:00",
+          "state": "skipped"
+        }
+      },
+      "want": "TVF7FE7A"
+    },
+    {
+      "name": "a key of characters past ASCII",
+      "entry": {
+        "source": "meeting",
+        "kind": "meeting",
+        "type": "Meeting",
+        "key": "r\u00e9union-\u65e5\u672c",
+        "title": "R\u00e9vision du budget, \u00e9quipe \u00e9tendue \u2014 \u65e5\u672c\u306e\u62e0\u70b9\u3068\u5171\u6709\u3057\u307e\u3059\u3002\u6700\u5f8c\u306b\u78ba\u8a8d",
+        "start": "2027-02-10T09:30:00+01:00",
+        "end": "2027-02-10T11:00:00.250+01:00"
+      },
+      "want": "QV5CBF7Q"
+    },
+    {
+      "name": "an empty key",
+      "entry": {
+        "source": "contract",
+        "kind": "renewal",
+        "type": "Contract",
+        "key": "",
+        "title": "Renew; the lease, now\\then\nand again\r\nonce more",
+        "start": "2027-01-05",
+        "end": "2027-01-08",
+        "allDay": true
+      },
+      "want": "ASB6RTLK"
+    }
+  ],
+  "feeds": [
+    {
+      "name": "no entries",
+      "entries": [],
+      "detail": "full",
+      "now": 1795608000000,
+      "calendarName": "Calendar",
+      "want": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//superschematic//calendar//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Calendar\r\nEND:VCALENDAR\r\n"
+    },
+    {
+      "name": "in full: escaped, folded, all day, an occurrence confirmed and one cancelled, an offset made UTC",
+      "entries": [
+        {
+          "source": "contract",
+          "kind": "renewal",
+          "type": "Contract",
+          "key": "c1",
+          "title": "Renew; the lease, now\\then\nand again\r\nonce more",
+          "start": "2027-01-05",
+          "end": "2027-01-08",
+          "allDay": true
+        },
+        {
+          "source": "filing",
+          "kind": "deadline",
+          "color": "filing",
+          "type": "Filing",
+          "key": "3vQB7B6MrGQZaxCuFg4oh",
+          "title": "A filing whose title runs long enough that its summary line passes seventy-five octets and folds",
+          "start": "2027-01-31T17:00:00.000Z",
+          "occurrence": {
+            "key": "2027-01-31T17:00",
+            "due": "2027-01-29T17:00",
+            "state": "upcoming"
+          }
+        },
+        {
+          "source": "meeting",
+          "kind": "meeting",
+          "type": "Meeting",
+          "key": "m-1",
+          "title": "R\u00e9vision du budget, \u00e9quipe \u00e9tendue \u2014 \u65e5\u672c\u306e\u62e0\u70b9\u3068\u5171\u6709\u3057\u307e\u3059\u3002\u6700\u5f8c\u306b\u78ba\u8a8d",
+          "start": "2027-02-10T09:30:00+01:00",
+          "end": "2027-02-10T11:00:00.250+01:00"
+        },
+        {
+          "source": "filing",
+          "kind": "deadline",
+          "color": "filing",
+          "type": "Filing",
+          "key": "3vQB7B6MrGQZaxCuFg4oh",
+          "title": "Quarterly return",
+          "start": "2027-04-30T16:00:00Z",
+          "occurrence": {
+            "key": "2027-04-30T17:00",
+            "due": "2027-04-30T17:00",
+            "state": "skipped"
+          }
+        },
+        {
+          "source": "filing",
+          "kind": "deadline",
+          "color": "filing",
+          "type": "Filing",
+          "key": "3vQB7B6MrGQZaxCuFg4oh",
+          "title": "Quarterly return",
+          "start": "2027-07-31T16:00:00Z",
+          "occurrence": {
+            "key": "2027-07-31T17:00",
+            "due": "2027-07-31T17:00",
+            "state": "done"
+          }
+        }
+      ],
+      "detail": "full",
+      "now": 1795608000000,
+      "calendarName": "Calendar",
+      "want": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//superschematic//calendar//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Calendar\r\nBEGIN:VEVENT\r\nUID:LDYR9CRX-2027-01-05@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART;VALUE=DATE:20270105\r\nDTEND;VALUE=DATE:20270108\r\nSUMMARY:Renew\\; the lease\\, now\\\\then\\nand again\\nonce more\r\nCATEGORIES:renewal\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:4S4854AZ-2027-01-31T17:00@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART:20270131T170000Z\r\nSUMMARY:A filing whose title runs long enough that its summary line passes \r\n seventy-five octets and folds\r\nCATEGORIES:deadline\r\nSTATUS:CONFIRMED\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:9Z3JPTTH-2027-02-10T09:30:00+01:00@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART:20270210T083000Z\r\nDTEND:20270210T100000Z\r\nSUMMARY:R\u00e9vision du budget\\, \u00e9quipe \u00e9tendue \u2014 \u65e5\u672c\u306e\u62e0\u70b9\u3068\u5171\u6709\r\n \u3057\u307e\u3059\u3002\u6700\u5f8c\u306b\u78ba\u8a8d\r\nCATEGORIES:meeting\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:TVF7FE7A-2027-04-30T17:00@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART:20270430T160000Z\r\nSUMMARY:Quarterly return\r\nCATEGORIES:deadline\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:MN35AXNP-2027-07-31T17:00@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART:20270731T160000Z\r\nSUMMARY:Quarterly return\r\nCATEGORIES:deadline\r\nSTATUS:CONFIRMED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    },
+    {
+      "name": "busy: a reference and no title or kind",
+      "entries": [
+        {
+          "source": "contract",
+          "kind": "renewal",
+          "type": "Contract",
+          "key": "c1",
+          "title": "Renew; the lease, now\\then\nand again\r\nonce more",
+          "start": "2027-01-05",
+          "end": "2027-01-08",
+          "allDay": true
+        },
+        {
+          "source": "filing",
+          "kind": "deadline",
+          "color": "filing",
+          "type": "Filing",
+          "key": "3vQB7B6MrGQZaxCuFg4oh",
+          "title": "A filing whose title runs long enough that its summary line passes seventy-five octets and folds",
+          "start": "2027-01-31T17:00:00.000Z",
+          "occurrence": {
+            "key": "2027-01-31T17:00",
+            "due": "2027-01-29T17:00",
+            "state": "upcoming"
+          }
+        },
+        {
+          "source": "meeting",
+          "kind": "meeting",
+          "type": "Meeting",
+          "key": "m-1",
+          "title": "R\u00e9vision du budget, \u00e9quipe \u00e9tendue \u2014 \u65e5\u672c\u306e\u62e0\u70b9\u3068\u5171\u6709\u3057\u307e\u3059\u3002\u6700\u5f8c\u306b\u78ba\u8a8d",
+          "start": "2027-02-10T09:30:00+01:00",
+          "end": "2027-02-10T11:00:00.250+01:00"
+        },
+        {
+          "source": "filing",
+          "kind": "deadline",
+          "color": "filing",
+          "type": "Filing",
+          "key": "3vQB7B6MrGQZaxCuFg4oh",
+          "title": "Quarterly return",
+          "start": "2027-04-30T16:00:00Z",
+          "occurrence": {
+            "key": "2027-04-30T17:00",
+            "due": "2027-04-30T17:00",
+            "state": "skipped"
+          }
+        }
+      ],
+      "detail": "busy",
+      "now": 1795608000000,
+      "calendarName": "Calendar",
+      "want": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//superschematic//calendar//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Calendar\r\nBEGIN:VEVENT\r\nUID:LDYR9CRX-2027-01-05@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART;VALUE=DATE:20270105\r\nDTEND;VALUE=DATE:20270108\r\nSUMMARY:Busy (LDYR9CRX)\r\nTRANSP:OPAQUE\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:4S4854AZ-2027-01-31T17:00@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART:20270131T170000Z\r\nSUMMARY:Busy (4S4854AZ)\r\nTRANSP:OPAQUE\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:9Z3JPTTH-2027-02-10T09:30:00+01:00@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART:20270210T083000Z\r\nDTEND:20270210T100000Z\r\nSUMMARY:Busy (9Z3JPTTH)\r\nTRANSP:OPAQUE\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:TVF7FE7A-2027-04-30T17:00@superschematic\r\nDTSTAMP:20261125T120000Z\r\nDTSTART:20270430T160000Z\r\nSUMMARY:Busy (TVF7FE7A)\r\nTRANSP:OPAQUE\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    },
+    {
+      "name": "a calendar name escaped and folded",
+      "entries": [
+        {
+          "source": "filing",
+          "kind": "deadline",
+          "color": "filing",
+          "type": "Filing",
+          "key": "3vQB7B6MrGQZaxCuFg4oh",
+          "title": "A filing whose title runs long enough that its summary line passes seventy-five octets and folds",
+          "start": "2027-01-31T17:00:00.000Z",
+          "occurrence": {
+            "key": "2027-01-31T17:00",
+            "due": "2027-01-29T17:00",
+            "state": "upcoming"
+          }
+        }
+      ],
+      "detail": "busy",
+      "now": 1795608001234,
+      "calendarName": "Team deadlines; filings, renewals and the rest of what falls due \u2014 \u00e9t\u00e9 \u65e5\u672c",
+      "want": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//superschematic//calendar//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Team deadlines\\; filings\\, renewals and the rest of what falls\r\n  due \u2014 \u00e9t\u00e9 \u65e5\u672c\r\nBEGIN:VEVENT\r\nUID:4S4854AZ-2027-01-31T17:00@superschematic\r\nDTSTAMP:20261125T120001Z\r\nDTSTART:20270131T170000Z\r\nSUMMARY:Busy (4S4854AZ)\r\nTRANSP:OPAQUE\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    }
+  ]
+}

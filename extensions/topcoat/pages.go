@@ -3,6 +3,7 @@ package topcoat
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode"
@@ -13,13 +14,12 @@ import (
 // PagesConfig is outputs.topcoat.pages: whether the crate has a page per
 // resource its operations describe, the path they are served under, and
 // whether a list's filter updates its table in place, through a shard, for
-// an app that loads Topcoat's runtime (Live). Engine and Identity turn the
-// engine's pages and the identity pages off; nil is on.
+// an app that loads Topcoat's runtime (Live). Identity turns the identity
+// pages off; nil is on.
 type PagesConfig struct {
 	Enabled  bool                 `json:"enabled"`
 	Prefix   string               `json:"prefix,omitempty"`
 	Live     bool                 `json:"live,omitempty"`
-	Engine   *bool                `json:"engine,omitempty"`
 	Identity *IdentityPagesConfig `json:"identity,omitempty"`
 }
 
@@ -222,7 +222,7 @@ func (m *pagesModel) Uses(item string) bool { return m.uses[item] }
 
 // Imports is the names pages.rs imports from module, sorted and joined.
 func (m *pagesModel) Imports(module string) string {
-	names := sortedKeys(m.imports[module])
+	names := slices.Sorted(maps.Keys(m.imports[module]))
 	return strings.Join(names, ", ")
 }
 
@@ -621,10 +621,10 @@ func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, 
 			}
 		}
 	}
-	for _, name := range sortedKeys(b.params) {
+	for _, name := range slices.Sorted(maps.Keys(b.params)) {
 		m.Params = append(m.Params, routeParam{Name: name})
 	}
-	for _, name := range sortedKeys(b.prefills) {
+	for _, name := range slices.Sorted(maps.Keys(b.prefills)) {
 		m.Prefills = append(m.Prefills, b.prefills[name])
 	}
 	m.Tree = b.tree(roots, 0)
@@ -1724,31 +1724,16 @@ var pageFuncs = map[string]any{
 	},
 }
 
-// hookPages readies pages.rs for the console's own pages, the engine's
-// (engine_pages.rs) and the identity runtime's (identity_pages.rs): the
-// nav and the index add their links (ConsoleHooks), the helpers the
-// modules share with these pages are public (Shared), and the engine's
-// lists get the history and the pager of a paged list. Without either
-// module pages.rs is as before.
-func (c *crate) hookPages() {
-	if c.Pages == nil {
-		return
-	}
-	if c.EnginePages != nil {
-		c.Pages.use("back", "pageQuery", "pager", "runtime", "form")
-	}
-}
-
 // ConsoleHooks reports whether pages.rs hooks the console's own pages in:
-// the engine's pages or the identity pages are on, so the nav and the
-// index add their links (NavLink) after the resources'.
+// the identity pages are on, so the nav and the index add their links
+// (NavLink) after the resources'.
 func (c *crate) ConsoleHooks() bool {
-	return c.Pages != nil && (c.EnginePages != nil || c.IdentityPages != nil)
+	return c.Pages != nil && c.IdentityPages != nil
 }
 
 // Shared is the visibility pages.rs gives a helper it shares with the
-// console's own pages: `pub ` when they are on, so engine_pages.rs and
-// identity_pages.rs call it, else none, which keeps it private.
+// console's own pages: `pub ` when they are on, so identity_pages.rs calls
+// it, else none, which keeps it private.
 func (c *crate) Shared() string {
 	if c.ConsoleHooks() {
 		return "pub "

@@ -6,33 +6,21 @@ import (
 )
 
 // outputs.api.mcp (D81) serves the API's tools over MCP from the
-// TypeScript router and from the Rust one (D116): a Go API with it fails
-// to load, saying what to change and that support follows, and a
-// TypeScript or a Rust one reads it.
-func TestParseOutputsServesMCPOnATypeScriptOrARustAPI(t *testing.T) {
+// TypeScript router, the Rust one (D116) and the Go one (#660): each
+// reads it, and its key.
+func TestParseOutputsServesMCPOnEveryAPILanguage(t *testing.T) {
 	enabled := map[string]any{"enabled": true}
-	for _, language := range []string{"", "GO"} {
-		api := map[string]any{"enabled": true, "mcp": true}
+	for language, types := range map[string]string{"": "go", "GO": "go", "TYPESCRIPT": "typescript", "RUST": "rust"} {
+		api := map[string]any{"enabled": true, "mcp": true, "mcpConfirmationKey": "McpKeys.MCP_CONFIRMATION_KEY"}
 		if language != "" {
 			api["language"] = language
 		}
-		_, err := ParseOutputs(map[string]any{"api": api, "types": map[string]any{"go": enabled}}, coreOutputRegistry(t))
-		want := "outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)"
-		if err == nil || err.Error() != want {
-			t.Errorf("mcp on a Go API (language %q): error = %v, want %q", language, err, want)
-		}
-	}
-
-	for language, types := range map[string]string{"TYPESCRIPT": "typescript", "RUST": "rust"} {
-		outputs, err := ParseOutputs(map[string]any{
-			"api":   map[string]any{"enabled": true, "language": language, "mcp": true, "mcpConfirmationKey": "McpKeys.MCP_CONFIRMATION_KEY"},
-			"types": map[string]any{types: enabled},
-		}, coreOutputRegistry(t))
+		outputs, err := ParseOutputs(map[string]any{"api": api, "types": map[string]any{types: enabled}}, coreOutputRegistry(t))
 		if err != nil {
-			t.Fatalf("mcp on a %s API: %v", language, err)
+			t.Fatalf("mcp on a %q API: %v", language, err)
 		}
 		if !outputs.API.MCP || outputs.MCPConfirmationKey() != "McpKeys.MCP_CONFIRMATION_KEY" {
-			t.Errorf("outputs.api.mcp and its key were not read on a %s API: %+v", language, outputs.API)
+			t.Errorf("outputs.api.mcp and its key were not read on a %q API: %+v", language, outputs.API)
 		}
 	}
 	// A disabled API serves nothing, so its mcp is not checked.

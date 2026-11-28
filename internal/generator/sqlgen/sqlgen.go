@@ -307,6 +307,10 @@ type DDLOutput struct {
 	// RoleSeeds are the roles a UserRole table's @seedRoles declares, in
 	// declaration order (seeds.go, D88).
 	RoleSeeds []RoleSeed
+
+	// SeedRows are the rows each table's @seedRows declares, in table
+	// order, then declaration order (seed_rows.go, #625).
+	SeedRows []SeedRow
 }
 
 // Options configures DDL generation.
@@ -369,15 +373,11 @@ const DefaultHistoryActorSetting = "superschematic.history_actor_id"
 
 // Generate generates PostgreSQL DDL from a v2 IR schema. Returns nil when
 // the schema declares no database tables and no queues. A queue's table
-// follows the tables (queues.go, D53). An engine type, a type that
-// composes a behavior, gets no table: the engine keeps its instances in
-// tables of its own (D58), so the DDL, and the migration models
-// sqlmigrate builds on it, leave it out.
+// follows the tables (queues.go, D53).
 func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
-	schema = codegen.WithoutEngineTypes(schema)
 
 	scalarMapping := sqlutil.ScalarSQLTypes(schema)
 	compositeDefaults, err := collectCompositeDefaults(schema, opts.Dependencies)
@@ -581,7 +581,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	audienceTriggers, audienceCascades, err := buildAudience(tableTypes, tables)
+	audienceTriggers, audienceCascades, err := buildAudience(schema, tableTypes, tables)
 	if err != nil {
 		return nil, err
 	}
@@ -594,6 +594,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		return nil, err
 	}
 	roleSeeds, err := buildRoleSeeds(tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
+	seedRows, err := buildSeedRows(tableTypes, tables)
 	if err != nil {
 		return nil, err
 	}
@@ -666,6 +670,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		SearchTriggers:      searchTriggers,
 		SearchChildTriggers: searchChildTriggers,
 		RoleSeeds:           roleSeeds,
+		SeedRows:            seedRows,
 		Projections:         projections,
 		Timestamp:           opts.Clock.RFC3339(),
 		RawSQL:              rawSQL,
@@ -825,8 +830,7 @@ func convertTypeToTable(
 			if column.Type != "JSONB" {
 				return table, fmt.Errorf("field %s.%s uses platform default %q on non-JSONB column %s", typeDef.Name, field.Name, field.PlatformDefault, column.Type)
 			}
-			escaped := strings.ReplaceAll(def.CanonicalJSON, "'", "''")
-			column.DefaultValue = "'" + escaped + "'::jsonb"
+			column.DefaultValue = sqlutil.QuoteLiteral(def.CanonicalJSON) + "::jsonb"
 		}
 
 		// A required date or time takes the time of the insert only where
@@ -1062,7 +1066,7 @@ func buildHistoryTable(table Table, typeDef *ir.TypeDef, actorSetting string) (H
 		literals := make([]string, 0, len(kept.Exclude))
 		for _, column := range kept.Exclude {
 			history.ExcludedColumns = append(history.ExcludedColumns, column)
-			literals = append(literals, "'"+strings.ReplaceAll(column, "'", "''")+"'")
+			literals = append(literals, sqlutil.QuoteLiteral(column))
 		}
 		history.ExcludeArray = "ARRAY[" + strings.Join(literals, ", ") + "]"
 	}

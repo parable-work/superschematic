@@ -8,9 +8,9 @@ require (
 )
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2 // indirect
+	github.com/go-chi/chi/v5 v5.4.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3 // indirect
 	github.com/parable-work/superschematic/ir v0.0.0 // indirect
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect

@@ -14,16 +14,17 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
-| the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
-| the same notifier in the Go runtime, on Postgres ([in Go](#in-go)) | a route to an agent in Go (D158 is TypeScript's alone so far) |
-| raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference; a table's Comments' mentions and replies ([conversations in the inbox](#a-tables-conversation-in-the-inbox)) | a generated behavior worker that hands a behavior's events to the notifier itself |
-| routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
-| the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
-| urgent, normal, digest and record; quiet hours; digests and briefs | an inbox page in Topcoat |
-| deliveries that fall through, time out and escalate | an event at an occurrence's due time itself; a reply interpreter other than keywords |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
+| the same notifier in the Rust runtime, on Postgres and SQLite ([in Rust](#in-rust)) | a generated Rust server that builds it over a database that lists `sqlite` first (#725) |
+| the same notifier in the Go runtime, on Postgres and SQLite, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | the same generated over a database that lists `sqlite` first (#717) |
+| raising an event in the caller's transaction; Recurrence's opened, reminded, due and missed; a cleared reference; a table's Comments' mentions and replies ([conversations in the inbox](#a-tables-conversation-in-the-inbox)) | a generated behavior worker that hands a behavior's events to the notifier itself |
+| routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
+| the recipient's audience held at routing and at send time; every adapter's health asked on a schedule by the dispatch queue's worker | |
+| urgent, normal, digest and record; quiet hours, held to the instants they start and end on a night the clocks change (TypeScript and Go); digests and briefs | an inbox page in Topcoat; Rust's quiet hours, which count wall minutes |
+| deliveries that fall through, time out and escalate | an event at an occurrence's due time itself |
 | replies by reference, trust per channel kind, echo and undo, and the audit | |
-| verifying an address by a code, and password reset by email | the dispatch queue drained on Workers over D1 |
+| a reply no keyword reads, interpreted by an agent run that acts for its sender (TypeScript, [below](#a-reply-an-agent-reads)) | the same in Go and Rust |
+| verifying an address by a code, and password reset by email; the dispatch queue drained on Workers over D1 | |
 
 [D153](https://github.com/parable-work/superschematic/issues/602)
 records the design and what is left. `examples/notifications` is the
@@ -43,7 +44,7 @@ export abstract class Ticket { ... }
 ```
 
 A behavior's events are kinds too: the use's member, a dot and the
-behavior's kind. Recurrence emits `opened`, `reminded` and `missed` as it
+behavior's kind. Recurrence emits `opened`, `reminded`, `due` and `missed` as it
 moves an occurrence on, so `recurrence.missed` is a kind an `@event` may
 make urgent:
 
@@ -81,7 +82,11 @@ build fills, one empty class per part, and the channel identities:
 The inbox, the deliveries, the routes and the dispatch queue are
 required. The notifier runs on Postgres. A database that declares any of
 this needs a channel adapter: the build refuses an environment that runs
-an API over it with no channel slot set.
+an API over it with no channel slot set. The examples' adapters,
+`examples/runtime-providers`' SMS and mail relays, send to stand-in
+services in their tests; an app whose service takes another shape writes
+its own adapter
+([set up your own provider](/superschematic/guides/runtime-providers/#set-up-your-own-provider)).
 
 ## Raise an event
 
@@ -194,17 +199,41 @@ Each recipient gets a notice in the inbox, numbered among their own
 (`#142`), and a delivery on the first channel their preferences name. A
 preference row maps an event kind and an urgency (each or `*`) to channel
 kinds in order, quiet hours, a time zone and a digest rule. A row with no
-principal is the default, seed data the app writes. `quietStart` and
-`quietEnd` are `Temporal.Time`, `timeZone` is a `Temporal.TimeZone` and
-`digest` is a `Temporal.RecurrenceRule`, so a write that names no time of
-day, zone or rule is refused.
+principal is the default. `quietStart` and `quietEnd` are
+`Temporal.Time`, `timeZone` is a `Temporal.TimeZone` and `digest` is a
+`Temporal.RecurrenceRule`, so a write that names no time of day, zone or
+rule is refused.
+
+The defaults are seed rows of the schema
+([`@seedRows`](/superschematic/reference/migrations/#seeded-rows)), which
+the migrations write and never overwrite: a person's own row, or an edit
+an administrator makes to the default, stays. No unique constraint holds
+the preference rows, so the seed names the fields that identify one:
+
+```ts
+@seedRows<NoticePreference>(
+  [{ principal: null, eventKind: "*", urgency: "*", channels: ["sms", "email"],
+     quietStart: "22:00", quietEnd: "07:00", timeZone: "Europe/Paris", digest: "FREQ=DAILY;BYHOUR=8;BYMINUTE=0" }],
+  { key: ["principal", "eventKind", "urgency"] },
+)
+@notifier("preferences")
+export abstract class NoticePreference {}
+```
+
+A person's own preference is a row the app writes:
 
 ```ts
 await orm.asSystem().noticePreference.createOne({
-  principal: null, eventKind: "*", urgency: "*", channels: ["sms", "email"],
-  quietStart: "22:00", quietEnd: "07:00", timeZone: "Europe/Paris", digest: "FREQ=DAILY;BYHOUR=8;BYMINUTE=0",
+  principal: ben, eventKind: "*", urgency: "normal", channels: ["email"], timeZone: "Europe/Paris",
 });
 ```
+
+Quiet hours start and end at instants in the recipient's zone (#602).
+Each wall time is the first instant the clock shows it: on the night the
+clocks go forward past it, the instant they jump; on the night they go
+back over it, the first time it shows. So a window holds a notice for the
+hours that pass: 22:00 to 07:00 in New York holds one 8 hours on the
+night the clocks go forward and 10 on the night they go back.
 
 A delivery is queued, then sent, delivered and read, or it ends failed or
 acknowledged. A send that fails, or no delivery report in five minutes
@@ -231,6 +260,9 @@ app.post("/webhooks/sms/inbound", async c =>
   c.json(await notifier.inbound("SMS", { headers: Object.fromEntries(c.req.raw.headers), body: await c.req.text() })));
 ```
 
+The generated TypeScript server mounts that route for every channel slot
+itself ([below](#what-the-generated-server-wires)).
+
 A sender whose address is a verified channel identity runs as its
 principal. A reply names its notice by number (`ACK 142`, `done 142`)
 unless exactly one waits on its sender on that channel. `ack` acknowledges
@@ -252,9 +284,46 @@ the same repository write the operation's route makes. The channel kind's
 trust row caps what a reply may use: `{ channelKind: "sms", level: "low",
 permissions: [] }` lets a text acknowledge and nothing else, since a
 sender id can be spoofed. A kind with no row is low. An address entered by
-hand acknowledges alone. Every reply is a row of the replies table: its
+hand acknowledges alone. The trust rows are seed rows too, keyed by the
+unique channel kind:
+
+```ts
+@seedRows<ChannelTrust>([
+  { channelKind: "sms", level: "low", permissions: [] },
+  { channelKind: "email", level: "standard", permissions: null },
+])
+@notifier("channelTrust")
+export abstract class ChannelTrust {}
+```
+
+Every reply is a row of the replies table: its
 channel, its sender, what read the text (`keyword`), what it ran, and its
 undo. Every action is echoed back with `UNDO 142`.
+
+### A reply an agent reads
+
+Keywords are the default. A notifier given an interpreter hands a reply
+no keyword reads to an [agent run](/superschematic/guides/agent-runs/)
+(#602, D158): one from a user's verified identity whose first word is not
+`ack`, `undo` or a verb a reply action takes, about a notice of a record.
+It may name the notice anywhere as `#142`, or by the one waiting.
+
+```ts
+const notifier = createNotifier({ orm, dispatch, providers, replies, agents: { request: (tx, input) => agents.notifierAgents.request(tx, input) }, interpret: { agent: "reader" } });
+const agents = createAgents({ orm, requests, endpoint, providers, notifier, tools: { reply: notifier.replyTool } });
+await agents.define(admin, { name: "reader", role: "reader-agent", tools: ["reply"] });
+```
+
+| Step | What happens |
+| --- | --- |
+| the reply | a row of the replies table at once, `interpreting`, its interpreter `agent:reader`; a run request in the same transaction, trigger `reply`, about the notice's record, acting for the sender, its task the text |
+| the run | the agent's role narrowed to the sender's permissions; its token reaches the notice's record and what the role reaches from it, nothing more |
+| the reply tool | runs one verb the notice takes, `ack` or a reply action, on that notice alone, held to the action's permission within the channel's trust as a keyword reply is; it names no notice, and a reply is acted on once |
+| the echo | the action repeated back with `UNDO 142`, which undoes it as a keyword reply's undo does |
+| a run that does not act | the reply ends `refused`, and the sender is told |
+
+The run row's `input.reply` names the reply, and the reply's
+`interpreter` names the agent, so the audit reads both ways.
 
 ## Verify an address, reset a password
 
@@ -264,6 +333,42 @@ sends a six-digit code to it, and a reply with the code, or
 sends a reset code to the address the login names, through the email
 adapter, and `complete` sets the new password with the identity service's
 `resetPassword`, which ends every session, and verifies the address.
+
+## What the generated server wires
+
+A generated TypeScript server of an API over a database that declares the
+notifier wires it itself (#702), in every entrypoint: `main.ts`,
+`fetch.ts`, and each job's and worker's `main.ts` and `drain.ts`. Over a
+database that lists `sqlite` first the pieces come from the runtime's
+`./d1` entry, over a SQLite file under `stack dev` and a D1 binding on
+Workers.
+
+| Piece | What the server does |
+| --- | --- |
+| `deps.providers` | `providersOf(config)`, the API package's `providers.ts`: the slots of its `@providers` over the provider packages its config lists ([runtime providers](/superschematic/guides/runtime-providers/)) |
+| `deps.notifier` | `createNotifier` over `deps.orm` and the dispatch queue, sending on every channel slot |
+| relay callbacks | `POST /webhooks/<slot>/inbound` and `/webhooks/<slot>/status` per channel slot, the slot in lower case (`SMS` is `/webhooks/sms`) |
+| the inbox | `GET /api/inbox`, `POST /api/inbox/<id>/read` and `/ack`, as the caller the API's authenticator establishes |
+| a `@worker` of the dispatch queue | hands each message to `notifier.handle`; the implementation has no method for it |
+| the worker's prune | `notifierUpkeepOf(deps)`: as it starts and every five minutes, and at each firing on Workers, it asks every adapter's `health` on its own (`notifier.checkHealth`), which raises `channel.down` for each that fails, at most every five minutes, and deletes the deliveries past their retention |
+
+What only the app knows goes in `createRuntimeOptions`, which the
+implementation may export; the server builds the notifier with what it
+answers over what it fills:
+
+```ts
+import type { RuntimeOptionsConstructor } from "@acme/tickets-api-api";
+
+export const createRuntimeOptions: RuntimeOptionsConstructor = deps => ({
+  notifier: { replies: { "ticket.overdue": { done: markDone } }, defaultChannels: ["sms", "email"] },
+  notifierRoutes: { inbox: "/api/me/notices" },
+});
+```
+
+Password reset's routes stay the app's; the preferences' and the
+channels' defaults are the schema's seed rows. A Go or a Rust server
+builds no notifier of its own yet, and one over a database that lists
+sqlite first neither: an app builds it there as below.
 
 ## On SQLite and D1
 
@@ -290,19 +395,22 @@ await runWorker(notifier.workerQueue(db), { signal });
 | a delivery after quiet hours, a timeout, an escalation and a digest are messages with a delay, due by the database's clock | the queue's `dueIn` statement on SQLite |
 | the queue on SQLite has no slots and no next due time | a worker in drain mode over a SQLite file is not built (D145) |
 
-A Worker drains no queue on D1 yet: a Workflow that wakes the
-dispatch queue's worker on D1 is D151's design, and not built.
+On Cloudflare, a worker of the dispatch queue over D1 drains it at each
+firing of its Cron Trigger through its D1 binding, and an enqueue due
+before the next firing wakes its Workflow, as on Postgres through
+Hyperdrive (D151, #702).
 
 ## In Rust
 
 The Rust HTTP runtime's `orm::notify` is the same notifier, on Postgres
-(D191). The Postgres definition of a generated Rust types crate carries
-each table's `@event` declarations and what each table is to the
-notifier, so `Notifier::new` finds the inbox, the deliveries, the routes
-and the rest by itself, and the crate re-exports the module as
-`orm::postgres::notify`. It takes the database's `Tables`, whose keys and
-behaviors a reply's action writes through, and the dispatch queue's
-descriptor:
+(D191) and on a SQLite file (#618). Each definition of a generated Rust
+types crate carries each table's `@event` declarations and what each
+table is to the notifier, so `Notifier::new` finds the inbox, the
+deliveries, the routes and the rest by itself, and the crate re-exports
+the module as `orm::postgres::notify`. It takes the database's tables,
+Postgres's `orm::postgres::tables(pool)` or SQLite's
+`orm::sqlite::tables(database)`, whose keys and behaviors a reply's
+action writes through, and the dispatch queue's descriptor:
 
 ```rust
 use superschematic_http_runtime::orm::notify::{approval_replies, Notifier, RaiseInput, ReplyInput};
@@ -315,7 +423,9 @@ let notifier = Notifier::new(orm::postgres::tables(pool.clone()), QueueDefinitio
     .with_reply("approval.requested", approve, approve_action)
     .with_reply("approval.requested", deny, deny_action);
 
-// In the transaction of the change that caused it.
+// In the transaction of the change that caused it: a Postgres client, a
+// Store's transaction (`tx.db()`), or on SQLite the caller's own rusqlite
+// transaction through `raise_sqlite(&connection, input)`.
 notifier.raise(&tx, RaiseInput::of("Ticket", key, "ticket.overdue")).await?;
 // The dispatch queue's worker.
 run_worker(notifier.worker_queue(), move |message| { let n = notifier.clone(); async move { Ok(n.handle(message).await?) } }, options, shutdown).await?;
@@ -338,13 +448,35 @@ a reset code through the email adapter and sets the password with the
 identity service's `reset_password`. Rust has no ambient caller, so a
 recipient's read of the record opens the repositories for the recipient
 (`with_access`). The wall time of quiet hours and digests is read from
-Postgres, which holds the zone database. A route that names an agent puts
+Postgres, which holds the zone database, and on SQLite from the IANA
+database the runtime bundles. Quiet hours count wall minutes there, so
+on a night the clocks change inside the window they hold a notice an
+hour too long or too short (#602). A route that names an agent puts
 a run request on the agent dispatcher's queue in the routing transaction,
 once `with_agents` gives the notifier that queue (D193); without it, the
-route's agent is logged and reaches no one. A party's address whose grants
-have all ended since it was verified is sent nothing. A Rust types crate
-that lists `sqlite` is refused the notifier, which runs on SQLite and D1 in
-TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+route's agent is logged and reaches no one. `Notifier::routes` serves the
+in-app inbox and the relays' routes, which hand a reply to `inbound` and a
+delivery status to `statuses`.
+
+A generated Rust server builds the notifier into its `Deps`, with the
+dispatcher's approve and deny and its requests queue, mounts the inbox and
+the relays' routes, and runs a `@worker` of the dispatch queue through
+`handle` (#620); the implementation adds its reply actions in
+`Wire::notifier` ([the generated Rust server's
+wiring](/superschematic/guides/api-routes/#the-generated-rust-servers-wiring)). A party's address whose grants
+have all ended since it was verified is sent nothing.
+
+On SQLite (#618) the notifier runs the same statements of the
+repositories in SQLite's words. Its transactions are held writes of the
+file (`orm::sqlite::Database::begin_async`): every other task's write
+waits for one, and the task's own reads and writes run in it, so a reply's
+action that calls the dispatcher or the inbound path writes in the reply's
+transaction. A reply action's statements answer at once there, and so
+must a file's bucket the inbound path calls in a transaction.
+`worker_queue()` claims the dispatch queue over a connection of its own to
+the file; it takes no slot and reads no next due time (D145). A generated
+Rust server over a database that lists `sqlite` first does not wire the
+notifier yet (#725): the implementation builds it over the file.
 
 ## In Go
 
@@ -392,9 +524,36 @@ reads into the table's filter. `FromBehaviorEvent` takes a behavior's
 event from the project's Workers method, `Cleared` a cleared reference's
 message, and `notify.PasswordReset` sends a reset code through the email
 adapter and sets the password with the identity service's
-`ResetPassword`. The wall time of quiet hours and digests is read from
-Postgres, which holds the zone database. Whether an adapter reports
+`ResetPassword`. The wall time of digests is read from Postgres, which
+holds the zone database. Quiet hours start and end at their instants in
+the recipient's zone (`QuietDelayAt`, #602), from Go's zone database,
+which the runtime carries. Whether an adapter reports
 statuses or reads inbound messages is whether it implements
 `providers.ChannelStatusReader` and `providers.ChannelInboundReader`. A
-route that names an agent is logged and reaches no one: the Go runtime
-does not serve agent runs yet.
+route that names an agent puts a run request on the dispatcher's queue
+when the notifier holds one (`Options.Agents`, D192); without it the
+route is logged and reaches no one.
+
+A stack's Go server builds the notifier into `Deps.Notifier` itself, with
+the reply actions and the rest of the options its implementation's
+`NewWiring` answers in `Wiring.Notifier`. It mounts the notifier's routes
+(`Notifier.Routes`): the caller's inbox at `GET /api/inbox`, and
+`POST /api/inbox/{id}/read` and `/ack`, behind the API's auth step, and
+each channel slot's relay callbacks at `POST /webhooks/<slot>/inbound`
+and `/status`, outside it, `/webhooks/sms` for slot `SMS`. A `@worker` of
+the dispatch queue is the notifier's, and the implementation has no
+method for it. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
+lists the whole wiring.
+
+On SQLite the Go runtime runs the same notifier (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Notifications()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). Its
+`Raise` enqueues in the caller's `*SQLiteTx`, so an event commits with
+the change, and `WorkerQueue()` claims the dispatch queue on SQLite, which
+has no slots and no next due time (D145). The wall time of digests is
+read from Go's zone database there, which the runtime
+carries. The generated server does not wire it over a database that lists
+`sqlite` first yet (#717): the implementation builds it over `Deps.DB`.

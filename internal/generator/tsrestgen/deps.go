@@ -66,10 +66,6 @@ type DepsInfo struct {
 	// keeps each replica's in-process limiter (D75).
 	RateLimitStore string
 
-	// Engine is the engine Deps holds when Database is an engine database
-	// (D58), nil otherwise.
-	Engine *DepsEngine
-
 	// DatabaseTypesPackage is the TypeScript types package of Database
 	// when the API declares a worker (D53): it declares the queues'
 	// messages, which the Workers interface takes, and exports their
@@ -100,6 +96,20 @@ type DepsInfo struct {
 	// agent orchestration (D158, D183), its repositories in Deps.orm; nil
 	// otherwise.
 	Agents *DepsAgents
+
+	// Providers are the runtime providers Deps holds when the API's config
+	// names provider slots (D159), nil otherwise.
+	Providers *DepsProviders
+
+	// Notifier is the notifier Deps holds when Database declares one
+	// (D153), and Inbound the inbound path when it declares conversations
+	// and run requests (D157); nil otherwise.
+	Notifier *DepsNotifier
+	Inbound  *DepsInbound
+
+	// Routes are the runtime's routes over Database the server mounts, and
+	// the grants and the access log around its router (D152, D155, D156).
+	Routes DepsRoutes
 }
 
 // DepsAgents is the agent dispatcher in Deps (D158, D183): createAgents
@@ -128,8 +138,8 @@ func (a *DepsAgents) Dispatches(queue string) bool {
 	return a != nil && queue != "" && (queue == a.Requests || queue == a.RunRequests)
 }
 
-// AgentsFile is the module of the API package that builds Deps.agents
-// (D183), which index.ts exports.
+// AgentsFile is the module of the API package that built Deps.agents
+// before runtime.ts did (D183): a build removes it.
 const AgentsFile = "agents.ts"
 
 // AgentOptionsFunc is the function an implementation of an API whose Deps
@@ -140,20 +150,6 @@ const AgentOptionsFunc = "createAgentOptions"
 
 // HasAgents reports whether Deps holds the agent dispatcher (D183).
 func (o *APIOutput) HasAgents() bool { return o.Deps.Agents != nil }
-
-// DepsEngine is the engine in Deps (D58): the engine of the API's engine
-// database, which the entrypoint opens in the background, an
-// EngineBackground of the engine's ./server entry.
-type DepsEngine struct {
-	// Database is the engine database, Namespace the namespace its engine
-	// types live in.
-	Database  string
-	Namespace string
-
-	// Package is the engine's npm package, whose ./server entry declares
-	// EngineBackground.
-	Package string
-}
 
 // DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
 // Bucket, which the entrypoint opens on the bucket's provider (D54).
@@ -259,7 +255,7 @@ func (o *APIOutput) DepsSQLite() bool {
 
 // depsFields are the members every Deps may hold beside its clients and
 // its buckets.
-var depsFields = []string{"config", "db", "orm", "engine", "logger", "agents"}
+var depsFields = []string{"config", "db", "orm", "engine", "logger", "agents", "providers", "notifier", "inbound"}
 
 // SetDeps sets what Deps holds, refusing a client, a bucket or a memory
 // store whose member
@@ -274,6 +270,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		return err
 	}
 	if err := o.checkGraphDeps(deps); err != nil {
+		return err
+	}
+	if err := o.checkRowFeatureDeps(deps); err != nil {
+		return err
+	}
+	if err := o.checkTriageDeps(deps); err != nil {
 		return err
 	}
 	if err := o.checkBehaviorWorkers(deps); err != nil {
@@ -301,19 +303,21 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
-	if deps.Agents != nil && deps.Dialect == SQLiteDialect {
-		// The dispatcher runs on SQLite and D1 (D189); the generated
-		// agents.ts builds it from the ./postgres entry, and its workers
-		// claim through the Postgres queue client.
-		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), and %s lists sqlite first: the generated server builds it from the runtime's ./postgres entry and claims its queues through the Postgres queue client. On SQLite and D1 an app builds createAgents of the runtime's ./d1 entry over the ./orm/sqlite entry's repositories and claims its queues over the SqlDatabase (D189)", o.SchemaName, deps.Database)
-	}
 	if deps.Agents != nil && !depsORM(deps) {
-		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export for Postgres, and holds none", o.SchemaName, deps.Database)
+		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export, and holds none", o.SchemaName, deps.Database)
 	}
-	// A @worker of the dispatcher's queues is the dispatcher's (D183).
+	if err := o.checkRuntimeDeps(deps); err != nil {
+		return err
+	}
+	// A @worker of the dispatcher's queues is the dispatcher's (D183), one
+	// of the notifier's dispatch queue the notifier's (D153), and one of a
+	// @searchable declaration's queue search's (D155).
 	workers := make([]WorkerInfo, len(o.Workers))
 	for i, w := range o.Workers {
-		w.Dispatcher = w.Behavior == nil && deps.Agents.Dispatches(w.Queue)
+		w.Runtime = ""
+		if w.Behavior == nil {
+			w.Runtime = runtimeOf(deps, w.Queue)
+		}
 		workers[i] = w
 	}
 	o.Workers = workers
@@ -342,9 +346,8 @@ func (o *APIOutput) ChecksEndUsers() bool {
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
 // each callee's SDK, in order, then the types of the database whose queues
 // the Workers interface's messages are, when the API declares a worker,
-// whose engine types the Derivers interface's methods fill (D74), or whose
-// repositories Deps.orm holds (D79), then the engine's package, when Deps
-// holds the engine (D58).
+// whose tables the Derivers interface's methods fill (D146), or whose
+// repositories Deps.orm holds (D79).
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
@@ -352,9 +355,6 @@ func (o *APIOutput) DepsPeerPackages() []string {
 	}
 	if (o.HasWorkers() || o.HasDerivers() || o.DepsORM()) && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
 		out = append(out, o.Deps.DatabaseTypesPackage)
-	}
-	if o.Deps.Engine != nil && !slices.Contains(o.PeerPackages, o.Deps.Engine.Package) {
-		out = append(out, o.Deps.Engine.Package)
 	}
 	return out
 }
@@ -395,12 +395,19 @@ type WorkerInfo struct {
 	// the generator writes, which the Workers interface has no method for.
 	Behavior *apigen.BehaviorWorkerInfo
 
-	// Dispatcher is set for a @worker of the agent dispatcher's queues
-	// (D183), the requests queue or the run requests queue, whose handler
-	// is Deps.agents.handle: the Workers interface has no method for it.
+	// Runtime names the runtime piece whose handler takes the @worker's
+	// messages (WorkerAgents, WorkerNotifier, WorkerSearch): the agent
+	// dispatcher's for its requests queue or the run requests queue
+	// (D183), the notifier's for its dispatch queue (D153), search's for a
+	// @searchable declaration's queue (D155). The Workers interface has no
+	// method for it. Empty for a worker the implementation handles.
 	// SetDeps sets it.
-	Dispatcher bool
+	Runtime string
 }
+
+// Dispatcher reports whether the worker's handler is the agent
+// dispatcher's (D183).
+func (w WorkerInfo) Dispatcher() bool { return w.Runtime == WorkerAgents }
 
 // jobsOf reads the API's jobs, sorted by name.
 func jobsOf(schema *ir.Schema) []JobInfo {
@@ -444,7 +451,7 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
 	var out []WorkerInfo
 	for _, w := range o.Workers {
-		if w.Behavior == nil && !w.Dispatcher {
+		if w.Behavior == nil && w.Runtime == "" {
 			out = append(out, w)
 		}
 	}
@@ -456,7 +463,7 @@ func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
 func (o *APIOutput) DispatcherWorkers() []WorkerInfo {
 	var out []WorkerInfo
 	for _, w := range o.Workers {
-		if w.Dispatcher {
+		if w.Dispatcher() {
 			out = append(out, w)
 		}
 	}
@@ -714,23 +721,19 @@ func (o *APIOutput) ORMEntry() string    { return tsgen.ORMEntry }
 
 // checkBehaviorWorkers refuses deps for an API that declares a behavior
 // worker (D103) when they hold no repositories: its handlers run each
-// deadline and each change through Deps.orm's repository of the table, on
-// Postgres, where its queues are claimed. One on a sqlite-first database
-// is refused even with the repositories there (D116): its claims are
-// Postgres's.
+// deadline and each change through Deps.orm's repository of the table,
+// with its queues claimed over the pool, or over the SqlDatabase on a
+// sqlite-first database (D186, #702).
 func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 	workers := o.BehaviorWorkers()
 	if len(workers) == 0 {
 		return nil
 	}
 	w := workers[0]
-	if deps.Database != "" && deps.Dialect == SQLiteDialect {
-		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D103, D116); on SQLite an app's worker runs the ./orm/sqlite entry's runDeadline and runChange over sqliteQueue's claims (D186)", w.Name, w.Behavior.Runs(), deps.Database)
-	}
 	if depsORM(deps) {
 		return nil
 	}
-	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
+	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
 }
 
 // HasJobs reports whether the API declares a job, for which deps.ts

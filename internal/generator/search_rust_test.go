@@ -28,9 +28,27 @@ var searchRustCases = []string{
 	"two principals with different access search the same text and each gets exactly the rows their list reads would show, ranked across at least five tables",
 	"a party with a grant finds only the rows its grant reaches, through the route and the MCP tool too, and a revoked grant finds nothing",
 	"a row's conversation and files are indexed with it, and an encrypted field never is",
+	"an uploaded file's text the file processor extracts is indexed with its row, and a file the processor fails on ends failed",
 	"an index row follows its row: an audience change and a delete at once, a change of text once the queue drains",
 	"scope keeps a search to the app's filter",
 	"embeddings re-rank the first hits, are kept while the text holds, and can be switched off",
+	searchParityCase,
+}
+
+// searchParityCase is the case the Rust search tests run of the parity
+// file's searches (#740), which the TypeScript and Go runtimes' search
+// tests run too.
+const searchParityCase = "the parity file's searches answer the same titles in every runtime (#740)"
+
+// searchParityJSON is the parity file, which a test crate's tests read
+// beside its manifest.
+func searchParityJSON(t *testing.T) string {
+	t.Helper()
+	parity, err := os.ReadFile(filepath.Join("..", "..", "runtime", "http", "testdata", "search_tables_parity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(parity)
 }
 
 // TestRustSearchEndToEnd builds fixture-search-db's Rust types (D155,
@@ -103,10 +121,11 @@ func TestRustSearchEndToEnd(t *testing.T) {
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for name, content := range map[string]string{
-		"Cargo.toml":      fmt.Sprintf(searchRustManifest, naming.Default().RustTypesCrate(db), filepath.ToSlash(typesDir), filepath.ToSlash(paths.HTTPRuntimeRust)),
-		"Cargo.lock":      string(lock),
-		"src/lib.rs":      "//! fixture-search-db's Rust repositories and search: see tests/.\n",
-		"tests/search.rs": searchRustTest,
+		"Cargo.toml":                fmt.Sprintf(searchRustManifest, naming.Default().RustTypesCrate(db), filepath.ToSlash(typesDir), filepath.ToSlash(paths.HTTPRuntimeRust)),
+		"Cargo.lock":                string(lock),
+		"src/lib.rs":                "//! fixture-search-db's Rust repositories and search: see tests/.\n",
+		"tests/search.rs":           searchRustTest,
+		"search_tables_parity.json": searchParityJSON(t),
 	} {
 		if err := os.WriteFile(filepath.Join(crateDir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -152,6 +171,7 @@ async-trait = "0.1.89"
 axum = "0.8.9"
 http = "1"
 http-body-util = "0.1.3"
+ring = "0.17.14"
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }

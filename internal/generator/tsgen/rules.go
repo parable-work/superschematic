@@ -68,6 +68,9 @@ var repositoryMembers = []string{
 	"clearActor", "runDeadline", "runChange", "runEvent", "refusePreconditions",
 	"viewer", "sees", "held", "accessConditions", "filterConditions", "reachFilter", "requireReach", "requireCreatedReach", "refuseHeldUpsert",
 	"wakeChanges",
+	// A merge's rows and a table operation's answer under per-record
+	// access (D147, D156).
+	"peerOfType", "keepAnsweredRow",
 	// The repositories on SQLite and D1 (D182).
 	"refuseOnD1", "createRows", "upsertBatchesOnSQLite", "keyRead", "keysStatement",
 }

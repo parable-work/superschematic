@@ -380,13 +380,13 @@ func TestBehaviorOperationsRefusals(t *testing.T) {
 		}, ordersDB, "OrderActions: @behaviorOperations is only allowed in an API schema (this schema has kind General)"},
 		{"@auth on another set", func() *ir.Schema {
 			return ordersAPI(plainSet(func(s *ir.OperationSet) { s.Auth = true }))
-		}, ordersDB, "Orders: @auth on a class applies only to a @behaviorOperations or @graphOperations set; extend Authenticated, or put @auth on each method of Orders"},
+		}, ordersDB, "Orders: @auth on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; extend Authenticated, or put @auth on each method of Orders"},
 		{"@requirePermission on another set", func() *ir.Schema {
 			return ordersAPI(plainSet(func(s *ir.OperationSet) { s.Permissions = []string{"orders.read"} }))
-		}, ordersDB, "Orders: @requirePermission on a class applies only to a @behaviorOperations or @graphOperations set; put it on each method of Orders"},
+		}, ordersDB, "Orders: @requirePermission on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; put it on each method of Orders"},
 		{"@publicRoute on another set", func() *ir.Schema {
 			return ordersAPI(plainSet(func(s *ir.OperationSet) { s.Public = true }))
-		}, ordersDB, "Orders: @publicRoute on a class applies only to a @behaviorOperations or @graphOperations set; put it on each method of Orders"},
+		}, ordersDB, "Orders: @publicRoute on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; put it on each method of Orders"},
 		{"@publicRoute with @auth", func() *ir.Schema {
 			set := actionsOf("OrderActions", "Order")
 			set.Public, set.Auth = true, true
@@ -438,13 +438,6 @@ func TestBehaviorOperationsRefusals(t *testing.T) {
 			db.Types["Order"].Role = ir.RoleEmbeddedStruct
 			return db
 		}, "OrderActions: @behaviorOperations names Order, which is not a table of orders-db: a set serves a table one of whose fields is a behavior (D103)"},
-		{"an engine type", func() *ir.Schema {
-			return ordersAPI(actionsOf("OrderActions", "Order"))
-		}, func() *ir.Schema {
-			db := ordersDB()
-			db.Types["Order"].Behaviors = []ir.BehaviorRef{{Name: "Workflow"}}
-			return db
-		}, "OrderActions: @behaviorOperations names Order, an engine type of orders-db (D58), whose engine serves its operations; a set serves a table one of whose fields is a behavior (D103)"},
 		{"no field behavior", func() *ir.Schema {
 			return ordersAPI(actionsOf("OrderActions", "Order"))
 		}, func() *ir.Schema {

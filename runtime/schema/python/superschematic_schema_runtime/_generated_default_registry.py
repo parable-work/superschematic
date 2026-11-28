@@ -12,7 +12,11 @@ from superscalar import (
     normalize_contact_email,
     normalize_contact_phone_number,
     normalize_design_color,
+    normalize_file_media_type,
     normalize_temporal_duration,
+    normalize_temporal_local_date_time,
+    normalize_temporal_period,
+    parse_file_media_type,
     parse_finance_money,
     parse_finance_signed_money,
     parse_generic_decimal,
@@ -25,8 +29,10 @@ from superscalar import (
     parse_temporal_days,
     parse_temporal_duration,
     parse_temporal_hours,
+    parse_temporal_local_date_time,
     parse_temporal_milliseconds,
     parse_temporal_minutes,
+    parse_temporal_period,
     parse_temporal_seconds,
 )
 
@@ -46,6 +52,7 @@ def _validator(canonical_name: str) -> Callable[[str], list]:
 
 
 DEFAULT_PARSE_FUNCTIONS: dict[str, Callable[[str], str]] = {
+    "File.MediaType": parse_file_media_type,
     "Finance.Money": parse_finance_money,
     "Finance.SignedMoney": parse_finance_signed_money,
     "Generic.Decimal": parse_generic_decimal,
@@ -58,8 +65,10 @@ DEFAULT_PARSE_FUNCTIONS: dict[str, Callable[[str], str]] = {
     "Temporal.Days": parse_temporal_days,
     "Temporal.Duration": parse_temporal_duration,
     "Temporal.Hours": parse_temporal_hours,
+    "Temporal.LocalDateTime": parse_temporal_local_date_time,
     "Temporal.Milliseconds": parse_temporal_milliseconds,
     "Temporal.Minutes": parse_temporal_minutes,
+    "Temporal.Period": parse_temporal_period,
     "Temporal.Seconds": parse_temporal_seconds,
 }
 
@@ -68,7 +77,10 @@ DEFAULT_NORMALIZE_FUNCTIONS: dict[str, Callable[[str], str]] = {
     "Contact.Email": normalize_contact_email,
     "Contact.PhoneNumber": normalize_contact_phone_number,
     "Design.Color": normalize_design_color,
+    "File.MediaType": normalize_file_media_type,
     "Temporal.Duration": normalize_temporal_duration,
+    "Temporal.LocalDateTime": normalize_temporal_local_date_time,
+    "Temporal.Period": normalize_temporal_period,
 }
 
 
@@ -83,6 +95,7 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Crypto.SHA256": _validator("Crypto.SHA256"),
     "Design.Color": _validator("Design.Color"),
     "Embedding.Vector": _validator("Embedding.Vector"),
+    "File.MediaType": _validator("File.MediaType"),
     "File.SizeBytes": _validator("File.SizeBytes"),
     "Finance.Currency": _validator("Finance.Currency"),
     "Finance.Money": _validator("Finance.Money"),
@@ -95,6 +108,7 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Generic.Probability": _validator("Generic.Probability"),
     "Generic.StringMap": _validator("Generic.StringMap"),
     "Generic.Text": _validator("Generic.Text"),
+    "Geo.CountryCode": _validator("Geo.CountryCode"),
     "Geo.Location": _validator("Geo.Location"),
     "Git.PathPattern": _validator("Git.PathPattern"),
     "Identity.Name": _validator("Identity.Name"),
@@ -105,6 +119,7 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Network.DnsLabel": _validator("Network.DnsLabel"),
     "Network.DomainName": _validator("Network.DomainName"),
     "Network.IpAddress": _validator("Network.IpAddress"),
+    "Network.Port": _validator("Network.Port"),
     "Network.Uri": _validator("Network.Uri"),
     "Network.Url": _validator("Network.Url"),
     "Ordering.Rank": _validator("Ordering.Rank"),
@@ -114,9 +129,11 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Temporal.Days": _validator("Temporal.Days"),
     "Temporal.Duration": _validator("Temporal.Duration"),
     "Temporal.Hours": _validator("Temporal.Hours"),
+    "Temporal.LocalDateTime": _validator("Temporal.LocalDateTime"),
     "Temporal.Milliseconds": _validator("Temporal.Milliseconds"),
     "Temporal.Minutes": _validator("Temporal.Minutes"),
     "Temporal.Month": _validator("Temporal.Month"),
+    "Temporal.Period": _validator("Temporal.Period"),
     "Temporal.Quarter": _validator("Temporal.Quarter"),
     "Temporal.QuarterYear": _validator("Temporal.QuarterYear"),
     "Temporal.RecurrenceRule": _validator("Temporal.RecurrenceRule"),

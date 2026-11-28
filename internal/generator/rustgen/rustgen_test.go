@@ -68,25 +68,28 @@ func TestWriteTypesGolden(t *testing.T) {
 		// the API's views read the database's union.
 		{service: "fixture-variant-field-db", sqlite: true},
 		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
-		// References and attachments (D154, D185): the Postgres definition in
-		// src/orm.rs carries them, and the repositories open references()
-		// and attachments().
-		{service: "fixture-references-db", core: true},
+		// References and attachments (D154, D185): the Postgres and the
+		// SQLite definitions in src/orm.rs carry them (#611), and the
+		// repositories of each dialect open references() and attachments().
+		{service: "fixture-references-db", core: true, sqlite: true},
 		// Search across tables (D155, D188): each @searchable table's index
-		// in the Postgres definition, which orm::search_tables reads.
-		{service: "fixture-search-db", core: true},
+		// in the Postgres definition, and on SQLite its FTS5 table (D186,
+		// #615), which orm::search_tables reads.
+		{service: "fixture-search-db", core: true, sqlite: true},
 		// The calendar (D152, D188): a date source and a Recurrence's
-		// occurrences source, on Postgres alone, which orm::calendar reads.
+		// occurrences source, on Postgres and on SQLite (#615), which
+		// orm::calendar reads.
 		{service: "fixture-recurrence-db", core: true, sqlite: true},
 		// Events and notifications (D153, D191): each table's events and
-		// what it is to the notifier, in the Postgres definition, which
-		// orm::notify reads.
-		{service: "fixture-notifications-db", core: true},
+		// what it is to the notifier, in the Postgres and the SQLite
+		// definitions (#618), which orm::notify reads.
+		{service: "fixture-notifications-db", core: true, sqlite: true},
 		// Parties and the agent orchestration (D157, D158, D193): each
 		// table's party, conversations and agents part, in the Postgres
-		// definition, which orm::parties, orm::inbound and orm::agents read.
-		{service: "fixture-parties-db", core: true},
-		{service: "fixture-agent-runs-db", core: true},
+		// and the SQLite definitions (#618), which orm::parties,
+		// orm::inbound and orm::agents read.
+		{service: "fixture-parties-db", core: true, sqlite: true},
+		{service: "fixture-agent-runs-db", core: true, sqlite: true},
 	}
 
 	for _, tc := range cases {

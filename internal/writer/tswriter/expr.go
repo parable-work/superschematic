@@ -66,8 +66,21 @@ func (e *emitter) renderScalar(name, owner string) string {
 		e.failf("%s: scalar %q is not namespaced; TypeScript schemas can only reference %s scalars", owner, name, naming.Active().ScalarNpmPackage)
 		return name
 	}
-	e.importSymbol(e.scalarPackage(name, name[:i], owner), name[:i])
-	return name
+	namespace := name[:i]
+	pkg := e.scalarPackage(name, namespace, owner)
+	if !e.declares(namespace) {
+		e.importSymbol(pkg, namespace)
+		return name
+	}
+	// A class of the schema shares the namespace's name, as a @party table
+	// named Contact does (D157): the namespace is imported under an alias,
+	// which the reader knows it by.
+	alias := namespace + "Scalars"
+	for n := 2; e.declares(alias); n++ {
+		alias = fmt.Sprintf("%sScalars%d", namespace, n)
+	}
+	e.importSymbol(pkg, namespace+" as "+alias)
+	return alias + name[i:]
 }
 
 // scalarPackage returns the npm package a scalar's namespace is imported
@@ -237,10 +250,7 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, item, owner string) stri
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Default"), expr, e.defaultLiteral(fd, owner))
 	}
 	if cfg := validateConfigExpr(&ir.FieldDef{
-		ValidateMin: arg.ValidateMin, ValidateMax: arg.ValidateMax,
-		ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
-		ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
-		ValidatePattern: arg.ValidatePattern,
+		ValueRules: arg.ValueRules,
 	}); cfg != "" {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Validate"), expr, cfg)
 	}
@@ -274,8 +284,7 @@ func (e *emitter) sortByExpr(arg *ir.ArgumentDef, item, owner string) string {
 		e.failf("%s: a sort argument that is not an optional query parameter has no TypeScript authoring form", owner)
 	}
 	if arg.TypeRef != (ir.TypeRef{Name: "string"}) || arg.Default != nil || arg.References != nil || arg.Search ||
-		arg.ValidateMin != nil || arg.ValidateMax != nil || arg.ValidateMinLength != nil || arg.ValidateMaxLength != nil ||
-		arg.ValidateListMin != nil || arg.ValidateListMax != nil || arg.ValidatePattern != "" {
+		arg.Any() {
 		e.failf("%s: a sort argument is SortBy's text alone; one of another type, or with a default, a reference, a search or a rule, has no TypeScript authoring form", owner)
 	}
 	fields := make([]string, len(arg.Sort))

@@ -78,7 +78,15 @@ func New(schema *ir.Schema, opts ...Option) *Validator {
 
 	for _, scalar := range schema.Scalars {
 		if scalar.Pattern != "" {
-			v.patterns[scalar.Pattern] = regexp.MustCompile(scalar.Pattern)
+			// Compile, never MustCompile: a schema can declare a scalar
+			// of its own with any pattern, and any IR can reach New. A
+			// pattern that does not compile is a nil entry, which
+			// refuses every value, as a field's does.
+			re, err := regexp.Compile(scalar.Pattern)
+			if err != nil {
+				re = nil
+			}
+			v.patterns[scalar.Pattern] = re
 		}
 	}
 
@@ -247,9 +255,12 @@ func (v *Validator) validateSingleField(field *ir.FieldDef, key, kind string, re
 			errs.SetFieldErrors(key, []ValidationError{*typeErr})
 			return
 		}
+		// A required String or ID holding "" is missing, and its rules are
+		// not checked, as the TS, Rust and Python validators read it.
 		if required && isBuiltinString(field.TypeRef.Name) {
 			if s, ok := value.(string); ok && s == "" {
 				errs.AddFieldError(key, "required", "required field")
+				return
 			}
 		}
 		for _, fieldErr := range validateFieldNumericConstraints(field, value) {
@@ -357,7 +368,7 @@ func (v *Validator) validateObjectValue(field *ir.FieldDef, key, kind string, va
 }
 
 func validateFieldNumericConstraints(field *ir.FieldDef, value any) []ValidationError {
-	if field.ValidateMin == nil && field.ValidateMax == nil {
+	if !field.HasRange() {
 		return nil
 	}
 	numericValue, ok := toFloat64(value)
@@ -389,7 +400,7 @@ func validateFieldNumericConstraints(field *ir.FieldDef, value any) []Validation
 // values are skipped by the caller, a present empty string IS checked, and an
 // uncompilable pattern fails closed with a pattern error.
 func (v *Validator) validateFieldStringConstraints(field *ir.FieldDef, value any) []ValidationError {
-	if field.ValidateMinLength == nil && field.ValidateMaxLength == nil && field.ValidatePattern == "" {
+	if !field.HasText() {
 		return nil
 	}
 	s, ok := value.(string)

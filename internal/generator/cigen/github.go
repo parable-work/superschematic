@@ -27,7 +27,7 @@ const (
 // GitHub is the core's CI renderer: one GitHub Actions workflow per stack,
 // `<stack>.yml` (docs/stack-model.md, section 11.3, D47).
 func GitHub() registry.CIRendererSpec {
-	return registry.CIRendererSpec{Name: GitHubRenderer, Dir: GitHubDir, Render: renderGitHub}
+	return registry.CIRendererSpec{Name: GitHubRenderer, Dir: GitHubDir, Render: renderGitHub, RenderTasks: renderGitHubTasks}
 }
 
 // action is a GitHub action pinned by commit, with the release the commit
@@ -50,6 +50,10 @@ var (
 	actionGoogleAuth = action{"google-github-actions/auth", "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093", "v3.0.0"}
 	actionUpload     = action{"actions/upload-artifact", "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"}
 	actionDownload   = action{"actions/download-artifact", "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "v8.0.1"}
+	// The two halves of actions/cache, which a Tasks workflow that reuses
+	// a pass looks one up with and keeps one with.
+	actionCacheRestore = action{"actions/cache/restore", "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "v6.1.0"}
+	actionCacheSave    = action{"actions/cache/save", "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "v6.1.0"}
 )
 
 // preparedArtifact names the artifact the prepare job uploads and every
@@ -208,10 +212,13 @@ type signedIn struct {
 // step is one step of a job.
 type step struct {
 	name string
-	cond string
-	uses *action
-	dir  string
-	with [][2]string
+	// id names the step for a job's outputs, and shell is the shell its
+	// run starts in when it is not the job's.
+	id, shell string
+	cond      string
+	uses      *action
+	dir       string
+	with      [][2]string
 	// env is the step's environment variables, in order: what a stack
 	// command signs in with when the identity is a secret (D64).
 	env [][2]string
@@ -338,7 +345,7 @@ func (g github) header(w *yamlWriter, notes []string) {
 		w.comment(0, g.why)
 		w.line(0, "#")
 	}
-	w.comment(0, fmt.Sprintf("On a pull request to %[1]s, check builds the stack and compiles its servers, jobs, workers and engine runners with no credentials; each plan job plans a cloud environment as its planner account, and each preview job deploys a member of an environment with one parameter for the pull request, and destroys it when the pull request closes. A pull request from a fork runs check alone. On a push to %[1]s, each deploy job deploys a cloud environment in the order the stack declares them, in the GitHub environment of its name, whose required reviewers approve it.", g.branch))
+	w.comment(0, fmt.Sprintf("On a pull request to %[1]s, check builds the stack and compiles its servers, jobs and workers with no credentials; each plan job plans a cloud environment as its planner account, and each preview job deploys a member of an environment with one parameter for the pull request, and destroys it when the pull request closes. A pull request from a fork runs check alone. On a push to %[1]s, each deploy job deploys a cloud environment in the order the stack declares them, in the GitHub environment of its name, whose required reviewers approve it.", g.branch))
 	w.line(0, "#")
 	w.comment(0, "The prepare job runs, with no credentials, all the project code the cloud jobs need: the build, the installs, the sites' and bundles' builds and the sidecar documents (superschematic stack prepare). A cloud job takes what it made: it runs no build, no package's script and no sidecar document, and its only package manager run, the schemas root's install with --ignore-scripts, which the loader reads the types of, is on a Bun or Node.js downloaded from its release, never restored from a cache another job could write.")
 	if len(notes) > 0 {
@@ -351,17 +358,14 @@ func (g github) header(w *yamlWriter, notes []string) {
 	w.blank()
 }
 
-// check is the job that builds the stack and compiles its servers, jobs,
-// workers and engine runners, with no credentials: levels 1 to 3 of
-// section 10. Each Go server, job, worker and runner's module compiles,
-// against the release's static archives, or the project's engine archive,
-// which it builds first, for one whose engine database composes a behavior
-// the core's archive leaves out (D58); for the TypeScript ones and the
-// sites it
+// check is the job that builds the stack and compiles its servers, jobs
+// and workers, with no credentials: levels 1 to 3 of section 10. Each Go
+// server, job and worker's module compiles, against the release's static
+// archives; for the TypeScript ones and the sites it
 // installs the output root's Bun workspace from the lockfile the project
 // commits, which fails when the lockfile is missing or does not match the
-// packages the build wrote, type-checks each TypeScript server's, job's,
-// worker's and runner's package and the implementation each imports (D51,
+// packages the build wrote, type-checks each TypeScript server's, job's
+// and worker's package and the implementation each imports (D51,
 // amended; D52, D53), bundles each one some environment places on Workers
 // with its bundle.ts --check, as `stack deploy` bundles it (D64), and
 // builds each site with its build script, as `stack deploy` does, so a
@@ -394,10 +398,9 @@ func (g github) check() job {
 			with: [][2]string{{"go-version", servergen.GoVersion}, {"cache", "false"}},
 		})
 	}
-	engines := g.goEngines(goModules)
 	rulesGo := g.req.Version == "" && linksRules(goModules, st.RulesGo)
 	rulesTypeScript := linksRules(tsPackages, st.RulesTypeScript)
-	if len(rustCrates) > 0 || len(engines) > 0 || rulesGo || rulesTypeScript {
+	if len(rustCrates) > 0 || rulesGo || rulesTypeScript {
 		steps = append(steps, setupRust())
 	}
 	packages := g.packages()
@@ -405,35 +408,16 @@ func (g github) check() job {
 		packages = append([]step{setupBun()}, packages...)
 	}
 	steps = append(steps, packages...)
-	archives := slices.DeleteFunc(slices.Sorted(maps.Keys(st.EngineArchives)), func(db string) bool {
-		return !slices.Contains(slices.Collect(maps.Values(engines)), db)
-	})
-	engineTypeScript := st.EngineCheckout != "" && st.EngineCheckoutTypeScript && len(tsPackages) > 0
-	if st.EngineCheckout != "" && (len(archives) > 0 || engineTypeScript) {
-		steps = append(steps, engineSuperscalar(st.EngineCheckout))
-	}
 	steps = append(steps, g.build())
-	for _, db := range archives {
-		steps = append(steps, engineArchive(db, st.EngineArchives[db], st.EngineCheckout))
-	}
 	if rulesGo {
 		steps = append(steps, rulesArchive(st.RulesCheckout))
 	}
 	for _, m := range goModules {
-		compile := goBuild
-		if db, ok := engines[m.name]; ok {
-			// The project's engine archive, searched before the release's,
-			// which holds the core's under the same name (D58).
-			compile = fmt.Sprintf(`CGO_LDFLAGS="-L%s $CGO_LDFLAGS" %s`, engineArchiveDir(db), compile)
-		}
 		steps = append(steps, step{
 			name: "Compile " + string(m.kind) + " " + m.name,
 			dir:  path.Join(st.OutputRoot, "server", st.Name, m.name),
-			run:  compile,
+			run:  goBuild,
 		})
-	}
-	if engineTypeScript {
-		steps = append(steps, engineTypeScriptPackages(st.EngineCheckout))
 	}
 	if rulesTypeScript {
 		steps = append(steps, rulesTypeScriptPackage(st.RulesCheckout))
@@ -501,97 +485,12 @@ func (g github) check() job {
 // superscalar's (docs/stack-model.md, section 18.5, D64).
 const bundleCheck = "bun bundle.ts --check"
 
-// goEngines are the Go servers, jobs, workers and engine runners of the
-// stack (modules) whose engine database's deployables link a project's
-// engine archive (registry.CIStack.EngineArchives), each with its
-// database: a deployable's sql edge to it says it connects to it.
-func (g github) goEngines(modules []deployable) map[string]string {
-	out := map[string]string{}
-	if len(g.req.Stack.EngineArchives) == 0 {
-		return out
-	}
-	links := func(name string) bool {
-		return slices.ContainsFunc(modules, func(m deployable) bool { return m.name == name })
-	}
-	for _, env := range g.req.Environments {
-		for _, e := range env.Environment.Edges {
-			if _, ok := g.req.Stack.EngineArchives[e.Service.Name]; ok && e.Kind == ir.EdgeSQL && links(e.From) {
-				out[e.From] = e.Service.Name
-			}
-		}
-	}
-	return out
-}
-
-// engineArchiveDir is where a check job stages the project's engine
-// archive of the engine database db.
-func engineArchiveDir(db string) string {
-	return "$RUNNER_TEMP/superschematic-engine/" + db
-}
-
-// engineArchive builds the project's engine archive of the engine database
-// db from the ffi member of its engine crate at crate, which the build
-// wrote, and stages it as libsuperschematic_engine.a, the name the engine's
-// Go binding links (D58): the static library cargo reports it built for
-// the crate, on the Rust release tools.env pins, which built the release's
-// other archives. With the engine's checkout at checkout, a crate with no
-// lock file of its own starts from the engine workspace's, as the image's
-// engine stage does.
-func engineArchive(db, crate, checkout string) step {
-	lines := []string{
-		"set -euo pipefail",
-		fmt.Sprintf(`dir="%s"`, engineArchiveDir(db)),
-		`mkdir -p "$dir"`,
-	}
-	if checkout != "" {
-		lines = append(lines, fmt.Sprintf(`test -f ../Cargo.lock || cp "$GITHUB_WORKSPACE/%s/runtime/engine/rust/Cargo.lock" ../Cargo.lock`, checkout))
-	}
-	return step{
-		name: "Build the engine archive of " + db,
-		dir:  crate,
-		run: strings.Join(append(lines,
-			`archive="$(cargo build --release --message-format=json-render-diagnostics | jq -r 'select(.reason == "compiler-artifact" and (.target.kind | index("staticlib"))) | .filenames[] | select(endswith(".a"))' | tail -n 1)"`,
-			`test -n "$archive"`,
-			`cp "$archive" "$dir/libsuperschematic_engine.a"`,
-		), "\n"),
-	}
-}
-
-// engineSuperscalar stands up the superscalar checkout under the engine's
-// checkout at checkout, which its crates reach by path and git does not
-// hold, from the commit its superscalar.pin names (D58).
-func engineSuperscalar(checkout string) step {
-	return step{
-		name: "Check out superscalar for the engine's checkout " + checkout,
-		dir:  checkout,
-		run:  "scripts/superscalar-dep.sh --checkout",
-	}
-}
-
-// engineTypeScriptPackages builds the dist/ of the packages of the engine's
-// checkout at checkout that the output root's workspace takes in place of
-// the published ones, which no checkout holds: superscalar's TypeScript
-// binding, the HTTP runtime's, and the engine's, which copies the HTTP
-// runtime's build (D58). The workspace's install, after it, takes them.
-func engineTypeScriptPackages(checkout string) step {
-	return step{
-		name: "Build the TypeScript packages of the engine's checkout " + checkout,
-		dir:  checkout,
-		run: strings.Join([]string{
-			"set -euo pipefail",
-			"(cd third_party/superscalar/bindings/typescript && bun install --frozen-lockfile && bun x --no-install tsc -p tsconfig.json && bun x --no-install tsc -p tsconfig.esm.json && bun scripts/fix-esm-extensions.mjs)",
-			"(cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)",
-			"(cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build)",
-		}, "\n"),
-	}
-}
-
-// goBuild compiles the entrypoint module of a Go server, job, worker or
-// engine runner, with the implementation it imports, and writes no
-// binary: the deploy builds the image.
+// goBuild compiles the entrypoint module of a Go server, job or worker,
+// with the implementation it imports, and writes no binary: the deploy
+// builds the image.
 const goBuild = "go build -mod=mod -o /dev/null ."
 
-// rustCheck compiles the crate of a Rust server, job, worker or runner and every
+// rustCheck compiles the crate of a Rust server, job or worker and every
 // crate it depends on, the implementations among them, frozen to the
 // workspace's lockfile.
 const rustCheck = "cargo check --locked"
@@ -1096,22 +995,22 @@ func (g github) stackCommand(command, environment string, flags ...string) strin
 	return strings.Join(args, " ")
 }
 
-// deployable is a server, job, worker, deriver, app or engine runner of
-// the stack whose entrypoint the build writes at server/<stack>/<name>
-// under the output root: a Go module, a package of the output root's Bun
-// workspace (D51, D52, D53, D74), or a crate of its Cargo workspace (D57,
-// D65, D78). It is its kind and name.
+// deployable is a server, job, worker, deriver or app of the stack whose
+// entrypoint the build writes at server/<stack>/<name> under the output
+// root: a Go module, a package of the output root's Bun workspace (D51,
+// D52, D53, D146), or a crate of its Cargo workspace (D57, D65, D78). It
+// is its kind and name.
 type deployable struct {
 	kind ir.DeployableKind
 	name string
 }
 
 // deployables are the stack's servers in language, then its jobs, then
-// its workers, then its derivers (D74), then its apps (D78), then its
-// engine runners (D58), each sorted by name. No environment changes them.
+// its workers, then its derivers (D146), then its apps (D78), each sorted
+// by name. No environment changes them.
 func (g github) deployables(language string) []deployable {
 	var out []deployable
-	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver, ir.DeployableApp, ir.DeployableRunner} {
+	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver, ir.DeployableApp} {
 		for _, name := range g.deployablesIn(kind, language) {
 			out = append(out, deployable{kind, name})
 		}
@@ -1242,6 +1141,9 @@ func (j job) write(w *yamlWriter) {
 
 func (s step) write(w *yamlWriter) {
 	w.line(3, "- name: "+scalar(s.name))
+	if s.id != "" {
+		w.line(4, "id: "+s.id)
+	}
 	if s.cond != "" {
 		w.line(4, "if: "+scalar(s.cond))
 	}
@@ -1262,6 +1164,9 @@ func (s step) write(w *yamlWriter) {
 		for _, kv := range s.env {
 			w.line(5, kv[0]+": "+scalar(kv[1]))
 		}
+	}
+	if s.shell != "" {
+		w.line(4, "shell: "+s.shell)
 	}
 	switch {
 	case strings.Contains(s.run, "\n"):

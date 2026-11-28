@@ -34,13 +34,6 @@ type BehaviorSpec struct {
 	// the behaviors command can write each package's declarations into that
 	// package (--package). Optional; when set it is an npm package name.
 	Package string
-	// Rust is the Rust crate whose implementation runs an extension's
-	// behavior in the Rust engine (D58): a crate implementing the engine's
-	// Behavior trait, which the project's engine crate, the one the
-	// projectengine generator writes for a schema that composes the
-	// behavior, depends on and registers. Optional; the core's behaviors
-	// are the engine's own crates and name none.
-	Rust BehaviorRust
 	// Rules is the Rust crate whose implementation of the core's hooks runs
 	// the behavior on the behaviors' core (D103's step 5): a crate whose
 	// Register value implements superschematic_rules::Behavior, which a
@@ -54,23 +47,23 @@ type BehaviorSpec struct {
 }
 
 // BehaviorRust names the Rust crate that implements an extension's
-// behavior (D58) and the value the project's engine registers.
+// behavior on the behaviors' core and the value the project's rules crate
+// adds to the core's behaviors.
 type BehaviorRust struct {
-	// Crate is the crate's Cargo package name, which the project's engine
+	// Crate is the crate's Cargo package name, which the project's rules
 	// crate depends on: a letter, then letters, digits, '-' and '_', at
 	// most 64 characters.
 	Crate string
 	// Path is the crate's directory relative to the project, the parent of
 	// the schemas root, which the [paths] keys of superschematic.toml are
 	// relative to as well: slash-separated and clean, and not absolute.
-	// The project's engine crate depends on the crate by this path, as acme
-	// points at crates/behaviors.
+	// The project's rules crate depends on the crate by this path.
 	Path string
-	// Register is the Rust expression of the behavior the project's engine
-	// registers (BehaviorSet::with): a path into the crate, as
-	// acme_behaviors::Rating names acme's unit struct, or a call with no
-	// arguments, as acme_behaviors::Rating::new() would be. It starts with
-	// the crate's name as Rust spells it (Ident).
+	// Register is the Rust expression of the behavior the project's rules
+	// crate adds (Core::with): a path into the crate, as
+	// acme_rules::Rating names a unit struct, or a call with no arguments,
+	// as acme_rules::Rating::new() would be. It starts with the crate's
+	// name as Rust spells it (Ident).
 	Register string
 }
 
@@ -239,8 +232,8 @@ type BehaviorVeto struct {
 
 // BehaviorField is a field a behavior adds to a type. It carries a name, a
 // description, whether it is volatile and per reader, and the type of the
-// column it takes on a table. An instance of an engine type keeps a
-// behavior's fields under the behavior's name, apart from the type's own
+// column it takes on a table. An instance of a General schema's type keeps
+// a behavior's fields under the behavior's name, apart from the type's own
 // and every other behavior's, so a field collides with nothing (D16,
 // amended: a behavior's fields sit under its name); a string names one by
 // BehaviorFieldPath. On a table a field-anchored use's fields are columns
@@ -453,9 +446,6 @@ type Behavior struct {
 	// Package is the npm package that implements it; "" when its spec
 	// names none.
 	Package string
-	// Rust is the Rust crate that implements it; the zero value when its
-	// spec names none.
-	Rust BehaviorRust
 	// Rules is the Rust crate that implements it on the behaviors' core
 	// (D103's step 5); the zero value when its spec names none.
 	Rules BehaviorRust
@@ -530,13 +520,13 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // (checkBehaviorTables); a veto code that is not lowercase snake case of at
 // most 64 characters, or repeats; a Package that is not an npm package
 // name, or that is RulesPackage on an extension's behavior, which runs in
-// its engine; and a Rust crate on a
+// its engine; and a rules crate on a
 // core behavior, or one whose crate is not a Cargo package name, whose
 // path is empty, absolute or not clean, or whose register expression is
 // not a path into the crate (checkBehaviorRust). Finalize checks what needs
 // the whole registry: requires and conflicts name registered behaviors,
 // each operation's invocation policy is a value of the registry's policy,
-// behaviors that name one Rust crate name it at one path, and each field's
+// behaviors that name one rules crate name it at one path, and each field's
 // type is a builtin or a scalar of the catalog (checkBehaviorFieldTypes).
 func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	var decl BehaviorDeclaration
@@ -563,16 +553,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if spec.Package == RulesPackage && spec.Extension != "" {
 		return fmt.Errorf("registry: behavior %s of extension %s names package %s, the behaviors' core, which implements the core's behaviors alone: an extension's behavior runs in its engine (D58)", decl.Name, spec.Extension, RulesPackage)
 	}
-	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rust); err != nil {
-		return err
-	}
 	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rules); err != nil {
 		return err
 	}
 	if _, dup := r.behaviors[decl.Name]; dup {
 		return fmt.Errorf("registry: behavior %q is already registered", decl.Name)
 	}
-	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust, Rules: spec.Rules}
+	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rules: spec.Rules}
 	if len(decl.ConfigSchema) > 0 {
 		compiled, err := compileSchema(decl.ConfigSchema, "superschematic://behaviors/"+decl.Name+"/config.json")
 		if err != nil {
@@ -673,10 +660,10 @@ func checkBehaviorName(name, extension string) error {
 	return nil
 }
 
-// checkBehaviorRust holds a behavior's Rust crate to what the project's
-// engine crate can depend on and register (D58): only an extension's
-// behavior names one, since the core's are the engine's own crates; the
-// crate is a Cargo package name; its path is relative to the project,
+// checkBehaviorRust holds a behavior's rules crate to what the project's
+// rules crate can depend on and add (D103's step 5): only an extension's
+// behavior names one, since the core's are the core's crate; the crate is
+// a Cargo package name; its path is relative to the project,
 // slash-separated and clean; and the register expression is a Rust path
 // into the crate, called with no arguments or not.
 func checkBehaviorRust(name, extension string, rust BehaviorRust) error {
@@ -684,7 +671,7 @@ func checkBehaviorRust(name, extension string, rust BehaviorRust) error {
 		return nil
 	}
 	if extension == "" {
-		return fmt.Errorf("registry: core behavior %s names Rust crate %q: the core's behaviors are the engine's own crates", name, rust.Crate)
+		return fmt.Errorf("registry: core behavior %s names Rust crate %q: the core's behaviors are the core's own crate", name, rust.Crate)
 	}
 	if !cargoPackageName.MatchString(rust.Crate) {
 		return fmt.Errorf("registry: behavior %s Rust crate %q is not a Cargo package name: a letter, then letters, digits, '-' and '_', at most 64 characters", name, rust.Crate)
@@ -1103,17 +1090,17 @@ func checkBehaviorVetoes(decl BehaviorDeclaration) error {
 // and conflicts name registered behaviors other than the declaring one, no
 // behavior both requires and conflicts with another, every operation's
 // invocation policy is a value of the policy in force, and behaviors that
-// name one Rust crate name it at one path, since the project's engine
+// name one rules crate name it at one path, since the project's rules
 // crate depends on each crate once.
 func (r *Registry) checkBehaviorReferences() error {
 	policy := r.ToolInvocationPolicy()
 	crates := map[string]Behavior{}
 	for _, b := range r.Behaviors() {
-		if b.Rust.Declared() {
-			if first, seen := crates[b.Rust.Crate]; seen && first.Rust.Path != b.Rust.Path {
-				return fmt.Errorf("registry: behaviors %s and %s name Rust crate %s at two paths, %q and %q", first.Name, b.Name, b.Rust.Crate, first.Rust.Path, b.Rust.Path)
+		if b.Rules.Declared() {
+			if first, seen := crates[b.Rules.Crate]; seen && first.Rules.Path != b.Rules.Path {
+				return fmt.Errorf("registry: behaviors %s and %s name Rust crate %s at two paths, %q and %q", first.Name, b.Name, b.Rules.Crate, first.Rules.Path, b.Rules.Path)
 			} else if !seen {
-				crates[b.Rust.Crate] = b
+				crates[b.Rules.Crate] = b
 			}
 		}
 		for _, list := range []struct {
@@ -1180,22 +1167,30 @@ func (b Behavior) ConfigRequired() bool {
 // config schema. An absent config is checked as {}, the value a config of
 // {} is stored as. A behavior without a config schema takes no config.
 func (b Behavior) ValidateConfig(config json.RawMessage) error {
+	return validateOptionalObject(b.config, config, "behavior "+b.Name, "config")
+}
+
+// validateOptionalObject checks raw, the config of a behavior or the
+// settings of a bundle (what, owner's), against schema. Absent, raw is
+// checked as {}; with no schema, only {} passes. owner and what name the
+// value in each error.
+func validateOptionalObject(schema *validator.Schema, raw json.RawMessage, owner, what string) error {
 	instance := any(map[string]any{})
-	if len(config) > 0 {
-		decoded, err := validator.UnmarshalJSON(bytes.NewReader(config))
+	if len(raw) > 0 {
+		decoded, err := validator.UnmarshalJSON(bytes.NewReader(raw))
 		if err != nil {
-			return fmt.Errorf("behavior %s config: %w", b.Name, err)
+			return fmt.Errorf("%s %s: %w", owner, what, err)
 		}
 		instance = decoded
 	}
-	if b.config == nil {
+	if schema == nil {
 		if m, ok := instance.(map[string]any); ok && len(m) == 0 {
 			return nil
 		}
-		return fmt.Errorf("behavior %s takes no config", b.Name)
+		return fmt.Errorf("%s takes no %s", owner, what)
 	}
-	if err := b.config.Validate(instance); err != nil {
-		return fmt.Errorf("behavior %s config: %w", b.Name, err)
+	if err := schema.Validate(instance); err != nil {
+		return fmt.Errorf("%s %s: %w", owner, what, err)
 	}
 	return nil
 }

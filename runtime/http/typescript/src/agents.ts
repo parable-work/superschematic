@@ -9,6 +9,7 @@ import { serveMcp, type McpCallGate, type McpCallOutcome, type McpTool, type Mcp
 import { canonicalJson } from './mcpconfirm.js';
 import type { Inbound, SendDecision, SendInput } from './inbound.js';
 import type { Notifier, ReplyAction } from './notify.js';
+import type { PlainRepository } from './orm.js';
 import { partyPrincipal } from './parties.js';
 import type { RequestContext } from './operation.js';
 import type { ModelCompletion, ModelMessage, ModelTool, ModelUsage } from './providers/model.js';
@@ -20,7 +21,7 @@ import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-or
 import type { CoreCaller } from './rules.js';
 import { callSearchTool, searchMcpTool, type SearchOptions } from './search-tables.js';
 import { SecretValue } from './secret.js';
-import { sha256 } from './sha256.js';
+import { sha256Hex } from './sha256.js';
 import { idKey } from './uuid.js';
 import type { WorkerQueue } from './worker.js';
 
@@ -123,8 +124,8 @@ while the run lives, since a provider checks it as it returned it; a read
 of the transcript and the transcript the run leaves hold it redacted.
 */
 
-/** The triggers of a run (D158). */
-export type AgentTrigger = 'route' | 'assigned' | 'schedule' | 'principal' | 'inbound';
+/** The triggers of a run (D158): reply is a reply the notifier hands its interpreter (#602), acting for its sender. */
+export type AgentTrigger = 'route' | 'assigned' | 'schedule' | 'principal' | 'inbound' | 'reply';
 
 
 /** Who asked for a run, or whom it acts for. */
@@ -230,7 +231,7 @@ export interface TranscriptEntry {
    * A completion's ModelCompletion.providerState, which the turns after it
    * pass back on its assistant message. It is the one member kept
    * unredacted while the run lives, since a provider checks it as it
-   * returned it (a Claude thinking block's signature); a read of the
+   * returned it (a signed reasoning block's signature); a read of the
    * transcript, and the transcript the run leaves, hold it redacted.
    */
   readonly providerState?: unknown;
@@ -504,23 +505,13 @@ export function redactTokens(text: string, secrets: readonly string[] = [], extr
 
 /** The SHA-256, in hex, of an operation and its parameters as canonical JSON: what an approval is bound to. */
 export function paramsHash(operation: string, params: unknown): string {
-  return hex(sha256(new TextEncoder().encode(canonicalJson({ operation, params }))));
-}
-
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+  return sha256Hex(canonicalJson({ operation, params }));
 }
 
 type Values = Record<string, any>;
 
-interface RepositoryShape {
-  readonly def: { readonly name: string; readonly key: string; readonly agents?: string; readonly access?: string; readonly relations?: readonly { readonly field: string; readonly column: string; readonly target: string }[] };
-  findOne(filter: Values, options?: Values): Promise<Values | null>;
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-  createOne(input: Values): Promise<Values>;
-  updateOne(id: unknown, update: Values, options?: Values): Promise<Values>;
-  [use: string]: any;
-}
+/** A repository as the agents run it, its uses' operations under their members beside its own. */
+type RepositoryShape = Pick<PlainRepository<Values>, 'def' | 'findOne' | 'findMany' | 'createOne' | 'updateOne'> & { readonly [use: string]: any };
 
 function repositoriesOf(orm: any): [string, RepositoryShape][] {
   return Object.entries(orm).filter((entry): entry is [string, RepositoryShape] => {
@@ -781,6 +772,17 @@ export function createAgents(options: AgentsOptions): Agents {
     if (outcome !== 'done' && run.trigger === 'assigned' && run.triggerTable && run.triggerKey && options.onReturn) {
       await orm.transaction((tx: any) => options.onReturn!(tx, { run, row: { table: String(run.triggerTable), key: String(run.triggerKey) } }));
     }
+    await replyEnded(run, outcome, detail);
+  };
+
+  /** A run that interpreted a reply (#602) has ended: the notifier ends a reply it did not act on, and tells its sender. */
+  const replyEnded = async (run: Values, outcome: string, detail?: string | null): Promise<void> => {
+    if (run.trigger !== 'reply' || !options.notifier) return;
+    try {
+      await options.notifier.replyRunEnded({ reply: ((run.input as Values | null) ?? {}).reply, outcome, detail: detail ?? null });
+    } catch (err) {
+      log.warn("a reply run's end was not told", { run: String(run.id), detail: err instanceof Error ? err.message : String(err) });
+    }
   };
 
   const cancel = async (runId: string, outcome = 'cancelled', detail?: string): Promise<void> => {
@@ -803,6 +805,7 @@ export function createAgents(options: AgentsOptions): Agents {
     }
     const refused = await runs().createOne(runFields(request, definition, []));
     await moveRun(orm, String(refused.id), 'cancelled', { outcome, detail, endedAt: now() });
+    await replyEnded(refused, outcome, detail);
     if (request.trigger === 'assigned' && request.subjectTable && request.subjectKey && options.onReturn) {
       const row = { table: request.subjectTable, key: request.subjectKey };
       await orm.transaction((tx: any) => options.onReturn!(tx, { run: { agent: definition.id, trigger: 'assigned' }, row }));

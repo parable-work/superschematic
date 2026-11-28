@@ -111,6 +111,12 @@ func EmitFromDist(distRoot string, producers map[string]string, copyPath string,
 	if err != nil {
 		return err
 	}
+	return writeGraph(distRoot, copyPath, g)
+}
+
+// writeGraph writes g to dist/.deps.json and, when copyPath is not empty,
+// to copyPath.
+func writeGraph(distRoot, copyPath string, g *Graph) error {
 	if err := Write(DepsPath(distRoot), g); err != nil {
 		return err
 	}

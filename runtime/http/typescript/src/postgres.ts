@@ -346,6 +346,9 @@ export { ormOf, POSTGRES_ORM_RUNTIME } from './orm-postgres.js';
 // applies as a repository does, and the refusal of a write a party's or an
 // agent run's grants do not reach.
 export { AccessRefusedError, audienceConditions, type AudienceDefinition } from './orm.js';
+// An audience resolved through a queue (#734): what a worker of an
+// @audience queue runs for each message, after the parent's write.
+export { AUDIENCE_RESOLVE_BATCH, resolveAudience, type AudienceResolving, type ResolveAudienceOptions } from './audience-resolve.js';
 // References and attachments on any row (D154): orm.references and
 // orm.attachments, the definitions a DB's ./orm entry gives them, and the
 // Comments attachment block of a file.
@@ -374,6 +377,10 @@ export {
   type RowTableDefinition,
   type Upload,
 } from './rowfeatures.js';
+// The file processor's wiring (D154, D159, #702): what attachments have
+// pending, handed to the environment's files slots, the text and preview
+// recorded with processed.
+export { DEFAULT_PROCESS_LIMIT, DEFAULT_PROCESS_MAX_BYTES, processFiles, type FileProcessingOptions, type FileProcessingRun } from './file-processing.js';
 // Grants and the access log (D156): the authenticator of a grant's token,
 // the making, revoking and reading of grants, and the log's writer.
 export {
@@ -448,6 +455,8 @@ export {
   type SearchableDefinition,
   type SnippetPart,
 } from './search-tables.js';
+// The query syntax of search across tables (#740).
+export { MAX_QUERY_TERMS, ftsQuery, postgresQuery, searchPlan, type SearchPlan, type SearchTerm } from './search-query.js';
 // Events, notifications and channels (D153): the notifier that raises a
 // table's events in the caller's transaction, routes them by rows, holds
 // each recipient to the record's audience, delivers through the channel
@@ -485,6 +494,12 @@ export {
   type ReplyOutcome,
   type Urgency,
 } from './notify.js';
+// The notifier's routes (D153, D157): each channel slot's relay callbacks and
+// the in-app inbox, which a generated server mounts.
+export { notifierRoutes, slotSegment, type NotifierRoutesOptions } from './notify-routes.js';
+// The notifier's upkeep on a schedule (D153, #702): every adapter's health
+// asked on its own, and the deliveries pruned, by the dispatch worker.
+export { HEALTH_CHECK_EVERY_MS, notifierUpkeep, type NotifierUpkeepOptions } from './notify-upkeep.js';
 // Agent orchestration (D158): the dispatcher of agent runs, their tokens,
 // autonomy, budgets and stop switches, over the @agents tables.
 export {
@@ -529,6 +544,7 @@ export {
   type InboundDisposition,
   type InboundOptions,
   type InboundOutcome,
+  type SettleOnto,
   type MessageRow,
   type ReceivedMessage,
   type RunRequest,

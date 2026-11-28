@@ -66,15 +66,16 @@ type ORMInfo struct {
 
 	// References and Attachments are whether the database keeps references
 	// (a @references table, or a table whose Comments ref blocks reach
-	// rows) and files (an @attachments table), which the Postgres
-	// repositories read through references() and attachments() (D154,
-	// D185).
+	// rows) and files (an @attachments table), which the Postgres and
+	// the SQLite repositories read through references() and attachments()
+	// (D154, D185, #611).
 	References  bool
 	Attachments bool
 
 	// Calendar and Searchable are whether a table of the database is a
 	// calendar source (D152) or @searchable (D155), which the runtime's
-	// orm::calendar and orm::search_tables read on Postgres (D188).
+	// orm::calendar and orm::search_tables read on Postgres (D188) and on
+	// SQLite (#615).
 	Calendar   bool
 	Searchable bool
 
@@ -211,7 +212,7 @@ type ormDefinition struct {
 	ClearHistoryActor string     `json:"clearHistoryActor,omitempty"`
 	Tables            []ormTable `json:"tables"`
 	// References and Attachments are the database's references and files
-	// (D154), on Postgres alone.
+	// (D154), in each dialect (#611).
 	References  *rustRowReferences `json:"references,omitempty"`
 	Attachments *rustAttachments   `json:"attachments,omitempty"`
 }
@@ -246,7 +247,7 @@ type ormTable struct {
 	Access   string       `json:"access,omitempty"`
 	// Calendar are the table's @calendarSource declarations (D152), and
 	// Searchable its search index (D155), which the runtime's calendar and
-	// search read (D188); on Postgres alone.
+	// search read on Postgres (D188) and on SQLite (#615).
 	Calendar   []rustCalendarSource `json:"calendar,omitempty"`
 	Searchable *rustSearchable      `json:"searchable,omitempty"`
 	// Events are the table's @event declarations, and Notifier what the
@@ -282,6 +283,16 @@ type ormMergeStep struct {
 	Before        []ormMergeStatement `json:"before,omitempty"`
 	Collisions    []ormMergeStatement `json:"collisions,omitempty"`
 	Repoint       ormMergeStatement   `json:"repoint"`
+	// Reach is the rows the step writes as per-record access holds them
+	// (D156, sqlutil.MergeStep.Reach), the runtime's orm::MergeReach; nil
+	// for the merged rows' own.
+	Reach *ormMergeReach `json:"reach,omitempty"`
+}
+
+// ormMergeReach is sqlutil.MergeReach as the runtime reads it.
+type ormMergeReach struct {
+	Type string `json:"type"`
+	Rows string `json:"rows"`
 }
 
 // ormMergeStatement is a merge's statement, its actor "uuid" for a
@@ -314,6 +325,9 @@ func ormMergeOf(plan *sqlutil.MergePlan, tables []sqlutil.TableModel) *ormMerge 
 	out := &ormMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser, Steps: []ormMergeStep{}}
 	for _, step := range plan.Steps {
 		s := ormMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
+		if step.Reach != nil {
+			s.Reach = &ormMergeReach{Type: step.Reach.Type, Rows: step.Reach.Rows}
+		}
 		for _, before := range step.Before {
 			s.Before = append(s.Before, statement(step.Source, before))
 		}
@@ -343,6 +357,10 @@ type ormAudience struct {
 	Effective string `json:"effective"`
 	Agents    string `json:"agents"`
 	Probe     string `json:"probe,omitempty"`
+	// Resolve is the statement that resolves a batch of the table's rows
+	// that inherit from one parent, on a table whose @audience names a
+	// queue (#734): orm::resolve_audience runs it.
+	Resolve string `json:"resolve,omitempty"`
 }
 
 type ormFence struct {
@@ -354,6 +372,23 @@ type ormFence struct {
 type ormBehaviors struct {
 	Owned    []string `json:"owned"`
 	NoUpsert bool     `json:"noUpsert,omitempty"`
+	// Reads are the operations on a row that write nothing, by the member
+	// they sit under, which a caller who sees the row may run (D156).
+	Reads map[string][]string `json:"reads,omitempty"`
+	// Answers are the table's operations of the table as a whole whose
+	// answer names one of its rows (the layout's answersRow), which the
+	// runtime keeps to the caller (D156).
+	Answers []ormAnsweredRow `json:"answers,omitempty"`
+}
+
+// ormAnsweredRow is an operation of the table as a whole whose answer
+// names one of the table's rows, the runtime's orm::AnsweredRow: the member
+// its use's operations sit under, the operation, and the member of its
+// answer that holds the row, {key, ...} or null (Aliased's resolve's row).
+type ormAnsweredRow struct {
+	Member    string `json:"member"`
+	Operation string `json:"operation"`
+	Row       string `json:"row"`
 }
 
 type ormColumn struct {
@@ -573,7 +608,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			Access:     t.Access,
 		}
 		if a := t.Audience; a != nil {
-			table.Audience = &ormAudience{Effective: a.Effective, Agents: a.Agents, Probe: a.Probe}
+			table.Audience = &ormAudience{Effective: a.Effective, Agents: a.Agents, Probe: a.Probe, Resolve: a.Resolve}
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
@@ -592,6 +627,22 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				// insert.
 				if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 					behaviors.NoUpsert = true
+				}
+				for _, op := range use.Operations {
+					if op.AnswersRow != "" {
+						behaviors.Answers = append(behaviors.Answers, ormAnsweredRow{Member: use.Member, Operation: op.Name, Row: op.AnswersRow})
+					}
+					if op.Table || op.Writes {
+						continue
+					}
+					member := use.Member
+					if member == "" {
+						member = use.ID
+					}
+					if behaviors.Reads == nil {
+						behaviors.Reads = map[string][]string{}
+					}
+					behaviors.Reads[member] = append(behaviors.Reads[member], op.Name)
 				}
 			}
 			typed.Behaviors, info.Rules = true, true
@@ -713,6 +764,17 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 					k = k.SQLite()
 					onSQLite.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 				}
+				// The calendar and search read the same tables on SQLite
+				// (#615), the search's words in the FTS5 table beside the
+				// index (D186).
+				onSQLite.Calendar = onPostgres.Calendar
+				onSQLite.Searchable = sqliteSearchable(onPostgres.Searchable)
+				// The notifier (D153), the parties, the inbound path and
+				// conversations (D157) and the agent orchestration (D158)
+				// read the same tables on SQLite (#618).
+				onSQLite.Events = onPostgres.Events
+				onSQLite.Notifier = onPostgres.Notifier
+				onSQLite.Party, onSQLite.Conversations, onSQLite.Agents = onPostgres.Party, onPostgres.Conversations, onPostgres.Agents
 			}
 			sqlite.Tables = append(sqlite.Tables, onSQLite)
 		}
@@ -729,6 +791,21 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		return nil, err
 	}
 	info.References, info.Attachments = postgres.References != nil, postgres.Attachments != nil
+	if opts.SQLite {
+		// On SQLite too (#611): the sub-tables, columns and triggers are
+		// the same, and a reference may point at a table with a
+		// repository there.
+		onSQLite := map[string]bool{}
+		for name := range repository {
+			onSQLite[name] = true
+		}
+		for _, refused := range info.SQLiteRefused {
+			delete(onSQLite, refused.Type)
+		}
+		if sqlite.References, sqlite.Attachments, err = rowFeaturesOf(schema, tables, onSQLite); err != nil {
+			return nil, err
+		}
+	}
 	if info.Rules {
 		encoded, err := json.MarshalIndent(layout, "", "  ")
 		if err != nil {

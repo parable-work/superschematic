@@ -3,19 +3,17 @@
 //! crate, which a stack runs as a deployable of its own beside shop-stock's
 //! server. Its entrypoint, which shop-stack's build writes, builds the
 //! parts as the server builds its own: shop-stock's implementations over
-//! shop-db's Postgres, its identity service, whose sessions shop-api's
-//! sign-in starts, and shop-db's engine, open, where the stack's checkouts
-//! hold and take the stock. Then it calls `serve`.
+//! shop-db's Postgres, where the stack's checkouts hold and take the stock
+//! through Inventory's Stock, and its identity service, whose sessions
+//! shop-api's sign-in starts. Then it calls `serve`.
 //!
 //! The pages are under `/stock`: the stock's list and each product's, and
-//! the forms that count and receive it; the engine console under
-//! `/stock/engine`, whose Inventory pages receive stock through the Stock
-//! panel's forms; and sign-in, the account, users and roles. Each page calls
-//! shop-stock or the engine in-process as its caller: staff who hold
-//! `stock.write` receive stock. The app serves its pages alone: neither
-//! shop-stock's JSON API nor the engine's routes are on its address, so
-//! exposing the app exposes no more of shop-stock than the pages do.
-//! `shop_stock_with_parts_and_api` would mount them at `/api` and `/engine`.
+//! the forms that count and receive it; and sign-in, the account, users
+//! and roles. Each page calls shop-stock in-process as its caller: staff
+//! who hold `stock.write` count and receive stock. The app serves its
+//! pages alone: shop-stock's JSON API is not on its address, so exposing
+//! the app exposes no more of shop-stock than the pages do.
+//! `shop_stock_with_parts_and_api` would mount it at `/api`.
 //!
 //! The image carries no Topcoat asset bundle, so the lists are GET forms
 //! that load the page.

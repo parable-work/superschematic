@@ -3,11 +3,13 @@ package crosstable
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/parable-work/superschematic/runtime/schema/go/fieldcrypt"
 	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 )
 
@@ -23,7 +25,9 @@ caller by the predicate the table's repository applies for it
 (Host.Conditions: its audience and its grants, D156, D180), so a row's
 audience and the caller's grants hold as they hold on any read; an
 occurrence is shown only when its row is read. A source a caller lacks the
-permission of (CalendarOptions.Permissions) is left out.
+permission of is left out: the schema's (@calendarSource's permission,
+#601, CalendarSource.Permission), or the one CalendarOptions.Permissions
+names for it, which wins.
 */
 
 // CalendarOccurrence is an occurrence's key, its wall due and its state,
@@ -73,7 +77,8 @@ type CalendarRead struct {
 type CalendarOptions struct {
 	// Permissions is the permission each source needs, by its name: a
 	// caller without it reads none of its entries. A source not named
-	// needs none beyond its table's audience and grants.
+	// needs the schema's (CalendarSource.Permission), or none beyond its
+	// table's audience and grants.
 	Permissions map[string]string
 }
 
@@ -123,13 +128,13 @@ func ReadCalendar(ctx context.Context, h Host, caller Caller, read CalendarRead,
 	as := h.As(ctx, caller.Principal)
 	out := Calendar{Entries: []CalendarEntry{}}
 	defs := h.Definitions().Calendar
-	for _, typeName := range sortedKeys(defs) {
+	for _, typeName := range slices.Sorted(maps.Keys(defs)) {
 		table := defs[typeName]
 		for _, source := range table.Sources {
 			if read.Sources != nil && !slices.Contains(read.Sources, source.Name) {
 				continue
 			}
-			if permission, ok := options.Permissions[source.Name]; ok && !caller.holds(permission) {
+			if permission, ok := source.permissionUnder(options); ok && !caller.holds(permission) {
 				continue
 			}
 			if read.Mine && (source.Owner == "" || caller.Principal.Anonymous()) {
@@ -174,9 +179,14 @@ func heldConditions(ctx context.Context, h Host, typeName string, table Calendar
 		if source.OwnerUUID {
 			subject = rowrefs.UUIDToDB(subject)
 		}
-		if subject == "" {
+		switch {
+		case subject == "":
 			out = append(out, "FALSE")
-		} else {
+		case onSQLite(h):
+			// On SQLite a UUID is its hyphenated text (D182).
+			*args = append(*args, subject)
+			out = append(out, fmt.Sprintf("%s = ?%d", source.Owner, len(*args)))
+		default:
 			*args = append(*args, subject)
 			cast := ""
 			if source.OwnerUUID {
@@ -186,6 +196,14 @@ func heldConditions(ctx context.Context, h Host, typeName string, table Calendar
 		}
 	}
 	return append(out, h.Conditions(ctx, typeName, args, len(*args))...)
+}
+
+// asText is expr as text, in Postgres's words or SQLite's.
+func asText(sqlite bool, expr string) string {
+	if sqlite {
+		return "CAST(" + expr + " AS TEXT)"
+	}
+	return expr + "::text"
 }
 
 func where(conditions []string) string {
@@ -220,29 +238,55 @@ func form(value any, timestamp bool) (string, bool) {
 	return fmt.Sprint(value), true
 }
 
+// titleOf is a row's title as its entry shows it: the column's text, or,
+// for a source titled by an Encrypted<T> field (#616), its envelope opened
+// under the host's keys, bound to the table type, the field and the row's
+// key as text, as the repositories seal it. An envelope that does not open
+// fails the read, as a repository's read of it does.
+func titleOf(h Host, typeName string, source CalendarSource, row, value string) (string, error) {
+	if !source.TitleSealed || value == "" {
+		return value, nil
+	}
+	var keys *fieldcrypt.Keyring
+	if unsealer, ok := h.(Unsealer); ok {
+		keys = unsealer.FieldKeys()
+	}
+	return keys.Open(fieldcrypt.Cell{Table: typeName, Field: source.TitleField, Row: row}, value)
+}
+
 // rowsOf reads a field source's rows in the window.
 func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, source CalendarSource, from, to time.Time, limit int, mine bool, caller Caller) ([]CalendarEntry, bool, error) {
 	if source.Field == "" {
 		return nil, false, fmt.Errorf("crosstable: %s's calendar source %s dates neither a field nor occurrences", typeName, source.Name)
 	}
+	sqlite := onSQLite(h)
 	var args []any
-	if source.Timestamp {
-		args = append(args, from, to)
-	} else {
+	switch {
+	case !source.Timestamp:
 		args = append(args, from.UTC().Format("2006-01-02"), to.UTC().Format("2006-01-02"))
+	case sqlite:
+		// On SQLite a time is its RFC 3339 text, which compares in order
+		// (D182), and a date its ISO text.
+		args = append(args, sqliteTime(from), sqliteTime(to))
+	default:
+		args = append(args, from, to)
 	}
-	cast := ""
-	if !source.Timestamp {
-		cast = "::date"
+	var conditions []string
+	switch {
+	case sqlite:
+		conditions = []string{source.Field + " >= ?1", source.Field + " < ?2"}
+	case source.Timestamp:
+		conditions = []string{source.Field + " >= $1", source.Field + " < $2"}
+	default:
+		conditions = []string{source.Field + " >= $1::date", source.Field + " < $2::date"}
 	}
-	conditions := []string{fmt.Sprintf("%s >= $1%s", source.Field, cast), fmt.Sprintf("%s < $2%s", source.Field, cast)}
 	conditions = append(conditions, heldConditions(ctx, h, typeName, table, source, mine, caller, &args)...)
 	end := "NULL"
 	if source.End != "" {
 		end = source.End
 	}
-	sql := fmt.Sprintf("SELECT %s::text AS key, %s::text AS title, %s AS start, %s AS finish FROM %s%s ORDER BY %s, %s LIMIT %d",
-		table.Key, source.Title, source.Field, end, table.Table, where(conditions), source.Field, table.Key, limit+1)
+	sql := fmt.Sprintf("SELECT %s AS key, %s AS title, %s AS start, %s AS finish FROM %s%s ORDER BY %s, %s LIMIT %d",
+		asText(sqlite, table.Key), asText(sqlite, source.Title), source.Field, end, table.Table, where(conditions), source.Field, table.Key, limit+1)
 	rows, err := h.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, false, err
@@ -254,7 +298,11 @@ func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, s
 		if !ok {
 			continue
 		}
-		entry := CalendarEntry{Source: source.Name, Kind: source.Kind, Color: source.Color, Type: typeName, Key: wireKey(table.UUID, text(row, "key")), Title: text(row, "title"), Start: start, AllDay: !source.Timestamp}
+		title, err := titleOf(h, typeName, source, text(row, "key"), text(row, "title"))
+		if err != nil {
+			return nil, false, err
+		}
+		entry := CalendarEntry{Source: source.Name, Kind: source.Kind, Color: source.Color, Type: typeName, Key: wireKey(table.UUID, text(row, "key")), Title: title, Start: start, AllDay: !source.Timestamp}
 		if finish, ok := form(row["finish"], source.Timestamp); ok {
 			entry.End = finish
 		}
@@ -268,12 +316,21 @@ func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, s
 // of the rows it read.
 func occurrencesOf(ctx context.Context, h Host, typeName string, table CalendarTable, source CalendarSource, from, to time.Time, limit int, mine bool, caller Caller) ([]CalendarEntry, bool, error) {
 	occ := source.Occurrences
-	due := "NULL::text"
+	sqlite := onSQLite(h)
+	due := "NULL"
 	if occ.Due != "" {
-		due = occ.Due + "::text"
+		due = occ.Due
 	}
-	rows, err := h.Query(h.System(ctx), fmt.Sprintf("SELECT %s::text AS row, %s::text AS key, %s AS due, %s AS due_at, %s::text AS state FROM %s WHERE %s >= $1 AND %s < $2 ORDER BY %s, %s LIMIT %d",
-		occ.Row, occ.Key, due, occ.DueAt, occ.State, occ.Table, occ.DueAt, occ.DueAt, occ.DueAt, occ.Key, limit+1), from, to)
+	window := []any{from, to}
+	p1, p2 := "$1", "$2"
+	if sqlite {
+		// On SQLite a time is its RFC 3339 text, which compares in order
+		// (D182), as the TypeScript calendar binds it.
+		window = []any{sqliteTime(from), sqliteTime(to)}
+		p1, p2 = "?1", "?2"
+	}
+	rows, err := h.Query(h.System(ctx), fmt.Sprintf("SELECT %s AS row, %s AS key, %s AS due, %s AS due_at, %s AS state FROM %s WHERE %s >= %s AND %s < %s ORDER BY %s, %s LIMIT %d",
+		asText(sqlite, occ.Row), asText(sqlite, occ.Key), asText(sqlite, due), occ.DueAt, asText(sqlite, occ.State), occ.Table, occ.DueAt, p1, occ.DueAt, p2, occ.DueAt, occ.Key, limit+1), window...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -287,15 +344,31 @@ func occurrencesOf(ctx context.Context, h Host, typeName string, table CalendarT
 	}
 	titles := map[string]string{}
 	if len(keys) > 0 {
-		args := []any{keys}
-		conditions := []string{fmt.Sprintf("%s = ANY($1::%s[])", table.Key, table.KeyType)}
+		var args []any
+		var conditions []string
+		if sqlite {
+			// One parameter a key, as SQLite has no arrays.
+			placeholders := make([]string, len(keys))
+			for i, key := range keys {
+				args = append(args, key)
+				placeholders[i] = fmt.Sprintf("?%d", i+1)
+			}
+			conditions = []string{fmt.Sprintf("%s IN (%s)", table.Key, strings.Join(placeholders, ", "))}
+		} else {
+			args = []any{keys}
+			conditions = []string{fmt.Sprintf("%s = ANY($1::%s[])", table.Key, table.KeyType)}
+		}
 		conditions = append(conditions, heldConditions(ctx, h, typeName, table, source, mine, caller, &args)...)
-		parents, err := h.Query(ctx, fmt.Sprintf("SELECT %s::text AS key, %s::text AS title FROM %s%s", table.Key, source.Title, table.Table, where(conditions)), args...)
+		parents, err := h.Query(ctx, fmt.Sprintf("SELECT %s AS key, %s AS title FROM %s%s", asText(sqlite, table.Key), asText(sqlite, source.Title), table.Table, where(conditions)), args...)
 		if err != nil {
 			return nil, false, err
 		}
 		for _, parent := range parents {
-			titles[text(parent, "key")] = text(parent, "title")
+			title, err := titleOf(h, typeName, source, text(parent, "key"), text(parent, "title"))
+			if err != nil {
+				return nil, false, err
+			}
+			titles[text(parent, "key")] = title
 		}
 	}
 	var out []CalendarEntry

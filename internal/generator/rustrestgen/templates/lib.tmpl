@@ -13,6 +13,12 @@ pub mod tables;
 {{ if .HasGraphOperations -}}
 pub mod graphs;
 {{ end -}}
+{{ if .HasRowFeatureOperations -}}
+pub mod rowfeatures;
+{{ end -}}
+{{ if .HasFileProcessing -}}
+pub mod files;
+{{ end -}}
 {{ if .HasEnvConfig -}}
 pub mod config;
 {{ end -}}
@@ -29,6 +35,9 @@ pub mod interfaces;
 pub mod openapi;
 pub mod operations;
 pub mod router;
+{{- if .HasWiring }}
+pub mod wiring;
+{{- end }}
 
 /// The schema's generated types crate, which every argument, input and
 /// result type comes from.
@@ -51,25 +60,26 @@ pub const IDEMPOTENCY_TABLE: runtime::idempotency::Table = {{ .IdempotencyTableL
 /// workers handle, and the descriptors of their queues, which a worker claims
 /// with and an implementation enqueues with (D65){{ if .HasTableOperations }}, and the repositories its
 /// table operations are served from (D106, D116){{ end }}{{ if .HasGraphOperations }}, and the facades its
-/// graph operations run through (D138){{ end }}.
+/// graph operations run through (D138){{ end }}{{ if .HasRowFeatureOperations }}, and the repositories its
+/// row feature operations run through (#723){{ end }}{{ if .HasFileProcessing }}, and the attachments its
+/// file processor's pass reads (#614){{ end }}{{ if .BehaviorsHeld }}, and the repositories its
+/// behavior operations check the caller's reach of a row through (D156, D181){{ end }}.
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- else if .HasDerivers }}
-{{- if .HasTableDerivers }}
 
 /// The Rust types of {{ .Deps.Database }}, the API's database: the tables whose
 /// derived fields its derivers fill, which type their methods, and the
 /// repositories its derivers pull and settle through (D146).
-{{- else }}
-
-/// The Rust types of {{ .Deps.Database }}, the API's database: the engine types
-/// whose derived fields its derivers fill, which type their methods (D74).
-{{- end }}
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- end }}
 
 {{ if .Deps -}}
 pub use {{ .DepsExports }}
 {{ end -}}
+
 pub use interfaces::*;
 pub use router::{build_router, build_router_with, {{ if .ManualEndpoints }}build_router_with_manual_routes, {{ end }}{{ if .WebhookProviders }}webhook_verified, {{ end }}Api, RouterState};
 pub use {{ .RuntimeCrateIdent }}::{request_ids, RouterOptions};
+{{- if .HasWiring }}
+pub use wiring::{Wire, Wired, WiringDeps};
+{{- end }}

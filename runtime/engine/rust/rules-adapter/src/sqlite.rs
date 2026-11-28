@@ -494,6 +494,8 @@ fn sql_value(value: &Bind) -> SqlValue {
             None => number.as_f64().map_or(SqlValue::Null, SqlValue::Real),
         },
         Bind::Bool(flag) => SqlValue::Integer(i64::from(*flag)),
+        // A list SQLite holds as the JSON text of an array (D182).
+        Bind::Uuids(ids) => SqlValue::Text(Value::from(ids.clone()).to_string()),
     }
 }
 

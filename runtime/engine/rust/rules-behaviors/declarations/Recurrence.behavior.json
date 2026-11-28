@@ -1,6 +1,6 @@
 {
   "name": "Recurrence",
-  "description": "A rule that turns into dated occurrences on the row (D152): calendar, an RFC 5545 RRULE from a wall start in a time zone; afterDone, an interval after the last completed occurrence; relative, an offset from a date field of the row a relation names, and its anniversaries. A due date on a weekend day or a holiday, a row of the holiday table the config names in the calendar a field of the row names, moves before or after it. The occurrences sub-table holds each occurrence up to horizonDays ahead: its due and open times, its state (upcoming, open, done, missed, skipped), and what and who completed it. An occurrence opens opensBefore its due, or, with none, when the one before it falls due; it reminds remindBefore its due and is missed overdueAfter it, each a deadline the API's behavior worker fires. A rule change regenerates the occurrences that have not opened and leaves the open ones as they are, and a missed occurrence never blocks the next. The behaviors' core alone implements it, on a table; no engine type composes it.",
+  "description": "A rule that turns into dated occurrences on the row (D152): calendar, an RFC 5545 RRULE from a wall start in a time zone; afterDone, an interval after the last completed occurrence; relative, an offset from a date field of the row a relation names, and its anniversaries. A due date on a weekend day or a holiday, a row of the holiday table the config names in the calendar a field of the row names, moves before or after it. The occurrences sub-table holds each occurrence up to horizonDays ahead: its due and open times, its state (upcoming, open, done, missed, skipped), and what and who completed it. An occurrence opens opensBefore its due, or, with none, when the one before it falls due; it reminds remindBefore its due, falls due at its due and is missed overdueAfter it, each a deadline the API's behavior worker fires. A rule change regenerates the occurrences that have not opened and leaves the open ones as they are, and a missed occurrence never blocks the next. The behaviors' core alone implements it, on a table; no engine type composes it.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -77,13 +77,19 @@
       },
       "opensBefore": {
         "description": "How long before its due an occurrence opens, an ISO 8601 duration (P14D); with none it opens when the occurrence before it falls due, the first when it is planned.",
-        "minLength": 2,
-        "type": "string"
+        "maxLength": 64,
+        "minLength": 3,
+        "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+        "type": "string",
+        "x-superschematic-scalar": "Temporal.Period"
       },
       "overdueAfter": {
         "description": "How long after its due an open occurrence is missed, an ISO 8601 duration (P1D); at its due when absent.",
-        "minLength": 2,
-        "type": "string"
+        "maxLength": 64,
+        "minLength": 3,
+        "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+        "type": "string",
+        "x-superschematic-scalar": "Temporal.Period"
       },
       "permission": {
         "description": "The permission complete and listOccurrences need; any caller when absent.",
@@ -119,8 +125,11 @@
       },
       "remindBefore": {
         "description": "How long before its due an occurrence reminds, an ISO 8601 duration (P3D): the deadline remind.",
-        "minLength": 2,
-        "type": "string"
+        "maxLength": 64,
+        "minLength": 3,
+        "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+        "type": "string",
+        "x-superschematic-scalar": "Temporal.Period"
       },
       "timeZone": {
         "description": "The IANA time zone a recurrence is read in when setRecurrence names none; UTC when absent.",
@@ -231,6 +240,11 @@
         {
           "name": "remindedAt",
           "description": "When its remind deadline fired, in epoch milliseconds; absent before.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "fellDueAt",
+          "description": "When its due deadline fired while it was neither done nor skipped, in epoch milliseconds; absent before (#601).",
           "type": "Temporal.DateTime"
         },
         {
@@ -444,6 +458,10 @@
             "description": "When it falls due, in epoch milliseconds.",
             "type": "integer"
           },
+          "fellDueAt": {
+            "description": "When it fell due while not done or skipped, in epoch milliseconds.",
+            "type": "integer"
+          },
           "key": {
             "description": "Its nominal wall date-time, its key.",
             "type": "string"
@@ -573,6 +591,10 @@
           },
           "dueAt": {
             "description": "When it falls due, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "fellDueAt": {
+            "description": "When it fell due while not done or skipped, in epoch milliseconds.",
             "type": "integer"
           },
           "key": {
@@ -706,6 +728,10 @@
           },
           "dueAt": {
             "description": "When it falls due, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "fellDueAt": {
+            "description": "When it fell due while not done or skipped, in epoch milliseconds.",
             "type": "integer"
           },
           "key": {
@@ -853,6 +879,10 @@
                   "description": "When it falls due, in epoch milliseconds.",
                   "type": "integer"
                 },
+                "fellDueAt": {
+                  "description": "When it fell due while not done or skipped, in epoch milliseconds.",
+                  "type": "integer"
+                },
                 "key": {
                   "description": "Its nominal wall date-time, its key.",
                   "type": "string"
@@ -964,6 +994,38 @@
     {
       "kind": "reminded",
       "description": "An occurrence's reminder fell due while it was not done: its remindBefore before its due.",
+      "payloadSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "due": {
+            "description": "The wall date-time it falls due at, after the adjustment.",
+            "type": "string"
+          },
+          "dueAt": {
+            "description": "When it falls due, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "key": {
+            "description": "The occurrence's key: its nominal wall date-time, 2026-10-31T09:00.",
+            "type": "string"
+          },
+          "overdueAt": {
+            "description": "When it is missed if not done, in epoch milliseconds.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "due",
+          "dueAt",
+          "overdueAt"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "kind": "due",
+      "description": "An occurrence fell due while it was neither done nor skipped, which its due deadline fires at (#601). With no overdueAfter it is missed at the same time, and missed follows it.",
       "payloadSchema": {
         "additionalProperties": false,
         "properties": {

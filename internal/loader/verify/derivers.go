@@ -11,8 +11,8 @@ import (
 // or operation set of the schema takes and whose member of the generated
 // Derivers no other deriver's takes, and each deriver's arguments are what
 // @deriver takes
-// (registry.CheckDeriver). Whether each schema is an engine type of the
-// API's database that composes Derived is the API's build's to check, and
+// (registry.CheckDeriver). Whether each names a table of the API's
+// database that implements Derived is the API's build's to check, and
 // resolution's: each reads that database's schema.
 func checkDerivers(schema *ir.Schema, r *Result) {
 	if len(schema.Derivers) == 0 {

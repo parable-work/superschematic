@@ -19,14 +19,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/migrateplan/lower"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -55,6 +56,23 @@ type Context struct {
 	// catalog also names the npm package an extension's namespace is
 	// imported from (registry.NpmPackageCatalog). Nil is the core catalog.
 	Scalars registry.ScalarCatalog
+
+	// Registry is the registry the document was read with, whose behaviors'
+	// declarations say how a field-anchored use's field type is written: a
+	// value a create gives takes its type before its config (D147). Nil is
+	// the core registry.
+	Registry *registry.Registry
+
+	// Tables writes a General document's type that composes a behavior on
+	// the type, D16's @behavior form, as the table it publishes as in
+	// runtime and compiled mode (D117, internal/migrateplan/lower), which
+	// format --to=ts does to a file: a class with a key, a behavior whose
+	// declaration names a value field as that field's type (`status:
+	// Workflow<{ ... }>`), and every other behavior one the class
+	// implements. The file then belongs to a DB service. Without it, as a
+	// General service is written whole, the type keeps @behavior, which a
+	// General service holds.
+	Tables bool
 }
 
 // Write renders a document as TypeScript schema source.
@@ -63,10 +81,19 @@ func Write(doc *schemafile.Document) ([]byte, error) {
 }
 
 // WriteContext renders a document as TypeScript schema source with
-// service-level context for cross-file references.
+// service-level context for cross-file references, and with ctx.Tables a
+// General document's types that compose behaviors on the type as the
+// tables they publish as.
 func WriteContext(doc *schemafile.Document, ctx *Context) ([]byte, error) {
 	if ctx == nil {
 		ctx = &Context{}
+	}
+	if ctx.Tables {
+		lowered, err := lower.Document(doc, lower.CoreValues())
+		if err != nil {
+			return nil, err
+		}
+		doc = lowered
 	}
 	e := &emitter{
 		doc:        doc,
@@ -130,7 +157,11 @@ var symbolPackages = map[string]string{
 	"index": "@superschematic/db", "rawSql": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
 	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
-	"seedRoles": "@superschematic/db", "agents": "@superschematic/db",
+	"seedRoles": "@superschematic/db", "seedRows": "@superschematic/db", "agents": "@superschematic/db",
+	"calendarSource": "@superschematic/db", "event": "@superschematic/db", "notifier": "@superschematic/db",
+	"channelIdentities": "@superschematic/db", "references": "@superschematic/db", "attachments": "@superschematic/db",
+	"searchable": "@superschematic/db", "audience": "@superschematic/db", "accessGrants": "@superschematic/db",
+	"accessLog": "@superschematic/db", "party": "@superschematic/db", "conversations": "@superschematic/db", "runRequests": "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "query": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
@@ -147,11 +178,11 @@ var symbolPackages = map[string]string{
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api", "FilterBy": "@superschematic/api",
 	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
-	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api", "graphOperations": "@superschematic/api",
+	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api", "graphOperations": "@superschematic/api", "rowFeatureOperations": "@superschematic/api", "triageOperations": "@superschematic/api",
 	"job": "@superschematic/api", "worker": "@superschematic/api", "behaviorWorker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
 	"paginated": "@superschematic/api", "tableOperation": "@superschematic/api", "autonomy": "@superschematic/api",
 	// @superschematic/schema-config
-	"envVars": "@superschematic/schema-config",
+	"envVars": "@superschematic/schema-config", "providers": "@superschematic/schema-config",
 	// @superschematic/stack
 	"stack": "@superschematic/stack", "server": "@superschematic/stack",
 	"database": "@superschematic/stack", "environment": "@superschematic/stack",
@@ -196,11 +227,11 @@ func (e *emitter) importRelative(module, symbol string) {
 // renderImports writes the import block: packages sorted by name, then
 // relative modules, each with sorted named imports.
 func (e *emitter) renderImports(out *strings.Builder) {
-	for _, pkg := range sortedKeys(e.pkgImports) {
-		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(sortedKeys(e.pkgImports[pkg]), ", "), pkg)
+	for _, pkg := range slices.Sorted(maps.Keys(e.pkgImports)) {
+		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(slices.Sorted(maps.Keys(e.pkgImports[pkg])), ", "), pkg)
 	}
-	for _, module := range sortedKeys(e.relImports) {
-		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(sortedKeys(e.relImports[module]), ", "), module)
+	for _, module := range slices.Sorted(maps.Keys(e.relImports)) {
+		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(slices.Sorted(maps.Keys(e.relImports[module])), ", "), module)
 	}
 }
 
@@ -214,20 +245,20 @@ func (e *emitter) emitDocument() {
 	if len(e.doc.Extensions) > 0 || len(e.doc.Documents) > 0 {
 		e.failf("schema-level extension data and documents have no TypeScript form; they are document metadata in JSON and YAML only")
 	}
-	for _, name := range sortedKeys(e.doc.Unions) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Unions)) {
 		if !e.doc.Unions[name].IsVariant() {
 			e.failf("union %s: unions have no TypeScript authoring form but a variant union's (Variant<By, Arms>, D149)", name)
 		}
 	}
 	e.checkScalars()
 
-	for _, name := range sortedKeys(e.doc.Enums) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Enums)) {
 		e.emitEnum(e.doc.Enums[name])
 	}
 	for _, name := range e.sortedTypes() {
 		e.emitType(e.doc.Types[name])
 	}
-	for _, name := range sortedKeys(e.doc.Unions) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Unions)) {
 		if def := e.doc.Unions[name]; def.IsVariant() {
 			e.emitVariant(def)
 		}
@@ -271,8 +302,7 @@ func (e *emitter) emitApp(app *ir.App) {
 // emitDeriver renders a deriver as the class the reader reads it from
 // (D74): `@deriver({ schemas: ["<type>", ...], ... })` on an abstract class
 // with no members, or `@deriver()` when it sets nothing. Each schema is the
-// name of an engine type of the API's database, which the schema does not
-// import.
+// name of a table of the API's database, which the schema need not import.
 func (e *emitter) emitDeriver(deriver *ir.Deriver) {
 	if deriver == nil {
 		return
@@ -440,7 +470,7 @@ func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
 		parts = append(parts, "when: ["+strings.Join(conditions, ", ")+"]")
 	}
 	var message []string
-	for _, field := range sortedKeys(def.Message) {
+	for _, field := range slices.Sorted(maps.Keys(def.Message)) {
 		message = append(message, propertyName(field)+": "+quote(def.Message[field]))
 	}
 	parts = append(parts, "message: "+objectLiteral(message))
@@ -533,6 +563,23 @@ func seedRolesArgs(seeds []*ir.RoleSeed) string {
 	return "[" + strings.Join(roles, ", ") + "]"
 }
 
+// seedRowsArgs renders @seedRows's rows (#625), each as the JSON value the
+// IR holds, keys sorted, and its key when the schema names one.
+func seedRowsArgs(seeds *ir.SeedRows) string {
+	rows := make([]string, 0, len(seeds.Rows))
+	for _, row := range seeds.Rows {
+		var value any
+		if data, err := json.Marshal(row); err == nil && json.Unmarshal(data, &value) == nil {
+			rows = append(rows, valueLiteral(value))
+		}
+	}
+	args := "[" + strings.Join(rows, ", ") + "]"
+	if len(seeds.Key) > 0 {
+		args += ", " + objectLiteral([]string{"key: " + stringListLiteral(seeds.Key)})
+	}
+	return args
+}
+
 // emitJob renders a job as the class the reader reads it from (D52):
 // `@job({ ... })` on an abstract class with no members.
 func (e *emitter) emitJob(job *ir.Job) {
@@ -566,7 +613,7 @@ func (e *emitter) emitJob(job *ir.Job) {
 // a scalar must use a namespaced name and carry no metadata beyond its
 // language primitive (the scalar registry owns the rich metadata).
 func (e *emitter) checkScalars() {
-	for _, name := range sortedKeys(e.doc.Scalars) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Scalars)) {
 		def := e.doc.Scalars[name]
 		if !strings.Contains(name, ".") {
 			e.failf("scalar %s: TypeScript schemas can only reference namespaced %s scalars", name, naming.Active().ScalarNpmPackage)
@@ -677,14 +724,15 @@ func equalOptionalInt64(left, right *int64) bool {
 }
 
 // sortedTypes returns type names topologically sorted so heritage, @source,
-// @graphMember, @enqueueOnChange and @versionGraph queue targets, and the classes a Stack
+// @graphMember, @enqueueOnChange and @versionGraph queue targets, the tables and queues
+// @references, @attachments and @searchable name, and the classes a Stack
 // declaration names, are declared before the classes that reference them
 // (decorator arguments and extends clauses are value positions in
 // TypeScript: forward references do not compile). The @environment classes come last, in declaration order
 // (ir.EnvironmentNames), since the reader numbers them by their place.
 func (e *emitter) sortedTypes() []string {
 	var names []string
-	for _, name := range sortedKeys(e.doc.Types) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Types)) {
 		if def := e.doc.Types[name]; def == nil || def.Environment == nil {
 			names = append(names, name)
 		}
@@ -739,6 +787,13 @@ func (e *emitter) sortedTypes() []string {
 		}
 		// A Stack declaration names a declared deployable by its class.
 		for _, ref := range stackClassRefs(def) {
+			if _, ok := e.doc.Types[ref]; ok && ref != name {
+				d = append(d, ref)
+			}
+		}
+		// A feature declaration names the tables and queues it keeps to
+		// by their classes (D154, D155).
+		for _, ref := range tableFeatureClassRefs(def) {
 			if _, ok := e.doc.Types[ref]; ok && ref != name {
 				d = append(d, ref)
 			}
@@ -864,15 +919,6 @@ func (e *emitter) ident(name, what string) string {
 func quote(s string) string {
 	out := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s)
 	return `"` + out + `"`
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // parentOf returns the parent type a graph member names, or "".

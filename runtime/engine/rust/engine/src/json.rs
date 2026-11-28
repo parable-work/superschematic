@@ -522,6 +522,25 @@ mod tests {
     }
 
     #[test]
+    fn stringify_writes_the_shared_cases_as_javascript_does() {
+        // The cases every Rust copy of JSON.stringify shares, recorded from
+        // Node.js (runtime/schema/testdata/js_stringify.json).
+        let corpus = parse(include_str!(
+            "../../../../schema/testdata/js_stringify.json"
+        ));
+        let cases = corpus["cases"].as_array().expect("cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let input = case["input"].as_str().expect("an input");
+            assert_eq!(
+                Value::String(stringify(&parse(input))),
+                case["output"],
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
     fn canonical_json_is_rfc_8785() {
         // Members sorted by UTF-16 code units, as RFC 8785's example has
         // them: U+1F600 (a surrogate pair) before U+FB33.

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -53,6 +54,15 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			// containment's (Comments' blocks, #713); on SQLite a read
 			// scans the table.
 			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool { return idx.Type == "GIN" })
+		}
+		if td := schema.Types[out.Tables[i].OriginalName]; td != nil && td.Audience != nil {
+			// An @audience table's effective audience has a GIN index on
+			// Postgres; on SQLite it is a JSON array a read takes apart
+			// with json_each, which no index serves (D182).
+			effective := sqlutil.QuoteIdentifier(codegen.ToSnakeCase(ir.EffectiveAudienceField))
+			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool {
+				return idx.Type == "GIN" && slices.Equal(idx.Columns, []string{effective})
+			})
 		}
 	}
 	if err := sqliteRefusals(out, types); err != nil {
@@ -200,10 +210,13 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	}
 	m.RawSQL = modelRawSQL(pieces)
 	if searchIndex != "" {
-		m.RawSQL = append(m.RawSQL, searchFTSPiece(searchIndex))
+		m.RawSQL = append(m.RawSQL, searchFTSPiece(searchIndex, schema.SearchConfig() == ir.SearchFoldedConfig))
 	}
 	for _, s := range out.RoleSeeds {
 		m.Roles = append(m.Roles, modelRole(s, s.SQLiteInsertSQL(qs), s.SQLiteUpdateSQL(qs)))
+	}
+	for _, s := range out.SeedRows {
+		m.Rows = append(m.Rows, &SeedRow{Table: s.Table, Key: s.Key, Origin: s.Origin, Insert: s.SQLiteInsertSQL(qs)})
 	}
 	m.sort()
 	return m, nil
@@ -219,9 +232,9 @@ const SearchFTSPiece = "search_index_fts"
 // no form of a virtual table: a file that holds them reads back as having
 // run it, and a plan to a schema that adds the index runs it. Its down
 // drops them. A table made @searchable with rows needs reindexSearch once,
-// as on Postgres.
-func searchFTSPiece(index string) *RawSQL {
-	up, down := sqlgen.SearchFTS(index, qs)
+// as on Postgres. fold removes diacritics (#740).
+func searchFTSPiece(index string, fold bool) *RawSQL {
+	up, down := sqlgen.SearchFTS(index, qs, fold)
 	return &RawSQL{ID: SearchFTSPiece, Origin: ir.SearchIndexTypeName, Position: ir.RawSQLAfterIndexes, Statements: up, Down: down, Checksum: sqlutil.StatementsChecksum(up)}
 }
 

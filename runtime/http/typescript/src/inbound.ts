@@ -3,14 +3,15 @@ import { covers } from './auth.js';
 import { activeGrants } from './access.js';
 import type { Bucket } from './bucket.js';
 import { createLogger, type Logger } from './logger.js';
+import type { PlainRepository } from './orm.js';
 import { normaliseAddress, sameId, type ChannelIdentityRow, type Notifier, type ReplyOutcome } from './notify.js';
 import { identityLapsed, partyPrincipal, partyTablesOf, sameUUID, type PartyRef } from './parties.js';
 import type { ChannelAdapter, InboundAttachment, InboundAuthentication, InboundMessage, WebhookRequest } from './providers/channel.js';
 import type { Providers } from './providers/registry.js';
 import type { QueueDefinition } from './queue-core.js';
 import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
-import { RowFeatureError, type RowRef } from './rowfeatures.js';
-import { sha256 } from './sha256.js';
+import type { Attachment, Attachments, RowRef } from './rowfeatures.js';
+import { sha256Hex } from './sha256.js';
 import type { WorkerQueue } from './worker.js';
 
 /*
@@ -69,8 +70,8 @@ message awaiting approval until release sends it.
 Postgres alone, as the notifier is.
 */
 
-/** What became of an inbound message. */
-export type InboundDisposition = 'reply' | 'run' | 'timeline' | 'unknown' | 'lapsed' | 'optOut' | 'verified' | 'ignored';
+/** What became of an inbound message; verifying is a held message settled onto a party whose address a code is sent to (settleOnto). */
+export type InboundDisposition = 'reply' | 'run' | 'timeline' | 'unknown' | 'lapsed' | 'optOut' | 'verified' | 'ignored' | 'verifying';
 
 /** The message of the @runRequests queue an inbound message from a party with an active grant puts on it (D157). */
 export interface RunRequest {
@@ -182,10 +183,26 @@ export interface Inbound {
   principalOf(party: PartyRef, options?: { readonly grant?: string }): Promise<Principal>;
   /** Files a message onto a row as acts, which must read it: the row points back at the message, and holds the message's files. */
   file(input: { readonly message: string; readonly to: RowRef; readonly as: Principal; readonly role?: string }): Promise<void>;
-  /** The messages held in triage, newest first; as holds the triage permission. */
-  triage(as: Principal, options?: { readonly limit?: number }): Promise<MessageRow[]>;
+  /**
+   * The messages held in triage, newest first; as holds the triage
+   * permission. offset skips that many first, and channel keeps those that
+   * came on one kind of channel (sms, email, chat), as the generated triage
+   * routes page them (#746).
+   */
+  triage(as: Principal, options?: { readonly limit?: number; readonly offset?: number; readonly channel?: string }): Promise<MessageRow[]>;
+  /** The ready files a message came with, oldest first, and none when the messages table has no @attachments; as holds the triage permission (#746). */
+  attachmentsOf(as: Principal, message: string): Promise<Attachment[]>;
   /** Closes a message's triage; as holds the triage permission. */
   settle(as: Principal, message: string): Promise<void>;
+  /**
+   * Settles a message held in triage onto a party (#606): adds the
+   * sender's address as the party's identity, and files the message as if
+   * it had come from the party. entered files it now, at the lower trust of
+   * an address entered by hand; verified sends a code to the address, and
+   * files it once the address answers. as holds the triage permission and
+   * reads the party's row; an address that is a user's is refused.
+   */
+  settleOnto(as: Principal, message: string, onto: SettleOnto): Promise<InboundOutcome>;
   /** A party's messages on every channel, newest first; as reads the party's row. */
   timeline(as: Principal, party: PartyRef, options?: { readonly limit?: number }): Promise<MessageRow[]>;
   /** A message's row, or null. */
@@ -195,6 +212,13 @@ export interface Inbound {
    * message handed to handle: the agent dispatcher's (D158), or an app's own.
    */
   runWorker(source: QueueSource, handle: (request: RunRequest) => Promise<void>): WorkerQueue;
+}
+
+/** Whom settleOnto settles a held message onto, and how its address is trusted. */
+export interface SettleOnto {
+  readonly party: PartyRef;
+  /** entered: trusted now, at the lower trust of an address entered by hand; verified: once the address answers a code sent to it. */
+  readonly trust: 'verified' | 'entered';
 }
 
 /** A refusal of an inbound call: no permission, no such party, no conversations tables. */
@@ -207,14 +231,7 @@ export class InboundError extends Error {
 
 type Values = Record<string, unknown>;
 
-interface RepositoryShape {
-  readonly def: { readonly name: string; readonly key: string; readonly notifier?: string; readonly conversations?: string; readonly party?: { readonly title?: string } };
-  findOne(filter: Values, options?: Values): Promise<Values | null>;
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-  createOne(input: Values): Promise<Values>;
-  updateOne(id: unknown, update: Values): Promise<Values>;
-  updateMany(filter: Values, update: Values): Promise<number>;
-}
+type RepositoryShape = Pick<PlainRepository, 'def' | 'findOne' | 'findMany' | 'createOne' | 'updateOne' | 'updateMany'>;
 
 function repositoriesOf(orm: object): [string, RepositoryShape][] {
   return Object.entries(orm).filter((entry): entry is [string, RepositoryShape] => {
@@ -244,10 +261,6 @@ export function emailAuthenticated(authentication: InboundAuthentication | undef
 function authenticationText(authentication: InboundAuthentication | undefined): string {
   if (!authentication) return 'the adapter reported no authentication';
   return `dmarc=${authentication.dmarc ?? 'none'} spf=${authentication.spf ?? 'none'} dkim=${authentication.dkim ?? 'none'}`;
-}
-
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 const CODE = /^[0-9A-Za-z]{4,12}$/u;
@@ -336,13 +349,13 @@ export function createInbound(options: InboundOptions): Inbound {
   /** Stores an inbound message's files on its row through the messages table's @attachments, and answers what could not be. */
   const store = async (message: string, files: readonly InboundAttachment[]): Promise<string | undefined> => {
     if (files.length === 0) return undefined;
-    const attachments = sys().attachments;
-    if (!attachments || !options.bucket) return `${files.length} file(s) dropped: the inbound path has no bucket or the messages table no @attachments`;
+    const attachments: Attachments | undefined = sys().attachments;
+    if (!attachments || !attachments.holds(messageType) || !options.bucket) return `${files.length} file(s) dropped: the inbound path has no bucket or the messages table no @attachments`;
     const dropped: string[] = [];
     for (const file of files) {
       try {
         const begun = await attachments.begin(
-          { to: { table: messageType, key: message }, name: file.name, mediaType: file.mediaType, size: file.bytes.length, sha256: hex(sha256(file.bytes)) },
+          { to: { table: messageType, key: message }, name: file.name, mediaType: file.mediaType, size: file.bytes.length, sha256: sha256Hex(file.bytes) },
           { bucket: options.bucket }
         );
         await options.bucket.put(begun.attachment.objectKey, file.bytes, { contentType: file.mediaType });
@@ -437,6 +450,83 @@ export function createInbound(options: InboundOptions): Inbound {
     return { outcome: 'optOut', message: String(message.id), conversation: String(conversation.id), detail: out ? 'opted out' : 'opted in' };
   };
 
+  // ---- settling a held message onto a party (#606) ----
+
+  /**
+   * Files a held message as if it had come from party through identity:
+   * the party's conversation on its channel, the party on the message and
+   * a reference to the party's row, and with an active grant a run request
+   * in the same transaction, its triage closed; with none, on the party's
+   * timeline and still in triage, as fromParty does.
+   */
+  const fileAsFrom = async (row: Values, identity: Values, party: PartyRef): Promise<InboundOutcome> => {
+    const grants = await activeGrants(orm, { holder: party.key, now: now() });
+    grants.sort((a, b) => new Date(b.startsAt as string).getTime() - new Date(a.startsAt as string).getTime());
+    const grant = grants[0];
+    let conversation: Values = {};
+    await orm.transaction(async (tx: any) => {
+      conversation = await conversationOf(tx, String(row.via), String(row.fromAddress), party, row.subject ? String(row.subject) : undefined);
+      await messages(tx).updateOne(row.id, {
+        conversation: conversation.id,
+        partyTable: party.table,
+        party: party.key,
+        identity: identity.id,
+        trust: identity.trust,
+        disposition: grant ? 'run' : 'timeline',
+        grant: grant?.id ?? null,
+        detail: grant ? `settled onto ${party.table} ${party.key}` : 'settled onto a party that holds no active grant',
+        ...(grant ? { triage: 'closed', triageClosedAt: now() } : {}),
+      });
+      await conversations(tx).updateOne(conversation.id, { lastMessageAt: row.at ?? now() });
+      if (grant) await enqueue(tx, options.runs, { trigger: 'inbound', party, message: sameId(row.id), grant: sameId(grant.id) } satisfies RunRequest);
+    });
+    await refer(orm, String(row.id), party, 'from');
+    return { outcome: grant ? 'run' : 'timeline', message: String(row.id), conversation: String(conversation.id), party, ...(grant ? { grant: sameId(grant.id) } : {}) };
+  };
+
+  /** Files each message settled onto party whose address the code just verified. */
+  const fileSettled = async (kind: string, address: string, party: PartyRef): Promise<void> => {
+    const verified = (await identities().findMany({ kind: { eq: kind }, address: { eq: address }, principalKind: { eq: 'party' }, principal: { eq: party.key }, trust: { eq: 'verified' }, revokedAt: { isNull: true } }, { limit: 10, count: false })).rows;
+    for (const identity of verified) {
+      const waiting = (await messages().findMany({ identity: { eq: identity.id }, disposition: { eq: 'verifying' }, triage: { eq: 'open' } }, { limit: 100, count: false, orderBy: [{ field: 'at' }] })).rows;
+      for (const row of waiting) await fileAsFrom(row, identity, party);
+    }
+  };
+
+  const settleOnto = async (as: Principal, id: string, onto: SettleOnto): Promise<InboundOutcome> => {
+    requirePermission(as, triagePermission, 'settle triage');
+    const row = await messages().findOne({ id: { eq: id } });
+    if (!row || row.direction !== 'inbound' || row.triage !== 'open') throw new InboundError(`message ${id} is not held in triage`);
+    // Whoever settles reads the party's row, as a sender does.
+    const member = partyMember(onto.party.table);
+    const visible = await orm.as(as)[member].findOne({ [(orm[member] as RepositoryShape).def.key]: { eq: onto.party.key } });
+    if (!visible) throw new InboundError(`no party ${onto.party.table} ${onto.party.key}`);
+    const party: PartyRef = { table: onto.party.table, key: sameId(onto.party.key) };
+    const kind = addressKindOf(String(row.via));
+    const address = String(row.fromAddress);
+    const held = (await identities().findMany({ kind: { eq: kind }, address: { eq: address }, revokedAt: { isNull: true } }, { limit: 50, count: false })).rows;
+    // A user shares an address with no one (D157).
+    if (held.some(i => i.principalKind === 'user')) throw new InboundError("the address is a user's: it is no party's");
+    const settledBy = { triageClosedBy: as.subject };
+    let identity: Values | undefined = held.find(i => i.principalKind === 'party' && i.principalTable === party.table && sameUUID(String(i.principal), party.key));
+    if (!identity) {
+      identity = (await options.notifier.addIdentity({ kind, address, principal: { kind: 'party', id: party.key, table: party.table }, trust: onto.trust === 'entered' ? 'entered' : 'unverified' })) as unknown as Values;
+    } else if (onto.trust === 'entered' && (identity.trust === 'unverified' || (await identityLapsed(orm, identity as unknown as ChannelIdentityRow, now())))) {
+      // Entered by hand: trusted from now at the lower trust, a lapsed
+      // identity among them.
+      identity = await identities().updateOne(identity.id, { trust: 'entered', verifiedAt: now() });
+    }
+    const current = (identity.trust === 'verified' || identity.trust === 'entered') && !(await identityLapsed(orm, identity as unknown as ChannelIdentityRow, now()));
+    if (current) {
+      await messages().updateOne(row.id, settledBy);
+      return fileAsFrom({ ...row, ...settledBy }, identity, party);
+    }
+    // Verified: a code goes to the address, and the message waits for it.
+    await messages().updateOne(row.id, { ...settledBy, identity: identity.id, disposition: 'verifying', detail: `settled onto ${party.table} ${party.key}: held until the address answers the code sent to it` });
+    await options.notifier.startVerification(String(identity.id));
+    return { outcome: 'verifying', message: String(row.id), conversation: String(row.conversation), party };
+  };
+
   const receive = async (input: ReceivedMessage): Promise<InboundOutcome> => {
     const kind = addressKindOf(input.channel);
     const address = normaliseAddress(kind, input.from);
@@ -480,6 +570,7 @@ export function createInbound(options: InboundOptions): Inbound {
           if (await options.notifier.confirmIdentity(String(identity.id), input.body.trim())) {
             const party = refOf(identity);
             const { message, conversation } = await recordInbound(input, address, { disposition: 'verified', identity: identity.id, trust: 'verified', detail: 'the identity is verified again' }, party);
+            await fileSettled(kind, address, party);
             return { outcome: 'verified', message: String(message.id), conversation: String(conversation.id), party };
           }
         }
@@ -492,6 +583,7 @@ export function createInbound(options: InboundOptions): Inbound {
       if (reply.outcome === 'verified') {
         const party = reply.principal?.kind === 'party' && reply.principal.table ? { table: reply.principal.table, key: sameId(reply.principal.id) } : undefined;
         const { message, conversation } = await recordInbound(input, address, { disposition: 'verified', detail: 'the address is verified' }, party);
+        if (party) await fileSettled(kind, address, party);
         return { outcome: 'verified', message: String(message.id), conversation: String(conversation.id), ...(party ? { party } : {}) };
       }
     }
@@ -626,16 +718,17 @@ export function createInbound(options: InboundOptions): Inbound {
     if (!seen) throw new InboundError(`${input.to.table} ${input.to.key} is not there`);
     const role = input.role ?? 'about';
     await refer(orm, input.message, input.to, role);
-    const attachments = sys().attachments;
-    if (!attachments) return;
+    // Only a messages table with @attachments has files to file, and only a
+    // row of a table with them takes one: any other row gets the reference
+    // alone.
+    const attachments: Attachments | undefined = sys().attachments;
+    if (!attachments || !attachments.holds(messageType) || !attachments.holds(input.to.table)) return;
+    // Filing is idempotent, as the reference is: a run request whose handler
+    // failed after filing is run again, and the row takes no file twice.
+    const filed = new Set((await attachments.list(input.to)).map(file => file.filedFrom));
     for (const attachment of await attachments.list({ table: messageType, key: input.message })) {
-      try {
-        await attachments.file({ table: messageType, id: attachment.id, to: input.to, role });
-      } catch (err) {
-        // A row of a table that holds no files gets the reference alone.
-        if (err instanceof RowFeatureError && err.code === 'not_a_holder') return;
-        throw err;
-      }
+      if (filed.has(`${messageType}:${attachment.key}:${attachment.id}`)) continue;
+      await attachments.file({ table: messageType, id: attachment.id, to: input.to, role });
     }
   };
 
@@ -661,7 +754,22 @@ export function createInbound(options: InboundOptions): Inbound {
     file,
     async triage(as, opts = {}) {
       requirePermission(as, triagePermission, 'read triage');
-      return (await messages().findMany({ triage: { eq: 'open' } }, { limit: opts.limit ?? 50, count: false, orderBy: [{ field: 'at', desc: true }] })).rows as MessageRow[];
+      const where = { triage: { eq: 'open' }, ...(opts.channel ? { via: { eq: opts.channel } } : {}) };
+      return (
+        await messages().findMany(where, {
+          limit: opts.limit ?? 50,
+          ...(opts.offset ? { offset: opts.offset } : {}),
+          count: false,
+          orderBy: [{ field: 'at', desc: true }, { field: 'id', desc: true }],
+        })
+      ).rows as MessageRow[];
+    },
+    async attachmentsOf(as, message) {
+      requirePermission(as, triagePermission, 'read triage');
+      // Only a messages table with @attachments holds files; no other is asked.
+      const attachments: Attachments | undefined = sys().attachments;
+      if (!attachments || !attachments.holds(messageType)) return [];
+      return (await attachments.list({ table: messageType, key: message })) as Attachment[];
     },
     async settle(as, id) {
       requirePermission(as, triagePermission, 'settle triage');
@@ -669,6 +777,7 @@ export function createInbound(options: InboundOptions): Inbound {
       if (!row || row.triage !== 'open') throw new InboundError(`message ${id} is not held in triage`);
       await messages().updateOne(row.id, { triage: 'closed', triageClosedBy: as.subject, triageClosedAt: now() });
     },
+    settleOnto,
     async timeline(as, party, opts = {}) {
       const member = partyMember(party.table);
       const visible = await orm.as(as)[member].findOne({ [(orm[member] as RepositoryShape).def.key]: { eq: party.key } });

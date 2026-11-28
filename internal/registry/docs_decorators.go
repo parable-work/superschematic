@@ -2,7 +2,8 @@ package registry
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -120,7 +121,7 @@ func operationMCP(args []any, invocation ToolInvocationPolicy) (*ir.OperationMCP
 		return nil, ArgErrorf(0, "@mcp config must be an object literal")
 	}
 	out := &ir.OperationMCP{}
-	for _, key := range sortedKeys(cfg) {
+	for _, key := range slices.Sorted(maps.Keys(cfg)) {
 		value := cfg[key]
 		switch key {
 		case "handle", "reason":
@@ -191,7 +192,7 @@ func operationDocs(args []any) (*ir.OperationDocs, error) {
 		return nil, ArgErrorf(0, "@docs config must be an object literal")
 	}
 	out := &ir.OperationDocs{MappingStatus: ir.DocsMappingStatusMapped}
-	for _, key := range sortedKeys(cfg) {
+	for _, key := range slices.Sorted(maps.Keys(cfg)) {
 		switch key {
 		case "errors":
 			docErrors, err := operationDocsErrors(cfg[key])
@@ -285,7 +286,7 @@ func operationDocsErrors(value any) ([]ir.OperationDocsError, error) {
 			return nil, ArgErrorf(0, "@docs errors must be a non-empty array of object literals")
 		}
 		var docError ir.OperationDocsError
-		for _, key := range sortedKeys(entry) {
+		for _, key := range slices.Sorted(maps.Keys(entry)) {
 			text, ok := entry[key].(string)
 			if !ok {
 				return nil, ArgErrorf(0, "@docs errors %s must be a string literal", key)
@@ -338,13 +339,4 @@ func setFieldText(field *ir.FieldDef, name string, target *string, args []any) e
 	}
 	*target = text
 	return nil
-}
-
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

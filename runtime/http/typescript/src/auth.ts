@@ -46,8 +46,12 @@ export interface Principal {
    * Absent for a user, who reaches rows through roles and row rules.
    */
   readonly grants?: readonly GrantReach[];
-  /** The credential the call came with, for the access log (D114, D156): an API key's or a grant's id; absent for a session. */
-  readonly credential?: { readonly kind: 'apiKey' | 'grant'; readonly id: string };
+  /**
+   * The credential the call came with, for the access log (D114, D156): an
+   * API key's, a grant's or an OAuth grant's id (#695); absent for a
+   * session.
+   */
+  readonly credential?: { readonly kind: 'apiKey' | 'grant' | 'oauth'; readonly id: string };
   /**
    * How the authenticator verified the principal for this call (D200),
    * which an Approvals requirement's proof reads: when its session last
@@ -105,6 +109,35 @@ export interface GrantReach {
 export type Authenticator = ((ctx: RequestContext) => Promise<Principal | null>) & {
   readonly readsAuthorization?: boolean;
 };
+
+/**
+ * The authenticator of a route the router does not mount (D152, D153,
+ * D155): authenticate, called for a request alone, with the request's
+ * headers, its method and path, and its Bearer token as the Hono adapter
+ * reads it. A route that is no operation has no operation spec, path
+ * captures or request id of the router's, and an authenticator that reads
+ * them reads them empty.
+ */
+export function requestAuthenticator(authenticate: Authenticator): (request: Request) => Promise<Principal | null> {
+  return request => {
+    const url = new URL(request.url);
+    const header = request.headers.get('authorization') ?? '';
+    const bearer = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+    const ctx = {
+      requestId: request.headers.get('x-request-id') ?? '',
+      method: request.method,
+      path: url.pathname,
+      headers: request.headers,
+      raw: request,
+      pathParams: {},
+      query: url.searchParams,
+      principal: null,
+      signal: request.signal,
+      ...(bearer !== '' && !authenticate.readsAuthorization ? { bearerToken: bearer } : {}),
+    };
+    return authenticate(ctx as unknown as RequestContext);
+  };
+}
 
 /** Reports whether `held` satisfies `required`; an empty `required` must be satisfied. */
 export type PermissionMatcher = (held: readonly string[], required: readonly string[]) => boolean;

@@ -8,6 +8,7 @@ export default defineConfig({
   kind: SchemaKind.API,
   public: true,
   authDb: ShopDb,
+  dependencies: [ShopDb],
   // Product images (D54): the implementation's Deps holds the bucket.
   buckets: [ShopMedia],
   // shop-cache (D75): every replica's Deps holds the memory store, which

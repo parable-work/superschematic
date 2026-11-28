@@ -150,6 +150,24 @@ func TestValidateType_RequiredEmptyString(t *testing.T) {
 	assert.Equal(t, []ValidationError{{Validator: "required", Message: "required field"}}, errs.GetFieldErrors("name"))
 }
 
+// A required String or ID holding "" reports that it is required, and none
+// of its rules: the TS, Rust and Python validators stop there too.
+func TestValidateType_RequiredEmptyBuiltinStringSkipsItsRules(t *testing.T) {
+	minLength := 3
+	s := ir.NewSchema("test", ir.SchemaKindGeneral)
+	s.Types["Account"] = &ir.TypeDef{
+		Name: "Account",
+		Fields: []*ir.FieldDef{
+			{Name: "handle", TypeRef: ir.TypeRef{Name: "String"}, Required: true,
+				ValueRules: ir.ValueRules{ValidateMinLength: &minLength, ValidatePattern: "^[a-z]+$"}},
+		},
+	}
+
+	errs := New(s).ValidateType("Account", map[string]any{"handle": ""})
+
+	assert.Equal(t, []ValidationError{{Validator: "required", Message: "required field"}}, errs.GetFieldErrors("handle"))
+}
+
 func TestValidateType_MaxLength(t *testing.T) {
 	schema := testSchema()
 	v := New(schema)
@@ -1003,6 +1021,26 @@ func TestValidateInput_InvalidFieldPatternFailsClosed(t *testing.T) {
 	brokenErrs := errs.GetFieldErrors("broken")
 	require.Len(t, brokenErrs, 1)
 	assert.Equal(t, "pattern", brokenErrs[0].Validator)
+}
+
+// A scalar's pattern that does not compile fails closed as a field's does:
+// a schema can declare a scalar of its own with any pattern, so New must
+// not panic on it, and every present value is a pattern error.
+func TestValidateInput_InvalidScalarPatternFailsClosed(t *testing.T) {
+	s := ir.NewSchema("test", ir.SchemaKindGeneral)
+	s.Scalars["Acme.Code"] = &ir.ScalarDef{Name: "Acme.Code", Primitive: "String", Pattern: `[`}
+	s.Inputs["CodeInput"] = &ir.TypeDef{
+		Name:   "CodeInput",
+		Kind:   ir.TypeKindInput,
+		Fields: []*ir.FieldDef{{Name: "code", TypeRef: ir.TypeRef{Name: "Acme.Code"}}},
+	}
+	var v *Validator
+	require.NotPanics(t, func() { v = New(s) })
+
+	errs := v.ValidateInput("CodeInput", map[string]any{"code": "x"})
+	codeErrs := errs.GetFieldErrors("code")
+	require.Len(t, codeErrs, 1)
+	assert.Equal(t, "pattern", codeErrs[0].Validator)
 }
 
 func TestValidateInput_FieldStringLengths(t *testing.T) {

@@ -93,6 +93,7 @@ and to `--out` as JSON.
 | `--print-model` | false | print the new version's model as canonical JSON and plan nothing; with `--from-database`, print the file's model, with the `--rename` and `--drop` its plan is given |
 | `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's declared queries are prepared on ([Declared queries](#declared-queries)) |
 | `--documents` | false | take the new version as the arguments: one DB service's schema documents, or `-` for stdin ([Plans from documents](#plans-from-documents)) |
+| `--service` | the name the documents share | with `--documents`, the DB service development mode's General documents lower into ([General documents](#general-documents)) |
 | `--request` | none | answer a plan request, in this file or on stdin with `-`, with one line of JSON ([Plans from documents](#plans-from-documents)) |
 | `--naming` | `<service-dir>/../../superschematic.toml`; with `--documents`, the one found walking up from the first document | naming config file of the new version |
 
@@ -262,6 +263,65 @@ and on Postgres a declared query, which a plan from documents does not
 prepare ([Declared queries](#declared-queries)). The documents carry no
 config, so the model takes the `sql` options of a config that sets none,
 and no reader stands beside them.
+
+### General documents
+
+Development mode's schemas are General documents, each an instance type
+and its behaviors (D117). Documents that are all General plan as the
+tables `format --to=ts` writes them as:
+
+- Each document's instance type, the type named like the document or its
+  only type, is a table. One that marks no field key is keyed by `id`, a
+  UUID the database makes, as development mode keys it.
+- A behavior on the type whose declaration names a value field is
+  anchored on a field of that name. A Workflow is the field `status:
+  Workflow<{ ... }>`, with its `status` and `status_entered_at` columns. A
+  type that already has a field of that name is refused.
+- Every other behavior on the type is one the table implements, listed
+  before the field behaviors, as TypeScript reads a class.
+- A type's description and its fields' are their comments.
+
+The documents become one DB service's. `--service`, or a request's
+`service`, names it; with none, it is the name the documents share, so
+one General document is the service of its own name:
+
+```sh
+superschematic migrate plan --documents batches.schema.json jobs.schema.json \
+  workers.schema.json --service jobs-db --dialect sqlite --out plan.json
+```
+
+A mix of General documents and a DB service's documents is refused as
+documents of two kinds.
+
+### Export a runtime database
+
+`migrate export` moves a runtime database to compiled mode (D117). No row
+moves. It reads the record of the database's last publish and the model
+the publish took the database to, through the runner's `record` command,
+and writes the DB service a build takes the database over with:
+
+```sh
+superschematic migrate export --database-url runtime.db --out schemas/services/jobs-db
+superschematic migrate plan schemas/services/jobs-db --dialect sqlite \
+  --from schemas/services/jobs-db/model.json
+```
+
+| File | What it holds |
+| --- | --- |
+| `schema.config.ts` | the service's name, its kind, and its dialect: `sql: { dialects: ["postgres", "sqlite"] }` for a SQLite database |
+| `src/<type>.schema.ts` | each published document in TypeScript, named after its instance type in kebab case: the table form, General documents lowered |
+| `model.json` | the model the database recorded |
+
+The build's first plan, from `model.json`, is empty unless the compiler
+changed, so the generated servers take the tables over as they are. The
+database keeps `superschematic_runtime`, which no compiled server reads. The
+service directory needs the package files a schemas root gives a service,
+as `superschematic new service` writes them. A file that exists is not
+replaced without `--force`.
+
+Export refuses a database no publish of runtime mode has reached, one
+whose service has a plan in progress or is past the record's model, and
+documents this compiler resolves to another model than the one recorded.
 
 ## Phases
 
@@ -467,6 +527,51 @@ the subject `role/<table>/<name>`:
 | a seed is removed | nothing: the role stays, since users may hold it |
 
 `create.sql` inserts every seeded role.
+
+## Seeded rows
+
+`@seedRows<T>(rows, { key? })` on any table of a DB service declares rows
+the table holds from its first migration on (#625): policy an app keeps as
+data, such as everyone's notice preference or a channel kind's trust. Each
+row gives its fields' values by name: text, a number, a boolean, `null`, a
+list for a list field, any JSON value for a JSON field. A field a row
+leaves out takes its column's default. The build checks each value as it
+checks a default, and refuses a field that is a relation, a list of
+related rows, or a secret.
+
+```ts
+@seedRows<ChannelTrust>([
+  { channelKind: "sms", level: "low", permissions: [] },
+  { channelKind: "email", level: "standard", permissions: null },
+])
+@notifier("channelTrust")
+export abstract class ChannelTrust {}
+```
+
+A row is identified by its key: the fields `key` names, else the table's
+key when every row gives it, else the first unique field, then the first
+unique index, that every row gives. A table with none of them names its
+key; two rows of one key are refused. `null` is a value of a key, so
+`{ key: ["principal", "eventKind", "urgency"] }` identifies a row of no
+principal.
+
+Each row's insert, in `create.sql` and in a plan, on Postgres and on
+SQLite, adds it unless the table holds a row of its key, and skips one
+another unique constraint refuses (`INSERT ... SELECT ... WHERE NOT EXISTS
+... ON CONFLICT DO NOTHING`), so it may run again and changes nothing the
+second time. Each is a step of its own with the subject
+`row/<table>/<key>`, the key its fields' values as a JSON object:
+
+| Change | Plan |
+| --- | --- |
+| a row is seeded | the insert in `expand`, with no hazard |
+| a seeded row's other values change | nothing: once seeded the row is the app's to edit, and a changed seed reaches only a database that does not hold its key |
+| a seeded row's key changes | the insert of the new key; the row of the old key stays |
+| a seed is removed | nothing: the row stays |
+
+A plan from a SQLite file read back (`--from-database`) holds no rows, so
+it plans every seeded row's insert again, which leaves the rows there
+alone.
 
 ## Raw SQL
 
@@ -979,7 +1084,8 @@ or a column the schema names otherwise is matched with `--rename`
 A table, a column or an index the schema does not declare is in the model
 like any other, and the plan drops it in `contract`, with its hazards.
 The roles `@seedRoles` keeps are rows, so the plan seeds each; the insert
-leaves a role that is there alone.
+leaves a role that is there alone. So are the rows `@seedRows` seeds,
+whose inserts leave a row of their key alone.
 
 Some of what a table's definition may hold has no form in a model: a
 `UNIQUE` written in the definition, whose index SQLite lets no statement
@@ -1211,6 +1317,14 @@ adopt.
 ([A file built by hand](#a-file-built-by-hand)). It opens the file to read
 it alone and refuses one that does not exist.
 
+`record` prints a runtime database's record (D117), the document `apply
+--record` writes: the schema documents of its last publish, their layout,
+each type's version and the model they belong to. With `--model` it
+prints that model, read with the record in one transaction. It refuses a
+database with no record, and one whose service has a plan in progress or
+is at another model. `migrate export` reads a runtime database through it
+([Export a runtime database](#export-a-runtime-database)).
+
 ## Limits
 
 - There are no down plans. Rolling back is a plan from the current version
@@ -1241,3 +1355,8 @@ it alone and refuses one that does not exist.
 - A plan from documents takes one DB service's documents. It resolves no
   other service's types, reads no config and prepares no declared query
   ([Plans from documents](#plans-from-documents)).
+- Lowering General documents rewrites no other config that names a
+  Workflow by its qualified field, such as a Reactions change of
+  `Workflow.status`; Rollups' `Workflow.status` reads the one Workflow
+  as before. A `@display` that labels a Workflow's states is refused on
+  the lowered table, which composes it on a field.

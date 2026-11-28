@@ -15,6 +15,10 @@
 //! `with_keys` seals and opens with: a server's keys are the
 //! [`FieldKeyring`] of the DB service's key secret.
 //!
+//! With the crate's `sqlite` feature, `sqlite::Repositories::new` opens them
+//! over a `rusqlite::Connection` its caller holds, synchronously: a write in
+//! a transaction the caller opened with `TransactionBehavior::Immediate`.
+//!
 //! With its `postgres` feature, `postgres::Repositories::new` opens them
 //! over a tokio-postgres client, asynchronously.
 //!
@@ -77,6 +81,12 @@ pub struct AccountFilter {
     pub id: Option<orm::Equals<IdentityUUID>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<orm::Text<ContactEmail>>,
+    /// The rows some OAuthCode row's user points at, or those none does.
+    #[serde(rename = "referencedByOAuthCodeUser", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_oauth_code_user: Option<orm::ReferencedBy>,
+    /// The rows some OAuthGrant row's user points at, or those none does.
+    #[serde(rename = "referencedByOAuthGrantUser", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_oauth_grant_user: Option<orm::ReferencedBy>,
     /// The rows some Session row's user points at, or those none does.
     #[serde(rename = "referencedBySessionUser", skip_serializing_if = "Option::is_none")]
     pub referenced_by_session_user: Option<orm::ReferencedBy>,
@@ -654,6 +664,523 @@ pub struct NoteFilter {
     /// The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.
     #[serde(rename = "anyOf", skip_serializing_if = "Vec::is_empty")]
     pub any_of: Vec<NoteFilter>,
+}
+
+/// A row of `OAuthClient`.
+///
+/// An OAuth client: a metadata document's, cached, or one that registered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthClientRow {
+    pub id: IdentityUUID,
+    /// The client_id the client is known by: its metadata document's URL, or the id registration made.
+    #[serde(rename = "clientId")]
+    pub client_id: String,
+    /// metadataDocument or registered.
+    pub kind: String,
+    /// What the consent page calls the client.
+    pub name: String,
+    /// The client's home page.
+    #[serde(default)]
+    pub uri: Option<String>,
+    /// The redirects the client may use.
+    #[serde(rename = "redirectUris")]
+    pub redirect_uris: Vec<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the client's metadata document was last fetched.
+    #[serde(default, rename = "refreshedAt")]
+    pub refreshed_at: Option<TemporalDateTime>,
+    /// Until when the metadata document's cache headers keep it.
+    #[serde(default, rename = "freshUntil")]
+    pub fresh_until: Option<TemporalDateTime>,
+    /// When an authorization last named the client.
+    #[serde(default, rename = "lastUsedAt")]
+    pub last_used_at: Option<TemporalDateTime>,
+}
+
+/// What a create of a row of `OAuthClient` sets; a member left unset takes its
+/// column's default, or the schema's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OAuthClientCreate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The client_id the client is known by: its metadata document's URL, or the id registration made.
+    #[serde(rename = "clientId")]
+    pub client_id: String,
+    /// metadataDocument or registered.
+    pub kind: String,
+    /// What the consent page calls the client.
+    pub name: String,
+    /// The client's home page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    /// The redirects the client may use.
+    #[serde(rename = "redirectUris")]
+    pub redirect_uris: Vec<String>,
+    /// When the client's metadata document was last fetched.
+    #[serde(rename = "refreshedAt", skip_serializing_if = "Option::is_none")]
+    pub refreshed_at: Option<TemporalDateTime>,
+    /// Until when the metadata document's cache headers keep it.
+    #[serde(rename = "freshUntil", skip_serializing_if = "Option::is_none")]
+    pub fresh_until: Option<TemporalDateTime>,
+    /// When an authorization last named the client.
+    #[serde(rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<TemporalDateTime>,
+}
+
+/// What an update of a row of `OAuthClient` sets: each member that is `Some`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthClientUpdate {
+    /// The client_id the client is known by: its metadata document's URL, or the id registration made.
+    #[serde(rename = "clientId", skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// metadataDocument or registered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// What the consent page calls the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The client's home page. `Some(None)` sets the column NULL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<Option<String>>,
+    /// The redirects the client may use.
+    #[serde(rename = "redirectUris", skip_serializing_if = "Option::is_none")]
+    pub redirect_uris: Option<Vec<String>>,
+    /// When the client's metadata document was last fetched. `Some(None)` sets the column NULL.
+    #[serde(rename = "refreshedAt", skip_serializing_if = "Option::is_none")]
+    pub refreshed_at: Option<Option<TemporalDateTime>>,
+    /// Until when the metadata document's cache headers keep it. `Some(None)` sets the column NULL.
+    #[serde(rename = "freshUntil", skip_serializing_if = "Option::is_none")]
+    pub fresh_until: Option<Option<TemporalDateTime>>,
+    /// When an authorization last named the client. `Some(None)` sets the column NULL.
+    #[serde(rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<Option<TemporalDateTime>>,
+}
+
+/// The rows of `OAuthClient` a read or a write finds: each member set is one
+/// condition, all of them ANDed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthClientFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "clientId", skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<orm::Text<String>>,
+    #[serde(rename = "createdAt", skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "refreshedAt", skip_serializing_if = "Option::is_none")]
+    pub refreshed_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "freshUntil", skip_serializing_if = "Option::is_none")]
+    pub fresh_until: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<orm::Ordered<TemporalDateTime>>,
+    /// The rows some OAuthCode row's client points at, or those none does.
+    #[serde(rename = "referencedByOAuthCodeClient", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_oauth_code_client: Option<orm::ReferencedBy>,
+    /// The rows some OAuthGrant row's client points at, or those none does.
+    #[serde(rename = "referencedByOAuthGrantClient", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_oauth_grant_client: Option<orm::ReferencedBy>,
+    /// The rows every one of the filters finds, beside the other members (D99).
+    #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
+    pub all_of: Vec<OAuthClientFilter>,
+    /// The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.
+    #[serde(rename = "anyOf", skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<OAuthClientFilter>,
+}
+
+/// A row of `OAuthCode`.
+///
+/// An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthCodeRow {
+    pub id: IdentityUUID,
+    #[serde(rename = "clientId")]
+    pub client_id: IdentityUUID,
+    #[serde(default, rename = "userId")]
+    pub user_id: Option<IdentityUUID>,
+    #[serde(default, rename = "grantId")]
+    pub grant_id: Option<IdentityUUID>,
+    /// The redirect the request named, which the code is bound to.
+    #[serde(rename = "redirectUri")]
+    pub redirect_uri: String,
+    /// The PKCE challenge, S256, which the code's verifier must answer.
+    #[serde(rename = "codeChallenge")]
+    pub code_challenge: String,
+    /// The state the client sent, which the redirect carries back.
+    #[serde(default)]
+    pub state: Option<String>,
+    /// The scope the client asked for, as it sent it.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// The resource the request named, which the code is bound to.
+    pub resource: String,
+    /// The value approve and deny send back, which ties a decision to the request the page read.
+    pub nonce: String,
+    /// The SHA-256 of the code approval made, which only the client holds.
+    #[serde(default, rename = "codeHash")]
+    pub code_hash: Option<CryptoSHA256>,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the request, or once approved its code, ends.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When the code was redeemed; a second redemption revokes its grant.
+    #[serde(default, rename = "usedAt")]
+    pub used_at: Option<TemporalDateTime>,
+}
+
+/// What a create of a row of `OAuthCode` sets; a member left unset takes its
+/// column's default, or the schema's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OAuthCodeCreate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(rename = "clientId")]
+    pub client_id: IdentityUUID,
+    #[serde(rename = "userId", skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<IdentityUUID>,
+    #[serde(rename = "grantId", skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<IdentityUUID>,
+    /// The redirect the request named, which the code is bound to.
+    #[serde(rename = "redirectUri")]
+    pub redirect_uri: String,
+    /// The PKCE challenge, S256, which the code's verifier must answer.
+    #[serde(rename = "codeChallenge")]
+    pub code_challenge: String,
+    /// The state the client sent, which the redirect carries back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// The scope the client asked for, as it sent it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// The resource the request named, which the code is bound to.
+    pub resource: String,
+    /// The value approve and deny send back, which ties a decision to the request the page read.
+    pub nonce: String,
+    /// The SHA-256 of the code approval made, which only the client holds.
+    #[serde(rename = "codeHash", skip_serializing_if = "Option::is_none")]
+    pub code_hash: Option<CryptoSHA256>,
+    /// When the request, or once approved its code, ends.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When the code was redeemed; a second redemption revokes its grant.
+    #[serde(rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<TemporalDateTime>,
+}
+
+/// What an update of a row of `OAuthCode` sets: each member that is `Some`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthCodeUpdate {
+    #[serde(rename = "clientId", skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<IdentityUUID>,
+    /// `Some(None)` sets the column NULL.
+    #[serde(rename = "userId", skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<Option<IdentityUUID>>,
+    /// `Some(None)` sets the column NULL.
+    #[serde(rename = "grantId", skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<Option<IdentityUUID>>,
+    /// The redirect the request named, which the code is bound to.
+    #[serde(rename = "redirectUri", skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
+    /// The PKCE challenge, S256, which the code's verifier must answer.
+    #[serde(rename = "codeChallenge", skip_serializing_if = "Option::is_none")]
+    pub code_challenge: Option<String>,
+    /// The state the client sent, which the redirect carries back. `Some(None)` sets the column NULL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<Option<String>>,
+    /// The scope the client asked for, as it sent it. `Some(None)` sets the column NULL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Option<String>>,
+    /// The resource the request named, which the code is bound to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    /// The value approve and deny send back, which ties a decision to the request the page read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    /// The SHA-256 of the code approval made, which only the client holds. `Some(None)` sets the column NULL.
+    #[serde(rename = "codeHash", skip_serializing_if = "Option::is_none")]
+    pub code_hash: Option<Option<CryptoSHA256>>,
+    /// When the request, or once approved its code, ends.
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<TemporalDateTime>,
+    /// When the code was redeemed; a second redemption revokes its grant. `Some(None)` sets the column NULL.
+    #[serde(rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<Option<TemporalDateTime>>,
+}
+
+/// The rows of `OAuthCode` a read or a write finds: each member set is one
+/// condition, all of them ANDed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthCodeFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "clientId", skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "userId", skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "grantId", skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "redirectUri", skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<orm::Text<String>>,
+    #[serde(rename = "codeChallenge", skip_serializing_if = "Option::is_none")]
+    pub code_challenge: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<orm::Text<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<orm::Text<String>>,
+    #[serde(rename = "codeHash", skip_serializing_if = "Option::is_none")]
+    pub code_hash: Option<orm::Text<CryptoSHA256>>,
+    #[serde(rename = "createdAt", skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<orm::Ordered<TemporalDateTime>>,
+    /// The rows whose client is among the OAuthClient rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<Box<OAuthClientFilter>>,
+    /// The rows whose user is among the Account rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<Box<AccountFilter>>,
+    /// The rows whose grant is among the OAuthGrant rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant: Option<Box<OAuthGrantFilter>>,
+    /// The rows every one of the filters finds, beside the other members (D99).
+    #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
+    pub all_of: Vec<OAuthCodeFilter>,
+    /// The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.
+    #[serde(rename = "anyOf", skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<OAuthCodeFilter>,
+}
+
+/// A row of `OAuthGrant`.
+///
+/// An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthGrantRow {
+    pub id: IdentityUUID,
+    #[serde(rename = "userId")]
+    pub user_id: IdentityUUID,
+    #[serde(rename = "clientId")]
+    pub client_id: IdentityUUID,
+    /// The permissions the grant was given, each held while its user holds it; null for every permission its user holds.
+    #[serde(default)]
+    pub permissions: Option<Vec<String>>,
+    /// The URL of the resource the grant was given for.
+    pub resource: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the grant ends, however often its refresh token rotates.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When the grant's token last authenticated a request, written at most once a minute.
+    #[serde(default, rename = "lastUsedAt")]
+    pub last_used_at: Option<TemporalDateTime>,
+    /// When the grant was revoked, by its user, by an administrator, by a replayed code or refresh token, or when its user was disabled.
+    #[serde(default, rename = "revokedAt")]
+    pub revoked_at: Option<TemporalDateTime>,
+}
+
+/// What a create of a row of `OAuthGrant` sets; a member left unset takes its
+/// column's default, or the schema's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OAuthGrantCreate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(rename = "userId")]
+    pub user_id: IdentityUUID,
+    #[serde(rename = "clientId")]
+    pub client_id: IdentityUUID,
+    /// The permissions the grant was given, each held while its user holds it; null for every permission its user holds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
+    /// The URL of the resource the grant was given for.
+    pub resource: String,
+    /// When the grant ends, however often its refresh token rotates.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When the grant's token last authenticated a request, written at most once a minute.
+    #[serde(rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<TemporalDateTime>,
+    /// When the grant was revoked, by its user, by an administrator, by a replayed code or refresh token, or when its user was disabled.
+    #[serde(rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<TemporalDateTime>,
+}
+
+/// What an update of a row of `OAuthGrant` sets: each member that is `Some`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthGrantUpdate {
+    #[serde(rename = "userId", skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<IdentityUUID>,
+    #[serde(rename = "clientId", skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<IdentityUUID>,
+    /// The permissions the grant was given, each held while its user holds it; null for every permission its user holds. `Some(None)` sets the column NULL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Option<Vec<String>>>,
+    /// The URL of the resource the grant was given for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    /// When the grant ends, however often its refresh token rotates.
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<TemporalDateTime>,
+    /// When the grant's token last authenticated a request, written at most once a minute. `Some(None)` sets the column NULL.
+    #[serde(rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<Option<TemporalDateTime>>,
+    /// When the grant was revoked, by its user, by an administrator, by a replayed code or refresh token, or when its user was disabled. `Some(None)` sets the column NULL.
+    #[serde(rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<Option<TemporalDateTime>>,
+}
+
+/// The rows of `OAuthGrant` a read or a write finds: each member set is one
+/// condition, all of them ANDed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthGrantFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "userId", skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "clientId", skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<orm::Text<String>>,
+    #[serde(rename = "createdAt", skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<orm::Ordered<TemporalDateTime>>,
+    /// The rows whose user is among the Account rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<Box<AccountFilter>>,
+    /// The rows whose client is among the OAuthClient rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<Box<OAuthClientFilter>>,
+    /// The rows some OAuthCode row's grant points at, or those none does.
+    #[serde(rename = "referencedByOAuthCodeGrant", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_oauth_code_grant: Option<orm::ReferencedBy>,
+    /// The rows some OAuthToken row's grant points at, or those none does.
+    #[serde(rename = "referencedByOAuthTokenGrant", skip_serializing_if = "Option::is_none")]
+    pub referenced_by_oauth_token_grant: Option<orm::ReferencedBy>,
+    /// The rows every one of the filters finds, beside the other members (D99).
+    #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
+    pub all_of: Vec<OAuthGrantFilter>,
+    /// The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.
+    #[serde(rename = "anyOf", skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<OAuthGrantFilter>,
+}
+
+/// A row of `OAuthToken`.
+///
+/// An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthTokenRow {
+    pub id: IdentityUUID,
+    #[serde(rename = "grantId")]
+    pub grant_id: IdentityUUID,
+    /// access or refresh.
+    pub kind: String,
+    /// The SHA-256 of the token, which only its client holds.
+    #[serde(rename = "tokenHash")]
+    pub token_hash: CryptoSHA256,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the token ends.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When a refresh token rotated; a second use revokes its grant.
+    #[serde(default, rename = "usedAt")]
+    pub used_at: Option<TemporalDateTime>,
+    /// When the token was revoked.
+    #[serde(default, rename = "revokedAt")]
+    pub revoked_at: Option<TemporalDateTime>,
+}
+
+/// What a create of a row of `OAuthToken` sets; a member left unset takes its
+/// column's default, or the schema's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OAuthTokenCreate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(rename = "grantId")]
+    pub grant_id: IdentityUUID,
+    /// access or refresh.
+    pub kind: String,
+    /// The SHA-256 of the token, which only its client holds.
+    #[serde(rename = "tokenHash")]
+    pub token_hash: CryptoSHA256,
+    /// When the token ends.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When a refresh token rotated; a second use revokes its grant.
+    #[serde(rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<TemporalDateTime>,
+    /// When the token was revoked.
+    #[serde(rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<TemporalDateTime>,
+}
+
+/// What an update of a row of `OAuthToken` sets: each member that is `Some`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthTokenUpdate {
+    #[serde(rename = "grantId", skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<IdentityUUID>,
+    /// access or refresh.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The SHA-256 of the token, which only its client holds.
+    #[serde(rename = "tokenHash", skip_serializing_if = "Option::is_none")]
+    pub token_hash: Option<CryptoSHA256>,
+    /// When the token ends.
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<TemporalDateTime>,
+    /// When a refresh token rotated; a second use revokes its grant. `Some(None)` sets the column NULL.
+    #[serde(rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<Option<TemporalDateTime>>,
+    /// When the token was revoked. `Some(None)` sets the column NULL.
+    #[serde(rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<Option<TemporalDateTime>>,
+}
+
+/// The rows of `OAuthToken` a read or a write finds: each member set is one
+/// condition, all of them ANDed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct OAuthTokenFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(rename = "grantId", skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<orm::Equals<IdentityUUID>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<orm::Text<String>>,
+    #[serde(rename = "tokenHash", skip_serializing_if = "Option::is_none")]
+    pub token_hash: Option<orm::Text<CryptoSHA256>>,
+    #[serde(rename = "createdAt", skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<orm::Ordered<TemporalDateTime>>,
+    #[serde(rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<orm::Ordered<TemporalDateTime>>,
+    /// The rows whose grant is among the OAuthGrant rows the filter finds (D90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant: Option<Box<OAuthGrantFilter>>,
+    /// The rows every one of the filters finds, beside the other members (D99).
+    #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
+    pub all_of: Vec<OAuthTokenFilter>,
+    /// The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row.
+    #[serde(rename = "anyOf", skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<OAuthTokenFilter>,
 }
 
 /// A row of `Request`.
@@ -1699,6 +2226,14 @@ pub const POSTGRES: &str = r#"{
       },
       "referencedBy": [
         {
+          "filter": "referencedByOAuthCodeUser",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.user_id = account.id"
+        },
+        {
+          "filter": "referencedByOAuthGrantUser",
+          "probe": "SELECT 1 FROM oauth_grant WHERE oauth_grant.user_id = account.id"
+        },
+        {
           "filter": "referencedBySessionUser",
           "probe": "SELECT 1 FROM \"session\" WHERE \"session\".user_id = account.id"
         },
@@ -1716,6 +2251,16 @@ pub const POSTGRES: &str = r#"{
         }
       ],
       "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "userId"
+        },
+        {
+          "name": "oauthGrants",
+          "target": "OAuthGrant",
+          "column": "userId"
+        },
         {
           "name": "sessions",
           "target": "Session",
@@ -1866,7 +2411,8 @@ pub const POSTGRES: &str = r#"{
       ],
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "contract",
         "key": "id",
         "keyType": "uuid",
@@ -2209,7 +2755,8 @@ pub const POSTGRES: &str = r#"{
       },
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "document",
         "key": "id",
         "keyType": "uuid",
@@ -2428,7 +2975,8 @@ pub const POSTGRES: &str = r#"{
       },
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "folder",
         "key": "id",
         "keyType": "uuid",
@@ -2856,7 +3404,8 @@ pub const POSTGRES: &str = r#"{
       },
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "note",
         "key": "id",
         "keyType": "uuid",
@@ -2868,6 +3417,1001 @@ pub const POSTGRES: &str = r#"{
         "scope": "project",
         "deletedAt": "deleted_at"
       }
+    },
+    {
+      "name": "OAuthClient",
+      "table": "oauth_client",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_client.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "clientId",
+          "qualified": "oauth_client.client_id",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "kind",
+          "column": "kind",
+          "field": "kind",
+          "qualified": "oauth_client.kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "oauth_client.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "uri",
+          "column": "uri",
+          "field": "uri",
+          "qualified": "oauth_client.uri",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "redirectUris",
+          "column": "redirect_uris",
+          "field": "redirectUris",
+          "qualified": "oauth_client.redirect_uris",
+          "list": true,
+          "required": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_client.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "refreshedAt",
+          "column": "refreshed_at",
+          "field": "refreshedAt",
+          "qualified": "oauth_client.refreshed_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "freshUntil",
+          "column": "fresh_until",
+          "field": "freshUntil",
+          "qualified": "oauth_client.fresh_until",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "oauth_client.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "qualifiedColumns": "\"oauth_client\".\"id\", \"oauth_client\".\"client_id\", \"oauth_client\".\"kind\", \"oauth_client\".\"name\", \"oauth_client\".\"uri\", \"oauth_client\".\"redirect_uris\", \"oauth_client\".\"created_at\", \"oauth_client\".\"refreshed_at\", \"oauth_client\".\"fresh_until\", \"oauth_client\".\"last_used_at\"",
+        "getOne": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE id = $1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_client%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_client%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_client%s",
+        "page": "SELECT %s FROM oauth_client%s%s LIMIT %d",
+        "pageAfterKey": "oauth_client.id %s %s",
+        "pageAfter": "(%s, oauth_client.id) %s ((SELECT %s FROM oauth_client AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_client AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_client.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_client WHERE oauth_client.id = $1)",
+        "insert": "INSERT INTO oauth_client (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_client (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_client SET %s WHERE id = $%d",
+        "versionFence": " AND _version = $%d",
+        "returning": " RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "updateMany": "UPDATE oauth_client SET %s%s",
+        "updatedAt": "updated_at = statement_timestamp()",
+        "updatedBy": "updated_by = $%d",
+        "upsert": "INSERT INTO oauth_client (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\", (xmax = 0) AS _inserted",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_client WHERE id = $1",
+        "deleteIfVersion": "DELETE FROM oauth_client WHERE id = $1 AND _version = $2",
+        "version": "SELECT _version FROM oauth_client WHERE id = $1"
+      },
+      "uniqueKeys": {
+        "clientId": {
+          "conflict": "(client_id)",
+          "keep": "client_id = oauth_client.client_id",
+          "rows": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (client_id) IN (%s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_client.id",
+          "rows": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (id) IN (%s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByOAuthCodeClient",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.client_id = oauth_client.id"
+        },
+        {
+          "filter": "referencedByOAuthGrantClient",
+          "probe": "SELECT 1 FROM oauth_grant WHERE oauth_grant.client_id = oauth_client.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "clientId"
+        },
+        {
+          "name": "oauthGrants",
+          "target": "OAuthGrant",
+          "column": "clientId"
+        }
+      ]
+    },
+    {
+      "name": "OAuthCode",
+      "table": "oauth_code",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_code.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "client",
+          "qualified": "oauth_code.client_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthClient",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "oauth_code.user_id",
+          "uuid": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "grantId",
+          "column": "grant_id",
+          "field": "grant",
+          "qualified": "oauth_code.grant_id",
+          "uuid": true,
+          "relation": "OAuthGrant",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "redirectUri",
+          "column": "redirect_uri",
+          "field": "redirectUri",
+          "qualified": "oauth_code.redirect_uri",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeChallenge",
+          "column": "code_challenge",
+          "field": "codeChallenge",
+          "qualified": "oauth_code.code_challenge",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "state",
+          "column": "state",
+          "field": "state",
+          "qualified": "oauth_code.state",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "scope",
+          "column": "scope",
+          "field": "scope",
+          "qualified": "oauth_code.scope",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "resource",
+          "column": "resource",
+          "field": "resource",
+          "qualified": "oauth_code.resource",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "nonce",
+          "column": "nonce",
+          "field": "nonce",
+          "qualified": "oauth_code.nonce",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeHash",
+          "column": "code_hash",
+          "field": "codeHash",
+          "qualified": "oauth_code.code_hash",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_code.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_code.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "usedAt",
+          "column": "used_at",
+          "field": "usedAt",
+          "qualified": "oauth_code.used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "qualifiedColumns": "\"oauth_code\".\"id\", \"oauth_code\".\"client_id\", \"oauth_code\".\"user_id\", \"oauth_code\".\"grant_id\", \"oauth_code\".\"redirect_uri\", \"oauth_code\".\"code_challenge\", \"oauth_code\".\"state\", \"oauth_code\".\"scope\", \"oauth_code\".\"resource\", \"oauth_code\".\"nonce\", \"oauth_code\".\"code_hash\", \"oauth_code\".\"created_at\", \"oauth_code\".\"expires_at\", \"oauth_code\".\"used_at\"",
+        "getOne": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE id = $1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_code%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_code%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_code%s",
+        "page": "SELECT %s FROM oauth_code%s%s LIMIT %d",
+        "pageAfterKey": "oauth_code.id %s %s",
+        "pageAfter": "(%s, oauth_code.id) %s ((SELECT %s FROM oauth_code AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_code AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_code.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_code WHERE oauth_code.id = $1)",
+        "insert": "INSERT INTO oauth_code (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_code (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_code SET %s WHERE id = $%d",
+        "versionFence": " AND _version = $%d",
+        "returning": " RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "updateMany": "UPDATE oauth_code SET %s%s",
+        "updatedAt": "updated_at = statement_timestamp()",
+        "updatedBy": "updated_by = $%d",
+        "upsert": "INSERT INTO oauth_code (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\", (xmax = 0) AS _inserted",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_code WHERE id = $1",
+        "deleteIfVersion": "DELETE FROM oauth_code WHERE id = $1 AND _version = $2",
+        "version": "SELECT _version FROM oauth_code WHERE id = $1"
+      },
+      "uniqueKeys": {
+        "codeHash": {
+          "conflict": "(code_hash)",
+          "keep": "code_hash = oauth_code.code_hash",
+          "rows": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (code_hash) IN (%s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_code.id",
+          "rows": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (id) IN (%s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "client",
+          "target": "OAuthClient",
+          "probe": "oauth_code.client_id IN (SELECT oauth_client.id FROM oauth_client%s)"
+        },
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "oauth_code.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "grant",
+          "target": "OAuthGrant",
+          "probe": "oauth_code.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)"
+        }
+      ]
+    },
+    {
+      "name": "OAuthGrant",
+      "table": "oauth_grant",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_grant.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "oauth_grant.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "client",
+          "qualified": "oauth_grant.client_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthClient",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "oauth_grant.permissions",
+          "list": true
+        },
+        {
+          "name": "resource",
+          "column": "resource",
+          "field": "resource",
+          "qualified": "oauth_grant.resource",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_grant.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_grant.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "oauth_grant.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "oauth_grant.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"oauth_grant\".\"id\", \"oauth_grant\".\"user_id\", \"oauth_grant\".\"client_id\", \"oauth_grant\".\"permissions\", \"oauth_grant\".\"resource\", \"oauth_grant\".\"created_at\", \"oauth_grant\".\"expires_at\", \"oauth_grant\".\"last_used_at\", \"oauth_grant\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE id = $1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_grant%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_grant%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_grant%s",
+        "page": "SELECT %s FROM oauth_grant%s%s LIMIT %d",
+        "pageAfterKey": "oauth_grant.id %s %s",
+        "pageAfter": "(%s, oauth_grant.id) %s ((SELECT %s FROM oauth_grant AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_grant.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_grant WHERE oauth_grant.id = $1)",
+        "insert": "INSERT INTO oauth_grant (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_grant (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_grant SET %s WHERE id = $%d",
+        "versionFence": " AND _version = $%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE oauth_grant SET %s%s",
+        "updatedAt": "updated_at = statement_timestamp()",
+        "updatedBy": "updated_by = $%d",
+        "upsert": "INSERT INTO oauth_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\", (xmax = 0) AS _inserted",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_grant WHERE id = $1",
+        "deleteIfVersion": "DELETE FROM oauth_grant WHERE id = $1 AND _version = $2",
+        "version": "SELECT _version FROM oauth_grant WHERE id = $1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_grant.id",
+          "rows": "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE (id) IN (%s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByOAuthCodeGrant",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.grant_id = oauth_grant.id"
+        },
+        {
+          "filter": "referencedByOAuthTokenGrant",
+          "probe": "SELECT 1 FROM oauth_token WHERE oauth_token.grant_id = oauth_grant.id"
+        }
+      ],
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "oauth_grant.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "client",
+          "target": "OAuthClient",
+          "probe": "oauth_grant.client_id IN (SELECT oauth_client.id FROM oauth_client%s)"
+        }
+      ],
+      "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "grantId"
+        },
+        {
+          "name": "oauthTokens",
+          "target": "OAuthToken",
+          "column": "grantId"
+        }
+      ]
+    },
+    {
+      "name": "OAuthToken",
+      "table": "oauth_token",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_token.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "grantId",
+          "column": "grant_id",
+          "field": "grant",
+          "qualified": "oauth_token.grant_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthGrant",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "kind",
+          "column": "kind",
+          "field": "kind",
+          "qualified": "oauth_token.kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "oauth_token.token_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_token.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_token.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "usedAt",
+          "column": "used_at",
+          "field": "usedAt",
+          "qualified": "oauth_token.used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "oauth_token.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"oauth_token\".\"id\", \"oauth_token\".\"grant_id\", \"oauth_token\".\"kind\", \"oauth_token\".\"token_hash\", \"oauth_token\".\"created_at\", \"oauth_token\".\"expires_at\", \"oauth_token\".\"used_at\", \"oauth_token\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE id = $1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_token%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_token%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_token%s",
+        "page": "SELECT %s FROM oauth_token%s%s LIMIT %d",
+        "pageAfterKey": "oauth_token.id %s %s",
+        "pageAfter": "(%s, oauth_token.id) %s ((SELECT %s FROM oauth_token AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_token AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_token.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_token WHERE oauth_token.id = $1)",
+        "insert": "INSERT INTO oauth_token (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_token (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_token SET %s WHERE id = $%d",
+        "versionFence": " AND _version = $%d",
+        "returning": " RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE oauth_token SET %s%s",
+        "updatedAt": "updated_at = statement_timestamp()",
+        "updatedBy": "updated_by = $%d",
+        "upsert": "INSERT INTO oauth_token (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\", (xmax = 0) AS _inserted",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_token WHERE id = $1",
+        "deleteIfVersion": "DELETE FROM oauth_token WHERE id = $1 AND _version = $2",
+        "version": "SELECT _version FROM oauth_token WHERE id = $1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_token.id",
+          "rows": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (id) IN (%s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = oauth_token.token_hash",
+          "rows": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (token_hash) IN (%s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "grant",
+          "target": "OAuthGrant",
+          "probe": "oauth_token.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)"
+        }
+      ]
     },
     {
       "name": "Request",
@@ -3004,7 +4548,8 @@ pub const POSTGRES: &str = r#"{
       ],
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "request",
         "key": "id",
         "keyType": "uuid",
@@ -3471,7 +5016,16 @@ pub const POSTGRES: &str = r#"{
       ],
       "behaviors": {
         "owned": [],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "comments": [
+            "listMessages",
+            "getMessage",
+            "listEdits",
+            "listReactions",
+            "listPinned"
+          ]
+        }
       },
       "many": [
         {
@@ -3482,7 +5036,8 @@ pub const POSTGRES: &str = r#"{
       ],
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "unit",
         "key": "id",
         "keyType": "uuid",
@@ -4068,6 +5623,26 @@ pub const POSTGRES: &str = r#"{
         "key": "id",
         "uuid": true
       },
+      "OAuthClient": {
+        "table": "oauth_client",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthCode": {
+        "table": "oauth_code",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthGrant": {
+        "table": "oauth_grant",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthToken": {
+        "table": "oauth_token",
+        "key": "id",
+        "uuid": true
+      },
       "Request": {
         "table": "request",
         "key": "id",
@@ -4182,6 +5757,22 @@ pub mod postgres {
     /// The repository of `Note` on a Postgres client.
     pub type NoteRepository<'a, C> =
         orm::postgres::Typed<'a, C, NoteRow, NoteCreate, NoteUpdate, NoteFilter, IdentityUUID>;
+
+    /// The repository of `OAuthClient` on a Postgres client.
+    pub type OAuthClientRepository<'a, C> =
+        orm::postgres::Typed<'a, C, OAuthClientRow, OAuthClientCreate, OAuthClientUpdate, OAuthClientFilter, IdentityUUID>;
+
+    /// The repository of `OAuthCode` on a Postgres client.
+    pub type OAuthCodeRepository<'a, C> =
+        orm::postgres::Typed<'a, C, OAuthCodeRow, OAuthCodeCreate, OAuthCodeUpdate, OAuthCodeFilter, IdentityUUID>;
+
+    /// The repository of `OAuthGrant` on a Postgres client.
+    pub type OAuthGrantRepository<'a, C> =
+        orm::postgres::Typed<'a, C, OAuthGrantRow, OAuthGrantCreate, OAuthGrantUpdate, OAuthGrantFilter, IdentityUUID>;
+
+    /// The repository of `OAuthToken` on a Postgres client.
+    pub type OAuthTokenRepository<'a, C> =
+        orm::postgres::Typed<'a, C, OAuthTokenRow, OAuthTokenCreate, OAuthTokenUpdate, OAuthTokenFilter, IdentityUUID>;
 
     /// The repository of `Request` on a Postgres client.
     pub type RequestRepository<'a, C> =
@@ -4557,6 +6148,26 @@ pub mod postgres {
             self.0.typed("Note")
         }
 
+        /// The repository of `OAuthClient`.
+        pub fn oauth_client(&self) -> Result<OAuthClientRepository<'_, C>, orm::Error> {
+            self.0.typed("OAuthClient")
+        }
+
+        /// The repository of `OAuthCode`.
+        pub fn oauth_code(&self) -> Result<OAuthCodeRepository<'_, C>, orm::Error> {
+            self.0.typed("OAuthCode")
+        }
+
+        /// The repository of `OAuthGrant`.
+        pub fn oauth_grant(&self) -> Result<OAuthGrantRepository<'_, C>, orm::Error> {
+            self.0.typed("OAuthGrant")
+        }
+
+        /// The repository of `OAuthToken`.
+        pub fn oauth_token(&self) -> Result<OAuthTokenRepository<'_, C>, orm::Error> {
+            self.0.typed("OAuthToken")
+        }
+
         /// The repository of `Request`.
         pub fn request(&self) -> Result<RequestRepository<'_, C>, orm::Error> {
             self.0.typed("Request")
@@ -4595,6 +6206,4059 @@ pub mod postgres {
 
         /// The repository of `UserRoleGrant`.
         pub fn user_role_grant(&self) -> Result<UserRoleGrantRepository<'_, C>, orm::Error> {
+            self.0.typed("UserRoleGrant")
+        }
+    }
+}
+
+/// The tables of `fixture-search-db` and the clauses their statements are written
+/// with, on SQLite.
+#[cfg(feature = "sqlite")]
+pub const SQLITE: &str = r#"{
+  "dialect": "sqlite",
+  "clauses": {
+    "eq": "%s = ?%d",
+    "ne": "%s IS DISTINCT FROM ?%d",
+    "gt": "%s > ?%d",
+    "gte": "%s >= ?%d",
+    "lt": "%s < ?%d",
+    "lte": "%s <= ?%d",
+    "ilike": "%s LIKE ?%d ESCAPE '\\'",
+    "in": "%s IN (%s)",
+    "noneOf": "(%s IN (%s)) IS NOT TRUE",
+    "isNull": "%s IS NULL",
+    "isNotNull": "%s IS NOT NULL",
+    "search": "%s LIKE ?%d ESCAPE '\\'",
+    "exists": "EXISTS (%s)",
+    "notExists": "NOT EXISTS (%s)",
+    "set": "%s = ?%d",
+    "setNull": "%s = NULL",
+    "pageKey": "page_key.%s",
+    "placeholder": "?%d",
+    "default": "",
+    "or": " OR ",
+    "group": "(%s)",
+    "where": " WHERE ",
+    "and": " AND ",
+    "orderBy": " ORDER BY ",
+    "orderTerm": "%s %s",
+    "limit": " LIMIT %d",
+    "offset": " OFFSET %d",
+    "changed": "(%s) IS DISTINCT FROM (%s)",
+    "never": "FALSE",
+    "null": "NULL",
+    "setExcluded": "%s = EXCLUDED.%s",
+    "excluded": "EXCLUDED.%s"
+  },
+  "jsonClauses": {
+    "eq": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    "ne": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    "in": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
+    "noneOf": "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
+    "value": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))"
+  },
+  "defaultLimit": 100,
+  "maxParameters": 32766,
+  "tables": [
+    {
+      "name": "Account",
+      "table": "account",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "account.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "email",
+          "column": "email",
+          "field": "email",
+          "qualified": "account.email",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"email\"",
+        "qualifiedColumns": "\"account\".\"id\", \"account\".\"email\"",
+        "getOne": "SELECT \"id\", \"email\" FROM account WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM account%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM account%s%s%s",
+        "count": "SELECT COUNT(*) FROM account%s",
+        "page": "SELECT %s FROM account%s%s LIMIT %d",
+        "pageAfterKey": "account.id %s %s",
+        "pageAfter": "(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", account.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM account WHERE account.id = ?1)",
+        "insert": "INSERT INTO account (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO account (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE account SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"email\"",
+        "updateMany": "UPDATE account SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO account (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"email\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM account WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM account WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM account WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "email": {
+          "conflict": "(email)",
+          "keep": "email = account.email",
+          "rows": "SELECT \"id\", \"email\" FROM account WHERE (email) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = account.id",
+          "rows": "SELECT \"id\", \"email\" FROM account WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByOAuthCodeUser",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.user_id = account.id"
+        },
+        {
+          "filter": "referencedByOAuthGrantUser",
+          "probe": "SELECT 1 FROM oauth_grant WHERE oauth_grant.user_id = account.id"
+        },
+        {
+          "filter": "referencedBySessionUser",
+          "probe": "SELECT 1 FROM \"session\" WHERE \"session\".user_id = account.id"
+        },
+        {
+          "filter": "referencedByUserApiKeyUser",
+          "probe": "SELECT 1 FROM user_api_key WHERE user_api_key.user_id = account.id"
+        },
+        {
+          "filter": "referencedByUserCredentialUser",
+          "probe": "SELECT 1 FROM user_credential WHERE user_credential.user_id = account.id"
+        },
+        {
+          "filter": "referencedByUserRoleGrantUser",
+          "probe": "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = account.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "userId"
+        },
+        {
+          "name": "oauthGrants",
+          "target": "OAuthGrant",
+          "column": "userId"
+        },
+        {
+          "name": "sessions",
+          "target": "Session",
+          "column": "userId"
+        },
+        {
+          "name": "userApiKeys",
+          "target": "UserApiKey",
+          "column": "userId"
+        },
+        {
+          "name": "userCredentials",
+          "target": "UserCredential",
+          "column": "userId"
+        },
+        {
+          "name": "userRoleGrants",
+          "target": "UserRoleGrant",
+          "column": "userId"
+        }
+      ]
+    },
+    {
+      "name": "Contract",
+      "table": "contract",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "contract.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "contract.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "summary",
+          "column": "summary",
+          "field": "summary",
+          "qualified": "contract.summary",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "terms",
+          "column": "terms",
+          "field": "terms",
+          "qualified": "contract.terms",
+          "encrypted": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"name\", \"summary\", \"terms\"",
+        "qualifiedColumns": "\"contract\".\"id\", \"contract\".\"name\", \"contract\".\"summary\", \"contract\".\"terms\"",
+        "getOne": "SELECT \"id\", \"name\", \"summary\", \"terms\" FROM contract WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM contract%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM contract%s%s%s",
+        "count": "SELECT COUNT(*) FROM contract%s",
+        "page": "SELECT %s FROM contract%s%s LIMIT %d",
+        "pageAfterKey": "contract.id %s %s",
+        "pageAfter": "(%s, contract.id) %s ((SELECT %s FROM contract AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM contract AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", contract.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM contract WHERE contract.id = ?1)",
+        "insert": "INSERT INTO contract (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO contract (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE contract SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"name\", \"summary\", \"terms\"",
+        "updateMany": "UPDATE contract SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO contract (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"summary\", \"terms\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM contract WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM contract WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM contract WHERE id = ?1",
+        "stale": "SELECT id, terms FROM contract WHERE terms NOT LIKE ?1 ORDER BY id LIMIT ?2",
+        "reseal": "UPDATE contract SET terms = ?1 WHERE id = ?2 AND terms IS NOT DISTINCT FROM ?3"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = contract.id",
+          "rows": "SELECT \"id\", \"name\", \"summary\", \"terms\" FROM contract WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByContractPartyContract",
+          "probe": "SELECT 1 FROM contract_party WHERE contract_party.contract_id = contract.id"
+        },
+        {
+          "filter": "referencedByUnitContract",
+          "probe": "SELECT 1 FROM unit WHERE unit.contract_id = contract.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "parties",
+          "target": "ContractParty",
+          "column": "contractId"
+        },
+        {
+          "name": "units",
+          "target": "Unit",
+          "column": "contractId"
+        }
+      ],
+      "searchable": {
+        "index": "search_index",
+        "document": "",
+        "table": "contract",
+        "key": "id",
+        "keyType": "text",
+        "uuid": true,
+        "title": "\"name\"",
+        "body": [
+          "summary"
+        ],
+        "fts": "search_index_fts"
+      }
+    },
+    {
+      "name": "ContractParty",
+      "table": "contract_party",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "contract_party.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "contractId",
+          "column": "contract_id",
+          "field": "contract",
+          "qualified": "contract_party.contract_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Contract",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "party",
+          "column": "party",
+          "field": "party",
+          "qualified": "contract_party.party",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"contract_id\", \"party\"",
+        "qualifiedColumns": "\"contract_party\".\"id\", \"contract_party\".\"contract_id\", \"contract_party\".\"party\"",
+        "getOne": "SELECT \"id\", \"contract_id\", \"party\" FROM contract_party WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM contract_party%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM contract_party%s%s%s",
+        "count": "SELECT COUNT(*) FROM contract_party%s",
+        "page": "SELECT %s FROM contract_party%s%s LIMIT %d",
+        "pageAfterKey": "contract_party.id %s %s",
+        "pageAfter": "(%s, contract_party.id) %s ((SELECT %s FROM contract_party AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM contract_party AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", contract_party.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM contract_party WHERE contract_party.id = ?1)",
+        "insert": "INSERT INTO contract_party (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO contract_party (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE contract_party SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"contract_id\", \"party\"",
+        "updateMany": "UPDATE contract_party SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO contract_party (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"contract_id\", \"party\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM contract_party WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM contract_party WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM contract_party WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = contract_party.id",
+          "rows": "SELECT \"id\", \"contract_id\", \"party\" FROM contract_party WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "contract",
+          "target": "Contract",
+          "probe": "contract_party.contract_id IN (SELECT contract.id FROM contract%s)"
+        }
+      ]
+    },
+    {
+      "name": "Document",
+      "table": "document",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "document.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "folderId",
+          "column": "folder_id",
+          "field": "folder",
+          "qualified": "document.folder_id",
+          "uuid": true,
+          "relation": "Folder",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "title",
+          "column": "title",
+          "field": "title",
+          "qualified": "document.title",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "text",
+          "column": "text",
+          "field": "text",
+          "qualified": "document.text",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "document.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdBy",
+          "column": "created_by",
+          "field": "createdBy",
+          "qualified": "document.created_by",
+          "uuid": true,
+          "required": true,
+          "audit": "createdBy",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "audience",
+          "column": "audience",
+          "field": "audience",
+          "qualified": "document.audience",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "audienceNamed",
+          "column": "audience_named",
+          "field": "audienceNamed",
+          "qualified": "document.audience_named",
+          "list": true,
+          "uuid": true
+        },
+        {
+          "name": "agentAccess",
+          "column": "agent_access",
+          "field": "agentAccess",
+          "qualified": "document.agent_access",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "effectiveAudience",
+          "column": "effective_audience",
+          "field": "effectiveAudience",
+          "qualified": "document.effective_audience",
+          "list": true,
+          "uuid": true
+        },
+        {
+          "name": "effectiveAgents",
+          "column": "effective_agents",
+          "field": "effectiveAgents",
+          "qualified": "document.effective_agents",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"folder_id\", \"title\", \"text\", \"created_at\", \"created_by\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "qualifiedColumns": "\"document\".\"id\", \"document\".\"folder_id\", \"document\".\"title\", \"document\".\"text\", \"document\".\"created_at\", \"document\".\"created_by\", \"document\".\"audience\", \"document\".\"audience_named\", \"document\".\"agent_access\", \"document\".\"effective_audience\", \"document\".\"effective_agents\"",
+        "getOne": "SELECT \"id\", \"folder_id\", \"title\", \"text\", \"created_at\", \"created_by\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\" FROM document WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM document%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM document%s%s%s",
+        "count": "SELECT COUNT(*) FROM document%s",
+        "page": "SELECT %s FROM document%s%s LIMIT %d",
+        "pageAfterKey": "document.id %s %s",
+        "pageAfter": "(%s, document.id) %s ((SELECT %s FROM document AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM document AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", document.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM document WHERE document.id = ?1)",
+        "insert": "INSERT INTO document (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO document (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE document SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"folder_id\", \"title\", \"text\", \"created_at\", \"created_by\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "updateMany": "UPDATE document SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO document (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"folder_id\", \"title\", \"text\", \"created_at\", \"created_by\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM document WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM document WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM document WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = document.id",
+          "rows": "SELECT \"id\", \"folder_id\", \"title\", \"text\", \"created_at\", \"created_by\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\" FROM document WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "folder",
+          "target": "Folder",
+          "probe": "document.folder_id IN (SELECT folder.id FROM folder%s)"
+        }
+      ],
+      "audience": {
+        "effective": "document.effective_audience",
+        "agents": "document.effective_agents"
+      },
+      "searchable": {
+        "index": "search_index",
+        "document": "",
+        "table": "document",
+        "key": "id",
+        "keyType": "text",
+        "uuid": true,
+        "title": "title",
+        "body": [
+          "text"
+        ],
+        "audience": {
+          "effective": "effective_audience",
+          "agents": "effective_agents"
+        },
+        "fts": "search_index_fts"
+      }
+    },
+    {
+      "name": "Folder",
+      "table": "folder",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "folder.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "folder.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "owner",
+          "column": "\"owner\"",
+          "field": "owner",
+          "qualified": "folder.\"owner\"",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "folder.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "audience",
+          "column": "audience",
+          "field": "audience",
+          "qualified": "folder.audience",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "audienceNamed",
+          "column": "audience_named",
+          "field": "audienceNamed",
+          "qualified": "folder.audience_named",
+          "list": true,
+          "uuid": true
+        },
+        {
+          "name": "agentAccess",
+          "column": "agent_access",
+          "field": "agentAccess",
+          "qualified": "folder.agent_access",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "effectiveAudience",
+          "column": "effective_audience",
+          "field": "effectiveAudience",
+          "qualified": "folder.effective_audience",
+          "list": true,
+          "uuid": true
+        },
+        {
+          "name": "effectiveAgents",
+          "column": "effective_agents",
+          "field": "effectiveAgents",
+          "qualified": "folder.effective_agents",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"name\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "qualifiedColumns": "\"folder\".\"id\", \"folder\".\"name\", \"folder\".\"owner\", \"folder\".\"created_at\", \"folder\".\"audience\", \"folder\".\"audience_named\", \"folder\".\"agent_access\", \"folder\".\"effective_audience\", \"folder\".\"effective_agents\"",
+        "getOne": "SELECT \"id\", \"name\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\" FROM folder WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM folder%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM folder%s%s%s",
+        "count": "SELECT COUNT(*) FROM folder%s",
+        "page": "SELECT %s FROM folder%s%s LIMIT %d",
+        "pageAfterKey": "folder.id %s %s",
+        "pageAfter": "(%s, folder.id) %s ((SELECT %s FROM folder AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM folder AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", folder.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM folder WHERE folder.id = ?1)",
+        "insert": "INSERT INTO folder (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO folder (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE folder SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"name\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "updateMany": "UPDATE folder SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO folder (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM folder WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM folder WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM folder WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = folder.id",
+          "rows": "SELECT \"id\", \"name\", \"owner\", \"created_at\", \"audience\", \"audience_named\", \"agent_access\", \"effective_audience\", \"effective_agents\" FROM folder WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByDocumentFolder",
+          "probe": "SELECT 1 FROM document WHERE document.folder_id = folder.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "documents",
+          "target": "Document",
+          "column": "folderId"
+        }
+      ],
+      "audience": {
+        "effective": "folder.effective_audience",
+        "agents": "folder.effective_agents"
+      },
+      "searchable": {
+        "index": "search_index",
+        "document": "",
+        "table": "folder",
+        "key": "id",
+        "keyType": "text",
+        "uuid": true,
+        "title": "\"name\"",
+        "audience": {
+          "effective": "effective_audience",
+          "agents": "effective_agents"
+        },
+        "fts": "search_index_fts"
+      }
+    },
+    {
+      "name": "Grant",
+      "table": "\"grant\"",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "\"grant\".id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "holder",
+          "column": "holder",
+          "field": "holder",
+          "qualified": "\"grant\".holder",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "holderKind",
+          "column": "holder_kind",
+          "field": "holderKind",
+          "qualified": "\"grant\".holder_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "role",
+          "column": "role",
+          "field": "role",
+          "qualified": "\"grant\".role",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "targetType",
+          "column": "target_type",
+          "field": "targetType",
+          "qualified": "\"grant\".target_type",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "targetId",
+          "column": "target_id",
+          "field": "targetId",
+          "qualified": "\"grant\".target_id",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "startsAt",
+          "column": "starts_at",
+          "field": "startsAt",
+          "qualified": "\"grant\".starts_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "endsAt",
+          "column": "ends_at",
+          "field": "endsAt",
+          "qualified": "\"grant\".ends_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "endsWhenField",
+          "column": "ends_when_field",
+          "field": "endsWhenField",
+          "qualified": "\"grant\".ends_when_field",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "endsWhenState",
+          "column": "ends_when_state",
+          "field": "endsWhenState",
+          "qualified": "\"grant\".ends_when_state",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "\"grant\".revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "\"grant\".token_hash",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "\"grant\".created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdBy",
+          "column": "created_by",
+          "field": "createdBy",
+          "qualified": "\"grant\".created_by",
+          "uuid": true,
+          "audit": "createdBy",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\"",
+        "qualifiedColumns": "\"grant\".\"id\", \"grant\".\"holder\", \"grant\".\"holder_kind\", \"grant\".\"role\", \"grant\".\"target_type\", \"grant\".\"target_id\", \"grant\".\"starts_at\", \"grant\".\"ends_at\", \"grant\".\"ends_when_field\", \"grant\".\"ends_when_state\", \"grant\".\"revoked_at\", \"grant\".\"token_hash\", \"grant\".\"created_at\", \"grant\".\"created_by\"",
+        "getOne": "SELECT \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\" FROM \"grant\" WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM \"grant\"%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM \"grant\"%s%s%s",
+        "count": "SELECT COUNT(*) FROM \"grant\"%s",
+        "page": "SELECT %s FROM \"grant\"%s%s LIMIT %d",
+        "pageAfterKey": "\"grant\".id %s %s",
+        "pageAfter": "(%s, \"grant\".id) %s ((SELECT %s FROM \"grant\" AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM \"grant\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", \"grant\".id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM \"grant\" WHERE \"grant\".id = ?1)",
+        "insert": "INSERT INTO \"grant\" (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO \"grant\" (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE \"grant\" SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\"",
+        "updateMany": "UPDATE \"grant\" SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO \"grant\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM \"grant\" WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM \"grant\" WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM \"grant\" WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = \"grant\".id",
+          "rows": "SELECT \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\" FROM \"grant\" WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = \"grant\".token_hash",
+          "rows": "SELECT \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\" FROM \"grant\" WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "access": "grants"
+    },
+    {
+      "name": "Note",
+      "table": "note",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "note.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "project",
+          "column": "project",
+          "field": "project",
+          "qualified": "note.project",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "title",
+          "column": "title",
+          "field": "title",
+          "qualified": "note.title",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "text",
+          "column": "text",
+          "field": "text",
+          "qualified": "note.text",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "deletedAt",
+          "column": "deleted_at",
+          "field": "deletedAt",
+          "qualified": "note.deleted_at",
+          "timestamp": true,
+          "audit": "deletedAt"
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"project\", \"title\", \"text\", \"deleted_at\"",
+        "qualifiedColumns": "\"note\".\"id\", \"note\".\"project\", \"note\".\"title\", \"note\".\"text\", \"note\".\"deleted_at\"",
+        "getOne": "SELECT \"id\", \"project\", \"title\", \"text\", \"deleted_at\" FROM note WHERE id = ?1",
+        "live": " AND deleted_at IS NULL",
+        "liveWhere": " WHERE deleted_at IS NULL",
+        "liveCondition": "note.deleted_at IS NULL",
+        "findOne": "SELECT %s FROM note%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM note%s%s%s",
+        "count": "SELECT COUNT(*) FROM note%s",
+        "page": "SELECT %s FROM note%s%s LIMIT %d",
+        "pageAfterKey": "note.id %s %s",
+        "pageAfter": "(%s, note.id) %s ((SELECT %s FROM note AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM note AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", note.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM note WHERE note.id = ?1)",
+        "insert": "INSERT INTO note (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO note (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE note SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"project\", \"title\", \"text\", \"deleted_at\"",
+        "updateMany": "UPDATE note SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"project\", \"title\", \"text\", \"deleted_at\"",
+        "softDelete": "UPDATE note SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        "softDeleteIfVersion": "UPDATE note SET deleted_at = ?1 WHERE id = ?2 AND _version = ?3 AND deleted_at IS NULL",
+        "delete": "DELETE FROM note WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM note WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM note WHERE id = ?1 AND deleted_at IS NULL"
+      },
+      "softDelete": true,
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = note.id",
+          "rows": "SELECT \"id\", \"project\", \"title\", \"text\", \"deleted_at\" FROM note WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "searchable": {
+        "index": "search_index",
+        "document": "",
+        "table": "note",
+        "key": "id",
+        "keyType": "text",
+        "uuid": true,
+        "title": "title",
+        "body": [
+          "text"
+        ],
+        "scope": "project",
+        "deletedAt": "deleted_at",
+        "fts": "search_index_fts"
+      }
+    },
+    {
+      "name": "OAuthClient",
+      "table": "oauth_client",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_client.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "clientId",
+          "qualified": "oauth_client.client_id",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "kind",
+          "column": "kind",
+          "field": "kind",
+          "qualified": "oauth_client.kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "oauth_client.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "uri",
+          "column": "uri",
+          "field": "uri",
+          "qualified": "oauth_client.uri",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "redirectUris",
+          "column": "redirect_uris",
+          "field": "redirectUris",
+          "qualified": "oauth_client.redirect_uris",
+          "list": true,
+          "required": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_client.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "refreshedAt",
+          "column": "refreshed_at",
+          "field": "refreshedAt",
+          "qualified": "oauth_client.refreshed_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "freshUntil",
+          "column": "fresh_until",
+          "field": "freshUntil",
+          "qualified": "oauth_client.fresh_until",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "oauth_client.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "qualifiedColumns": "\"oauth_client\".\"id\", \"oauth_client\".\"client_id\", \"oauth_client\".\"kind\", \"oauth_client\".\"name\", \"oauth_client\".\"uri\", \"oauth_client\".\"redirect_uris\", \"oauth_client\".\"created_at\", \"oauth_client\".\"refreshed_at\", \"oauth_client\".\"fresh_until\", \"oauth_client\".\"last_used_at\"",
+        "getOne": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_client%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_client%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_client%s",
+        "page": "SELECT %s FROM oauth_client%s%s LIMIT %d",
+        "pageAfterKey": "oauth_client.id %s %s",
+        "pageAfter": "(%s, oauth_client.id) %s ((SELECT %s FROM oauth_client AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_client AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_client.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_client WHERE oauth_client.id = ?1)",
+        "insert": "INSERT INTO oauth_client (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_client (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_client SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "updateMany": "UPDATE oauth_client SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_client (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_client WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_client WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_client WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "clientId": {
+          "conflict": "(client_id)",
+          "keep": "client_id = oauth_client.client_id",
+          "rows": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (client_id) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_client.id",
+          "rows": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByOAuthCodeClient",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.client_id = oauth_client.id"
+        },
+        {
+          "filter": "referencedByOAuthGrantClient",
+          "probe": "SELECT 1 FROM oauth_grant WHERE oauth_grant.client_id = oauth_client.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "clientId"
+        },
+        {
+          "name": "oauthGrants",
+          "target": "OAuthGrant",
+          "column": "clientId"
+        }
+      ]
+    },
+    {
+      "name": "OAuthCode",
+      "table": "oauth_code",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_code.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "client",
+          "qualified": "oauth_code.client_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthClient",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "oauth_code.user_id",
+          "uuid": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "grantId",
+          "column": "grant_id",
+          "field": "grant",
+          "qualified": "oauth_code.grant_id",
+          "uuid": true,
+          "relation": "OAuthGrant",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "redirectUri",
+          "column": "redirect_uri",
+          "field": "redirectUri",
+          "qualified": "oauth_code.redirect_uri",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeChallenge",
+          "column": "code_challenge",
+          "field": "codeChallenge",
+          "qualified": "oauth_code.code_challenge",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "state",
+          "column": "state",
+          "field": "state",
+          "qualified": "oauth_code.state",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "scope",
+          "column": "scope",
+          "field": "scope",
+          "qualified": "oauth_code.scope",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "resource",
+          "column": "resource",
+          "field": "resource",
+          "qualified": "oauth_code.resource",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "nonce",
+          "column": "nonce",
+          "field": "nonce",
+          "qualified": "oauth_code.nonce",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeHash",
+          "column": "code_hash",
+          "field": "codeHash",
+          "qualified": "oauth_code.code_hash",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_code.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_code.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "usedAt",
+          "column": "used_at",
+          "field": "usedAt",
+          "qualified": "oauth_code.used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "qualifiedColumns": "\"oauth_code\".\"id\", \"oauth_code\".\"client_id\", \"oauth_code\".\"user_id\", \"oauth_code\".\"grant_id\", \"oauth_code\".\"redirect_uri\", \"oauth_code\".\"code_challenge\", \"oauth_code\".\"state\", \"oauth_code\".\"scope\", \"oauth_code\".\"resource\", \"oauth_code\".\"nonce\", \"oauth_code\".\"code_hash\", \"oauth_code\".\"created_at\", \"oauth_code\".\"expires_at\", \"oauth_code\".\"used_at\"",
+        "getOne": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_code%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_code%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_code%s",
+        "page": "SELECT %s FROM oauth_code%s%s LIMIT %d",
+        "pageAfterKey": "oauth_code.id %s %s",
+        "pageAfter": "(%s, oauth_code.id) %s ((SELECT %s FROM oauth_code AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_code AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_code.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_code WHERE oauth_code.id = ?1)",
+        "insert": "INSERT INTO oauth_code (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_code (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_code SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "updateMany": "UPDATE oauth_code SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_code (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_code WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_code WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_code WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "codeHash": {
+          "conflict": "(code_hash)",
+          "keep": "code_hash = oauth_code.code_hash",
+          "rows": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (code_hash) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_code.id",
+          "rows": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "client",
+          "target": "OAuthClient",
+          "probe": "oauth_code.client_id IN (SELECT oauth_client.id FROM oauth_client%s)"
+        },
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "oauth_code.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "grant",
+          "target": "OAuthGrant",
+          "probe": "oauth_code.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)"
+        }
+      ]
+    },
+    {
+      "name": "OAuthGrant",
+      "table": "oauth_grant",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_grant.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "oauth_grant.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "client",
+          "qualified": "oauth_grant.client_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthClient",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "oauth_grant.permissions",
+          "list": true
+        },
+        {
+          "name": "resource",
+          "column": "resource",
+          "field": "resource",
+          "qualified": "oauth_grant.resource",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_grant.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_grant.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "oauth_grant.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "oauth_grant.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"oauth_grant\".\"id\", \"oauth_grant\".\"user_id\", \"oauth_grant\".\"client_id\", \"oauth_grant\".\"permissions\", \"oauth_grant\".\"resource\", \"oauth_grant\".\"created_at\", \"oauth_grant\".\"expires_at\", \"oauth_grant\".\"last_used_at\", \"oauth_grant\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_grant%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_grant%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_grant%s",
+        "page": "SELECT %s FROM oauth_grant%s%s LIMIT %d",
+        "pageAfterKey": "oauth_grant.id %s %s",
+        "pageAfter": "(%s, oauth_grant.id) %s ((SELECT %s FROM oauth_grant AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_grant.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_grant WHERE oauth_grant.id = ?1)",
+        "insert": "INSERT INTO oauth_grant (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_grant (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_grant SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE oauth_grant SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_grant WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_grant WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_grant WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_grant.id",
+          "rows": "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByOAuthCodeGrant",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.grant_id = oauth_grant.id"
+        },
+        {
+          "filter": "referencedByOAuthTokenGrant",
+          "probe": "SELECT 1 FROM oauth_token WHERE oauth_token.grant_id = oauth_grant.id"
+        }
+      ],
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "oauth_grant.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "client",
+          "target": "OAuthClient",
+          "probe": "oauth_grant.client_id IN (SELECT oauth_client.id FROM oauth_client%s)"
+        }
+      ],
+      "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "grantId"
+        },
+        {
+          "name": "oauthTokens",
+          "target": "OAuthToken",
+          "column": "grantId"
+        }
+      ]
+    },
+    {
+      "name": "OAuthToken",
+      "table": "oauth_token",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_token.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "grantId",
+          "column": "grant_id",
+          "field": "grant",
+          "qualified": "oauth_token.grant_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthGrant",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "kind",
+          "column": "kind",
+          "field": "kind",
+          "qualified": "oauth_token.kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "oauth_token.token_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_token.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_token.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "usedAt",
+          "column": "used_at",
+          "field": "usedAt",
+          "qualified": "oauth_token.used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "oauth_token.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"oauth_token\".\"id\", \"oauth_token\".\"grant_id\", \"oauth_token\".\"kind\", \"oauth_token\".\"token_hash\", \"oauth_token\".\"created_at\", \"oauth_token\".\"expires_at\", \"oauth_token\".\"used_at\", \"oauth_token\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_token%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_token%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_token%s",
+        "page": "SELECT %s FROM oauth_token%s%s LIMIT %d",
+        "pageAfterKey": "oauth_token.id %s %s",
+        "pageAfter": "(%s, oauth_token.id) %s ((SELECT %s FROM oauth_token AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_token AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_token.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_token WHERE oauth_token.id = ?1)",
+        "insert": "INSERT INTO oauth_token (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_token (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_token SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE oauth_token SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_token (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_token WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_token WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_token WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_token.id",
+          "rows": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = oauth_token.token_hash",
+          "rows": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "grant",
+          "target": "OAuthGrant",
+          "probe": "oauth_token.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)"
+        }
+      ]
+    },
+    {
+      "name": "Request",
+      "table": "request",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "request.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "unitId",
+          "column": "unit_id",
+          "field": "unit",
+          "qualified": "request.unit_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Unit",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "title",
+          "column": "title",
+          "field": "title",
+          "qualified": "request.title",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "details",
+          "column": "details",
+          "field": "details",
+          "qualified": "request.details",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "resolution",
+          "column": "resolution",
+          "field": "resolution",
+          "qualified": "request.resolution",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"unit_id\", \"title\", \"details\", \"resolution\"",
+        "qualifiedColumns": "\"request\".\"id\", \"request\".\"unit_id\", \"request\".\"title\", \"request\".\"details\", \"request\".\"resolution\"",
+        "getOne": "SELECT \"id\", \"unit_id\", \"title\", \"details\", \"resolution\" FROM request WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM request%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM request%s%s%s",
+        "count": "SELECT COUNT(*) FROM request%s",
+        "page": "SELECT %s FROM request%s%s LIMIT %d",
+        "pageAfterKey": "request.id %s %s",
+        "pageAfter": "(%s, request.id) %s ((SELECT %s FROM request AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM request AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", request.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM request WHERE request.id = ?1)",
+        "insert": "INSERT INTO request (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO request (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE request SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"unit_id\", \"title\", \"details\", \"resolution\"",
+        "updateMany": "UPDATE request SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO request (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"unit_id\", \"title\", \"details\", \"resolution\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM request WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM request WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM request WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = request.id",
+          "rows": "SELECT \"id\", \"unit_id\", \"title\", \"details\", \"resolution\" FROM request WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "unit",
+          "target": "Unit",
+          "probe": "request.unit_id IN (SELECT unit.id FROM unit%s)"
+        }
+      ],
+      "searchable": {
+        "index": "search_index",
+        "document": "",
+        "table": "request",
+        "key": "id",
+        "keyType": "text",
+        "uuid": true,
+        "title": "title",
+        "body": [
+          "details",
+          "resolution"
+        ],
+        "scope": "unit_id",
+        "fts": "search_index_fts"
+      }
+    },
+    {
+      "name": "Role",
+      "table": "role",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "role.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "role.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "role.permissions",
+          "list": true,
+          "required": true
+        },
+        {
+          "name": "reaches",
+          "column": "reaches",
+          "field": "reaches",
+          "qualified": "role.reaches",
+          "list": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"name\", \"permissions\", \"reaches\"",
+        "qualifiedColumns": "\"role\".\"id\", \"role\".\"name\", \"role\".\"permissions\", \"role\".\"reaches\"",
+        "getOne": "SELECT \"id\", \"name\", \"permissions\", \"reaches\" FROM role WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM role%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM role%s%s%s",
+        "count": "SELECT COUNT(*) FROM role%s",
+        "page": "SELECT %s FROM role%s%s LIMIT %d",
+        "pageAfterKey": "role.id %s %s",
+        "pageAfter": "(%s, role.id) %s ((SELECT %s FROM role AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM role AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", role.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM role WHERE role.id = ?1)",
+        "insert": "INSERT INTO role (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO role (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE role SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"name\", \"permissions\", \"reaches\"",
+        "updateMany": "UPDATE role SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO role (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"permissions\", \"reaches\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM role WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM role WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM role WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = role.id",
+          "rows": "SELECT \"id\", \"name\", \"permissions\", \"reaches\" FROM role WHERE (id) IN (VALUES %s)"
+        },
+        "name": {
+          "conflict": "(\"name\")",
+          "keep": "\"name\" = role.\"name\"",
+          "rows": "SELECT \"id\", \"name\", \"permissions\", \"reaches\" FROM role WHERE (\"name\") IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByUserRoleGrantRole",
+          "probe": "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "userRoleGrants",
+          "target": "UserRoleGrant",
+          "column": "roleId"
+        }
+      ],
+      "access": "roles"
+    },
+    {
+      "name": "Session",
+      "table": "\"session\"",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "\"session\".id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "\"session\".user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "\"session\".token_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "\"session\".created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "\"session\".expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastSeenAt",
+          "column": "last_seen_at",
+          "field": "lastSeenAt",
+          "qualified": "\"session\".last_seen_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "\"session\".revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"session\".\"id\", \"session\".\"user_id\", \"session\".\"token_hash\", \"session\".\"created_at\", \"session\".\"expires_at\", \"session\".\"last_seen_at\", \"session\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM \"session\"%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM \"session\"%s%s%s",
+        "count": "SELECT COUNT(*) FROM \"session\"%s",
+        "page": "SELECT %s FROM \"session\"%s%s LIMIT %d",
+        "pageAfterKey": "\"session\".id %s %s",
+        "pageAfter": "(%s, \"session\".id) %s ((SELECT %s FROM \"session\" AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM \"session\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", \"session\".id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM \"session\" WHERE \"session\".id = ?1)",
+        "insert": "INSERT INTO \"session\" (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO \"session\" (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE \"session\" SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+        "updateMany": "UPDATE \"session\" SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO \"session\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM \"session\" WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM \"session\" WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM \"session\" WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = \"session\".id",
+          "rows": "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = \"session\".token_hash",
+          "rows": "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "\"session\".user_id IN (SELECT account.id FROM account%s)"
+        }
+      ]
+    },
+    {
+      "name": "Unit",
+      "table": "unit",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "unit.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "unit.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "notes",
+          "column": "notes",
+          "field": "notes",
+          "qualified": "unit.notes",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "contractId",
+          "column": "contract_id",
+          "field": "contract",
+          "qualified": "unit.contract_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Contract",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "_version",
+          "column": "_version",
+          "field": "_version",
+          "qualified": "unit._version",
+          "auto": true,
+          "required": true,
+          "internal": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"name\", \"notes\", \"contract_id\", \"_version\"",
+        "qualifiedColumns": "\"unit\".\"id\", \"unit\".\"name\", \"unit\".\"notes\", \"unit\".\"contract_id\", \"unit\".\"_version\"",
+        "getOne": "SELECT \"id\", \"name\", \"notes\", \"contract_id\", \"_version\" FROM unit WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM unit%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM unit%s%s%s",
+        "count": "SELECT COUNT(*) FROM unit%s",
+        "page": "SELECT %s FROM unit%s%s LIMIT %d",
+        "pageAfterKey": "unit.id %s %s",
+        "pageAfter": "(%s, unit.id) %s ((SELECT %s FROM unit AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM unit AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", unit.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM unit WHERE unit.id = ?1)",
+        "insert": "INSERT INTO unit (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO unit (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE unit SET %s, _version = _version + 1 WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"name\", \"notes\", \"contract_id\", \"_version\"",
+        "updateMany": "UPDATE unit SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO unit (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s, _version = _version + 1%s RETURNING \"id\", \"name\", \"notes\", \"contract_id\", \"_version\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM unit WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM unit WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM unit WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = unit.id",
+          "rows": "SELECT \"id\", \"name\", \"notes\", \"contract_id\", \"_version\" FROM unit WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByRequestUnit",
+          "probe": "SELECT 1 FROM request WHERE request.unit_id = unit.id"
+        }
+      ],
+      "relations": [
+        {
+          "field": "contract",
+          "target": "Contract",
+          "probe": "unit.contract_id IN (SELECT contract.id FROM contract%s)"
+        }
+      ],
+      "behaviors": {
+        "owned": [],
+        "noUpsert": true,
+        "reads": {
+          "comments": [
+            "listMessages",
+            "getMessage",
+            "listEdits",
+            "listReactions",
+            "listPinned"
+          ]
+        }
+      },
+      "many": [
+        {
+          "name": "requests",
+          "target": "Request",
+          "column": "unitId"
+        }
+      ],
+      "searchable": {
+        "index": "search_index",
+        "document": "",
+        "table": "unit",
+        "key": "id",
+        "keyType": "text",
+        "uuid": true,
+        "title": "\"name\"",
+        "body": [
+          "notes"
+        ],
+        "comments": {
+          "table": "unit_comments_messages",
+          "row": "unit_id",
+          "body": "body",
+          "state": "state",
+          "order": "message"
+        },
+        "files": {
+          "table": "unit_attachments",
+          "row": "unit_id",
+          "text": "extracted_text",
+          "state": "state"
+        },
+        "fts": "search_index_fts"
+      }
+    },
+    {
+      "name": "UserApiKey",
+      "table": "user_api_key",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "user_api_key.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "user_api_key.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "user_api_key.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "user_api_key.token_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "user_api_key.permissions",
+          "list": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "user_api_key.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "user_api_key.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "user_api_key.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "user_api_key.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"user_api_key\".\"id\", \"user_api_key\".\"user_id\", \"user_api_key\".\"name\", \"user_api_key\".\"token_hash\", \"user_api_key\".\"permissions\", \"user_api_key\".\"created_at\", \"user_api_key\".\"expires_at\", \"user_api_key\".\"last_used_at\", \"user_api_key\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM user_api_key%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM user_api_key%s%s%s",
+        "count": "SELECT COUNT(*) FROM user_api_key%s",
+        "page": "SELECT %s FROM user_api_key%s%s LIMIT %d",
+        "pageAfterKey": "user_api_key.id %s %s",
+        "pageAfter": "(%s, user_api_key.id) %s ((SELECT %s FROM user_api_key AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM user_api_key AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", user_api_key.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM user_api_key WHERE user_api_key.id = ?1)",
+        "insert": "INSERT INTO user_api_key (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO user_api_key (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE user_api_key SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE user_api_key SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO user_api_key (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM user_api_key WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM user_api_key WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM user_api_key WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = user_api_key.id",
+          "rows": "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = user_api_key.token_hash",
+          "rows": "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "user_api_key.user_id IN (SELECT account.id FROM account%s)"
+        }
+      ]
+    },
+    {
+      "name": "UserCredential",
+      "table": "user_credential",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "user_credential.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "user_credential.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "passwordHash",
+          "column": "password_hash",
+          "field": "passwordHash",
+          "qualified": "user_credential.password_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ]
+        },
+        {
+          "name": "passwordChangedAt",
+          "column": "password_changed_at",
+          "field": "passwordChangedAt",
+          "qualified": "user_credential.password_changed_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "disabledAt",
+          "column": "disabled_at",
+          "field": "disabledAt",
+          "qualified": "user_credential.disabled_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "pendingAt",
+          "column": "pending_at",
+          "field": "pendingAt",
+          "qualified": "user_credential.pending_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+        "qualifiedColumns": "\"user_credential\".\"id\", \"user_credential\".\"user_id\", \"user_credential\".\"password_hash\", \"user_credential\".\"password_changed_at\", \"user_credential\".\"disabled_at\", \"user_credential\".\"pending_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM user_credential%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM user_credential%s%s%s",
+        "count": "SELECT COUNT(*) FROM user_credential%s",
+        "page": "SELECT %s FROM user_credential%s%s LIMIT %d",
+        "pageAfterKey": "user_credential.id %s %s",
+        "pageAfter": "(%s, user_credential.id) %s ((SELECT %s FROM user_credential AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM user_credential AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", user_credential.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM user_credential WHERE user_credential.id = ?1)",
+        "insert": "INSERT INTO user_credential (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO user_credential (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE user_credential SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+        "updateMany": "UPDATE user_credential SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO user_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM user_credential WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM user_credential WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM user_credential WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = user_credential.id",
+          "rows": "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (VALUES %s)"
+        },
+        "user": {
+          "conflict": "(user_id)",
+          "keep": "user_id = user_credential.user_id",
+          "rows": "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "user_credential.user_id IN (SELECT account.id FROM account%s)"
+        }
+      ]
+    },
+    {
+      "name": "UserRoleGrant",
+      "table": "user_role_grant",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "user_role_grant.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "user_role_grant.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "roleId",
+          "column": "role_id",
+          "field": "role",
+          "qualified": "user_role_grant.role_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Role",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "grantedAt",
+          "column": "granted_at",
+          "field": "grantedAt",
+          "qualified": "user_role_grant.granted_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"role_id\", \"granted_at\"",
+        "qualifiedColumns": "\"user_role_grant\".\"id\", \"user_role_grant\".\"user_id\", \"user_role_grant\".\"role_id\", \"user_role_grant\".\"granted_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM user_role_grant%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM user_role_grant%s%s%s",
+        "count": "SELECT COUNT(*) FROM user_role_grant%s",
+        "page": "SELECT %s FROM user_role_grant%s%s LIMIT %d",
+        "pageAfterKey": "user_role_grant.id %s %s",
+        "pageAfter": "(%s, user_role_grant.id) %s ((SELECT %s FROM user_role_grant AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM user_role_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", user_role_grant.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM user_role_grant WHERE user_role_grant.id = ?1)",
+        "insert": "INSERT INTO user_role_grant (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO user_role_grant (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE user_role_grant SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\"",
+        "updateMany": "UPDATE user_role_grant SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO user_role_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM user_role_grant WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM user_role_grant WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM user_role_grant WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = user_role_grant.id",
+          "rows": "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (VALUES %s)"
+        },
+        "user,role": {
+          "conflict": "(user_id, role_id)",
+          "keep": "user_id = user_role_grant.user_id",
+          "rows": "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "user_role_grant.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "role",
+          "target": "Role",
+          "probe": "user_role_grant.role_id IN (SELECT role.id FROM role%s)"
+        }
+      ]
+    }
+  ],
+  "references": {
+    "holders": {},
+    "targets": {
+      "Account": {
+        "table": "account",
+        "key": "id",
+        "uuid": true
+      },
+      "Contract": {
+        "table": "contract",
+        "key": "id",
+        "uuid": true
+      },
+      "ContractParty": {
+        "table": "contract_party",
+        "key": "id",
+        "uuid": true
+      },
+      "Document": {
+        "table": "document",
+        "key": "id",
+        "uuid": true,
+        "owner": "created_by",
+        "restricted": "effective_audience"
+      },
+      "Folder": {
+        "table": "folder",
+        "key": "id",
+        "uuid": true,
+        "owner": "\"owner\"",
+        "restricted": "effective_audience"
+      },
+      "Grant": {
+        "table": "\"grant\"",
+        "key": "id",
+        "uuid": true
+      },
+      "Note": {
+        "table": "note",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthClient": {
+        "table": "oauth_client",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthCode": {
+        "table": "oauth_code",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthGrant": {
+        "table": "oauth_grant",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthToken": {
+        "table": "oauth_token",
+        "key": "id",
+        "uuid": true
+      },
+      "Request": {
+        "table": "request",
+        "key": "id",
+        "uuid": true
+      },
+      "Role": {
+        "table": "role",
+        "key": "id",
+        "uuid": true
+      },
+      "Session": {
+        "table": "\"session\"",
+        "key": "id",
+        "uuid": true
+      },
+      "Unit": {
+        "table": "unit",
+        "key": "id",
+        "uuid": true
+      },
+      "UserApiKey": {
+        "table": "user_api_key",
+        "key": "id",
+        "uuid": true
+      },
+      "UserCredential": {
+        "table": "user_credential",
+        "key": "id",
+        "uuid": true
+      },
+      "UserRoleGrant": {
+        "table": "user_role_grant",
+        "key": "id",
+        "uuid": true
+      }
+    },
+    "comments": {
+      "Unit": {
+        "table": "unit_comments_messages",
+        "row": "unit_id",
+        "uuid": true,
+        "blocks": "blocks",
+        "state": "state",
+        "id": "message"
+      }
+    }
+  },
+  "attachments": {
+    "holders": {
+      "Unit": {
+        "table": "unit_attachments",
+        "row": "unit_id",
+        "uuid": true,
+        "maxFileBytes": 104857600,
+        "maxRowBytes": 1073741824,
+        "maxFiles": 100,
+        "released": "file_released_queue"
+      }
+    }
+  }
+}"#;
+
+/// The definition [`SQLITE`] holds, read once.
+#[cfg(feature = "sqlite")]
+pub fn sqlite_definition() -> Result<&'static orm::Definition, orm::Error> {
+    static DEFINITION: std::sync::OnceLock<Result<orm::Definition, String>> =
+        std::sync::OnceLock::new();
+    DEFINITION
+        .get_or_init(|| orm::Definition::parse(SQLITE).map_err(|err| err.to_string()))
+        .as_ref()
+        .map_err(|err| orm::Error::Definition(err.clone()))
+}
+
+/// The repositories on a SQLite file.
+#[cfg(feature = "sqlite")]
+pub mod sqlite {
+    use super::*;
+
+    pub use orm::sqlite::rusqlite;
+    // What the references and attachments of the database's rows read and
+    // answer (D154, #611).
+    pub use orm::rowfeatures;
+    // Search across the database's @searchable tables on SQLite, its
+    // indexing and its route (D155, D186, #615).
+    pub use orm::search_tables::sqlite as search_tables;
+
+    /// The repository of `Account` on a SQLite connection.
+    pub type AccountRepository<'a> =
+        orm::sqlite::Typed<'a, AccountRow, AccountCreate, AccountUpdate, AccountFilter, IdentityUUID>;
+
+    /// The repository of `Contract` on a SQLite connection.
+    pub type ContractRepository<'a> =
+        orm::sqlite::Typed<'a, ContractRow, ContractCreate, ContractUpdate, ContractFilter, IdentityUUID>;
+
+    /// The repository of `ContractParty` on a SQLite connection.
+    pub type ContractPartyRepository<'a> =
+        orm::sqlite::Typed<'a, ContractPartyRow, ContractPartyCreate, ContractPartyUpdate, ContractPartyFilter, IdentityUUID>;
+
+    /// The repository of `Document` on a SQLite connection.
+    pub type DocumentRepository<'a> =
+        orm::sqlite::Typed<'a, DocumentRow, DocumentCreate, DocumentUpdate, DocumentFilter, IdentityUUID>;
+
+    /// The repository of `Folder` on a SQLite connection.
+    pub type FolderRepository<'a> =
+        orm::sqlite::Typed<'a, FolderRow, FolderCreate, FolderUpdate, FolderFilter, IdentityUUID>;
+
+    /// The repository of `Grant` on a SQLite connection.
+    pub type GrantRepository<'a> =
+        orm::sqlite::Typed<'a, GrantRow, GrantCreate, GrantUpdate, GrantFilter, IdentityUUID>;
+
+    /// The repository of `Note` on a SQLite connection.
+    pub type NoteRepository<'a> =
+        orm::sqlite::Typed<'a, NoteRow, NoteCreate, NoteUpdate, NoteFilter, IdentityUUID>;
+
+    /// The repository of `OAuthClient` on a SQLite connection.
+    pub type OAuthClientRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthClientRow, OAuthClientCreate, OAuthClientUpdate, OAuthClientFilter, IdentityUUID>;
+
+    /// The repository of `OAuthCode` on a SQLite connection.
+    pub type OAuthCodeRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthCodeRow, OAuthCodeCreate, OAuthCodeUpdate, OAuthCodeFilter, IdentityUUID>;
+
+    /// The repository of `OAuthGrant` on a SQLite connection.
+    pub type OAuthGrantRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthGrantRow, OAuthGrantCreate, OAuthGrantUpdate, OAuthGrantFilter, IdentityUUID>;
+
+    /// The repository of `OAuthToken` on a SQLite connection.
+    pub type OAuthTokenRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthTokenRow, OAuthTokenCreate, OAuthTokenUpdate, OAuthTokenFilter, IdentityUUID>;
+
+    /// The repository of `Request` on a SQLite connection.
+    pub type RequestRepository<'a> =
+        orm::sqlite::Typed<'a, RequestRow, RequestCreate, RequestUpdate, RequestFilter, IdentityUUID>;
+
+    /// The repository of `Role` on a SQLite connection.
+    pub type RoleRepository<'a> =
+        orm::sqlite::Typed<'a, RoleRow, RoleCreate, RoleUpdate, RoleFilter, IdentityUUID>;
+
+    /// The repository of `Session` on a SQLite connection.
+    pub type SessionRepository<'a> =
+        orm::sqlite::Typed<'a, SessionRow, SessionCreate, SessionUpdate, SessionFilter, IdentityUUID>;
+
+    /// The repository of `Unit` on a SQLite connection.
+    pub type UnitRepository<'a> =
+        orm::sqlite::Typed<'a, UnitRow, UnitCreate, UnitUpdate, UnitFilter, IdentityUUID>;
+
+    /// The repository of `UserApiKey` on a SQLite connection.
+    pub type UserApiKeyRepository<'a> =
+        orm::sqlite::Typed<'a, UserApiKeyRow, UserApiKeyCreate, UserApiKeyUpdate, UserApiKeyFilter, IdentityUUID>;
+
+    /// The repository of `UserCredential` on a SQLite connection.
+    pub type UserCredentialRepository<'a> =
+        orm::sqlite::Typed<'a, UserCredentialRow, UserCredentialCreate, UserCredentialUpdate, UserCredentialFilter, IdentityUUID>;
+
+    /// The repository of `UserRoleGrant` on a SQLite connection.
+    pub type UserRoleGrantRepository<'a> =
+        orm::sqlite::Typed<'a, UserRoleGrantRow, UserRoleGrantCreate, UserRoleGrantUpdate, UserRoleGrantFilter, IdentityUUID>;
+
+    /// The operations of the Comments `Unit` implements, under `comments` (D103), each run through the behaviors' core in the transaction the repositories were opened over: on the row whose key it takes, or on the table as a whole (D104).
+    pub struct UnitCommentsOperations<'a>(UnitRepository<'a>);
+
+    impl UnitCommentsOperations<'_> {
+        /// Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, each block's kind one the config allows, and an attachment's uri scheme, media type and size ones the config's attachments allow. A caller acting for someone records that subject as the message's for. A retry with the clientId of a message the caller posted or began returns that message and posts nothing.
+        pub fn post(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsPostParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "post", key, params, options)
+        }
+
+        /// Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read, and an attachment not on it before must be one the config's attachments allow; a code block equal to the one at its place before keeps its moves. Acting for the author is not being it: only the author's own subject, or moderatePermission, may edit.
+        pub fn edit(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsEditParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "edit", key, params, options)
+        }
+
+        /// Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept.
+        pub fn delete_message(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsDeleteMessageParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "deleteMessage", key, params, options)
+        }
+
+        /// Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them.
+        pub fn purge(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsPurgeParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsPurgeResult, orm::Error> {
+            self.0.operation("comments", "purge", key, params, options)
+        }
+
+        /// Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji.
+        pub fn react(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsReactParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "react", key, params, options)
+        }
+
+        /// Removes the caller's reaction from a posted or interrupted message.
+        pub fn unreact(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsUnreactParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "unreact", key, params, options)
+        }
+
+        /// Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one.
+        pub fn pin(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsPinParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "pin", key, params, options)
+        }
+
+        /// Unpins a pinned message. Needs pinPermission when the config names one.
+        pub fn unpin(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsUnpinParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "unpin", key, params, options)
+        }
+
+        /// Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it.
+        pub fn resolve(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsResolveParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "resolve", key, params, options)
+        }
+
+        /// Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission.
+        pub fn reopen(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsReopenParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "reopen", key, params, options)
+        }
+
+        /// Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.
+        pub fn list_messages(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsListMessagesParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsListMessagesResult, orm::Error> {
+            self.0.operation("comments", "listMessages", key, params, options)
+        }
+
+        /// Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals.
+        pub fn get_message(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsGetMessageParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsCommentMessage, orm::Error> {
+            self.0.operation("comments", "getMessage", key, params, options)
+        }
+
+        /// Lists what a message held before each of its edits, oldest first, one page at a time.
+        pub fn list_edits(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsListEditsParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsListEditsResult, orm::Error> {
+            self.0.operation("comments", "listEdits", key, params, options)
+        }
+
+        /// Lists who reacted to a message with an emoji, in the order they reacted, one page at a time.
+        pub fn list_reactions(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsListReactionsParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsListReactionsResult, orm::Error> {
+            self.0.operation("comments", "listReactions", key, params, options)
+        }
+
+        /// Lists the conversation's pinned messages, top-level and replies, in ascending id order, one page at a time. Only a posted or interrupted message is pinned: a deleted one loses its pin, and a composing one cannot take one.
+        pub fn list_pinned(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsListPinnedParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsListPinnedResult, orm::Error> {
+            self.0.operation("comments", "listPinned", key, params, options)
+        }
+    }
+
+    /// The tables of `fixture-search-db` in the file `database` holds, as a
+    /// generated router serves its table operations from them (D106).
+    pub fn tables(database: std::sync::Arc<orm::sqlite::Database>) -> orm::sqlite::Tables {
+        orm::sqlite::Tables::new(database, sqlite_definition)
+    }
+
+    /// The repositories of `fixture-search-db` on a SQLite connection, acting as
+    /// a user or as no one.
+    pub struct Repositories<'a>(orm::sqlite::Repositories<'a>);
+
+    impl<'a> Repositories<'a> {
+        /// The repositories over `connection`, the caller's: a
+        /// `rusqlite::Transaction` it opened, for a write. They act as no
+        /// one until `acting` names a user.
+        pub fn new(connection: &'a rusqlite::Connection) -> Result<Self, orm::Error> {
+            orm::sqlite::Repositories::new(connection, sqlite_definition()?).map(Self)
+        }
+
+        /// The repositories acting as `user` (D87); `None` acts as no one.
+        #[must_use]
+        pub fn acting(self, user: Option<String>) -> Self {
+            Self(self.0.acting(user))
+        }
+
+        /// The repositories acting as the database's system actor (D87).
+        #[must_use]
+        pub fn as_system(self) -> Self {
+            Self(self.0.as_system())
+        }
+
+        /// The repositories with the keys of the database's `Encrypted<T>`
+        /// fields (D85).
+        #[must_use]
+        pub fn with_keys(self, keys: &'a dyn orm::FieldKeys) -> Self {
+            Self(self.0.with_keys(keys))
+        }
+
+        /// The repositories with what runs the behaviors of the tables that
+        /// compose them (D103).
+        #[must_use]
+        pub fn with_rules(self, rules: &'a dyn orm::sqlite::Rules) -> Self {
+            Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories running each behavior's command as `caller`,
+        /// whose permissions the core's guards read (D103); the acting
+        /// user, holding none, unless set.
+        #[must_use]
+        pub fn with_caller(self, caller: orm::Caller) -> Self {
+            Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
+        }
+
+        /// The runtime's repositories these are, over JSON objects.
+        pub fn untyped(&self) -> &orm::sqlite::Repositories<'a> {
+            &self.0
+        }
+
+        /// The references of the database's rows, and the rows that point at a
+        /// row, each held to what the repositories' caller reads (D154, #611):
+        /// `add`, `remove`, `of` and `referenced_by`. `add` runs in a
+        /// transaction.
+        pub fn references(&self) -> Result<rowfeatures::sqlite::References<'_, 'a>, orm::Error> {
+            self.0.references()
+        }
+
+        /// The files of the database's rows (D154, #611): a direct upload
+        /// `begin` signs and `complete` checks, `list`, `get`, `download`,
+        /// `caption`, `detach`, `file` onto another row, `release`, and a file
+        /// processor's `pending` and `processed`. `begin`, `file` and `release`
+        /// run in a transaction; those that reach the bucket are async.
+        pub fn attachments(&self) -> Result<rowfeatures::sqlite::Attachments<'_, 'a>, orm::Error> {
+            self.0.attachments()
+        }
+
+        /// The repository of `Account`.
+        pub fn account(&self) -> Result<AccountRepository<'_>, orm::Error> {
+            self.0.typed("Account")
+        }
+
+        /// The repository of `Contract`.
+        pub fn contract(&self) -> Result<ContractRepository<'_>, orm::Error> {
+            self.0.typed("Contract")
+        }
+
+        /// The repository of `ContractParty`.
+        pub fn contract_party(&self) -> Result<ContractPartyRepository<'_>, orm::Error> {
+            self.0.typed("ContractParty")
+        }
+
+        /// The repository of `Document`.
+        pub fn document(&self) -> Result<DocumentRepository<'_>, orm::Error> {
+            self.0.typed("Document")
+        }
+
+        /// The repository of `Folder`.
+        pub fn folder(&self) -> Result<FolderRepository<'_>, orm::Error> {
+            self.0.typed("Folder")
+        }
+
+        /// The repository of `Grant`.
+        pub fn grant(&self) -> Result<GrantRepository<'_>, orm::Error> {
+            self.0.typed("Grant")
+        }
+
+        /// The repository of `Note`.
+        pub fn note(&self) -> Result<NoteRepository<'_>, orm::Error> {
+            self.0.typed("Note")
+        }
+
+        /// The repository of `OAuthClient`.
+        pub fn oauth_client(&self) -> Result<OAuthClientRepository<'_>, orm::Error> {
+            self.0.typed("OAuthClient")
+        }
+
+        /// The repository of `OAuthCode`.
+        pub fn oauth_code(&self) -> Result<OAuthCodeRepository<'_>, orm::Error> {
+            self.0.typed("OAuthCode")
+        }
+
+        /// The repository of `OAuthGrant`.
+        pub fn oauth_grant(&self) -> Result<OAuthGrantRepository<'_>, orm::Error> {
+            self.0.typed("OAuthGrant")
+        }
+
+        /// The repository of `OAuthToken`.
+        pub fn oauth_token(&self) -> Result<OAuthTokenRepository<'_>, orm::Error> {
+            self.0.typed("OAuthToken")
+        }
+
+        /// The repository of `Request`.
+        pub fn request(&self) -> Result<RequestRepository<'_>, orm::Error> {
+            self.0.typed("Request")
+        }
+
+        /// The repository of `Role`.
+        pub fn role(&self) -> Result<RoleRepository<'_>, orm::Error> {
+            self.0.typed("Role")
+        }
+
+        /// The repository of `Session`.
+        pub fn session(&self) -> Result<SessionRepository<'_>, orm::Error> {
+            self.0.typed("Session")
+        }
+
+        /// The repository of `Unit`.
+        pub fn unit(&self) -> Result<UnitRepository<'_>, orm::Error> {
+            self.0.typed("Unit")
+        }
+
+        /// The operations of `Unit`'s `comments`, a typed method
+        /// each ([`UnitCommentsOperations`]).
+        pub fn unit_comments(&self) -> Result<UnitCommentsOperations<'_>, orm::Error> {
+            self.unit().map(UnitCommentsOperations)
+        }
+
+        /// The repository of `UserApiKey`.
+        pub fn user_api_key(&self) -> Result<UserApiKeyRepository<'_>, orm::Error> {
+            self.0.typed("UserApiKey")
+        }
+
+        /// The repository of `UserCredential`.
+        pub fn user_credential(&self) -> Result<UserCredentialRepository<'_>, orm::Error> {
+            self.0.typed("UserCredential")
+        }
+
+        /// The repository of `UserRoleGrant`.
+        pub fn user_role_grant(&self) -> Result<UserRoleGrantRepository<'_>, orm::Error> {
             self.0.typed("UserRoleGrant")
         }
     }

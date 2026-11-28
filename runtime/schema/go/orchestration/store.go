@@ -63,7 +63,7 @@ func (t Table) selectList() string {
 // Value is v as the column of field takes it: a UUID in the database's
 // form, "" as null for a UUID.
 func (t Table) Value(field string, v any) any {
-	if column, ok := t.Columns[field]; ok && column.UUID {
+	if column, ok := t.Columns[field]; ok && (column.UUID || column.SQLite == notifications.SQLiteUUID) {
 		if s, ok := v.(string); ok {
 			if s == "" {
 				return nil
@@ -79,17 +79,23 @@ func (t Table) Value(field string, v any) any {
 // Holds reports whether the column of field can hold id: any text, or a
 // UUID in either form for a UUID column.
 func (t Table) Holds(field, id string) bool {
-	if column, ok := t.Columns[field]; ok && column.UUID {
+	if column, ok := t.Columns[field]; ok && (column.UUID || column.SQLite == notifications.SQLiteUUID) {
 		return rowrefs.UUIDToDB(id) != ""
 	}
 	return true
 }
 
-// Where is the conditions of a statement and their values.
+// Where is the conditions of a statement and their values. Each condition
+// is written in the dialect of the host the statement runs on (#618).
 type Where struct {
 	t     Table
-	conds []string
+	conds []func(sqlite bool) string
 	args  []any
+}
+
+// cond adds a condition that is the same in every dialect.
+func (w *Where) cond(text string) {
+	w.conds = append(w.conds, func(bool) string { return text })
 }
 
 // Where starts the conditions of a statement over t.
@@ -102,58 +108,65 @@ func (w *Where) arg(v any) string {
 
 // Eq keeps the rows whose field is v.
 func (w *Where) Eq(field string, v any) *Where {
-	w.conds = append(w.conds, fmt.Sprintf("%s = %s", w.t.C(field), w.arg(w.t.Value(field, v))))
+	w.cond(fmt.Sprintf("%s = %s", w.t.C(field), w.arg(w.t.Value(field, v))))
 	return w
 }
 
 // In keeps the rows whose field is one of values.
 func (w *Where) In(field string, values ...string) *Where {
-	w.conds = append(w.conds, fmt.Sprintf("%s = ANY(%s)", w.t.C(field), w.arg(values)))
+	column, placeholder := w.t.C(field), w.arg(values)
+	w.conds = append(w.conds, func(sqlite bool) string { return notifications.InList(sqlite, column, placeholder) })
 	return w
 }
 
 // Null keeps the rows whose field is null, NotNull those whose field is
 // not.
 func (w *Where) Null(field string) *Where {
-	w.conds = append(w.conds, w.t.C(field)+" IS NULL")
+	w.cond(w.t.C(field) + " IS NULL")
 	return w
 }
 
 func (w *Where) NotNull(field string) *Where {
-	w.conds = append(w.conds, w.t.C(field)+" IS NOT NULL")
+	w.cond(w.t.C(field) + " IS NOT NULL")
 	return w
 }
 
 // Cmp keeps the rows whose field is op v.
 func (w *Where) Cmp(field, op string, v any) *Where {
-	w.conds = append(w.conds, fmt.Sprintf("%s %s %s", w.t.C(field), op, w.arg(v)))
+	w.cond(fmt.Sprintf("%s %s %s", w.t.C(field), op, w.arg(v)))
 	return w
 }
 
-func (w *Where) sql() string {
+func (w *Where) sql(sqlite bool) string {
 	if len(w.conds) == 0 {
 		return ""
 	}
-	return " WHERE " + strings.Join(w.conds, " AND ")
+	conds := make([]string, len(w.conds))
+	for i, cond := range w.conds {
+		conds[i] = cond(sqlite)
+	}
+	return " WHERE " + strings.Join(conds, " AND ")
 }
 
 // Find reads up to limit rows w keeps (none for no limit), ordered by
 // order, fields and DESC as SQL names them ("" for none).
 func Find(ctx context.Context, h Statements, w *Where, order string, limit int) ([]Row, error) {
-	sql := fmt.Sprintf("SELECT %s FROM %s%s", w.t.selectList(), w.t.Table, w.sql())
+	sqlite := notifications.OnSQLite(h)
+	sql := fmt.Sprintf("SELECT %s FROM %s%s", w.t.selectList(), w.t.Table, w.sql(sqlite))
 	if order != "" {
 		sql += " ORDER BY " + order
 	}
 	if limit > 0 {
 		sql += " LIMIT " + strconv.Itoa(limit)
 	}
-	rows, err := h.Query(ctx, sql, w.args...)
+	sql, args := notifications.Statement(h, sql, w.args)
+	rows, err := h.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("orchestration: read %s: %w", w.t.Type, err)
 	}
 	out := make([]Row, len(rows))
 	for i, r := range rows {
-		out[i] = Clean(r)
+		out[i] = w.t.clean(r, sqlite)
 	}
 	return out, nil
 }
@@ -185,12 +198,14 @@ func Insert(ctx context.Context, h Statements, t Table, values map[string]any) (
 	columns := make([]string, len(fields))
 	placeholders := make([]string, len(fields))
 	args := make([]any, len(fields))
+	sqlite := notifications.OnSQLite(h)
 	for i, field := range fields {
 		columns[i] = t.C(field)
 		placeholders[i] = "$" + strconv.Itoa(i+1)
-		args[i] = t.Value(field, values[field])
+		args[i] = t.arg(field, values[field], sqlite)
 	}
 	sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING %s", t.Table, strings.Join(columns, ", "), strings.Join(placeholders, ", "), t.selectList())
+	sql, args = notifications.Statement(h, sql, args)
 	rows, err := h.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("orchestration: write %s: %w", t.Type, err)
@@ -198,7 +213,7 @@ func Insert(ctx context.Context, h Statements, t Table, values map[string]any) (
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("orchestration: write %s: no row came back", t.Type)
 	}
-	return Clean(rows[0]), nil
+	return t.clean(rows[0], sqlite), nil
 }
 
 // Update sets values on the rows w keeps and returns how many it set.
@@ -213,11 +228,13 @@ func Update(ctx context.Context, h Statements, w *Where, values map[string]any) 
 	args := make([]any, 0, len(fields)+len(w.args))
 	// The conditions' placeholders come first.
 	args = append(args, w.args...)
+	sqlite := notifications.OnSQLite(h)
 	for i, field := range fields {
-		args = append(args, t.Value(field, values[field]))
+		args = append(args, t.arg(field, values[field], sqlite))
 		sets[i] = fmt.Sprintf("%s = $%d", t.C(field), len(args))
 	}
-	sql := fmt.Sprintf("UPDATE %s SET %s%s", t.Table, strings.Join(sets, ", "), w.sql())
+	sql := fmt.Sprintf("UPDATE %s SET %s%s", t.Table, strings.Join(sets, ", "), w.sql(sqlite))
+	sql, args = notifications.Statement(h, sql, args)
 	n, err := h.Exec(ctx, sql, args...)
 	if err != nil {
 		return 0, fmt.Errorf("orchestration: write %s: %w", t.Type, err)
@@ -237,6 +254,29 @@ func UpdateID(ctx context.Context, h Statements, t Table, id string, values map[
 // Row is a row of one of the orchestration's tables, or of a repository's
 // JSON, by field.
 type Row map[string]any
+
+// arg is v as the column of field takes it as a statement's parameter: a
+// UUID in the database's form, and on SQLite as its column holds it.
+func (t Table) arg(field string, v any, sqlite bool) any {
+	v = t.Value(field, v)
+	if sqlite {
+		return notifications.SQLiteArg(t.Columns[field], v)
+	}
+	return v
+}
+
+// clean is a row of t as the orchestration reads it, on SQLite each cell
+// first as the Postgres driver reads its column (notifications.SQLiteCell).
+func (t Table) clean(r map[string]any, sqlite bool) Row {
+	if sqlite {
+		read := make(map[string]any, len(r))
+		for k, v := range r {
+			read[k] = notifications.SQLiteCell(t.Columns[k], v)
+		}
+		r = read
+	}
+	return Clean(r)
+}
 
 // Clean is a row as the orchestration reads it: a UUID in base62, a JSON
 // value decoded.

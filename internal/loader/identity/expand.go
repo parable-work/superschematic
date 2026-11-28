@@ -1,9 +1,15 @@
 // Package identity expands the core user model's traits (D50) of a
 // verified schema into ordinary tables, as the version graph expansion does
 // for a version graph. A schema whose User table holds the project's users
-// gets the Session, UserCredential and UserApiKey (D114) tables beside it
-// and, when it also has a UserRole table, UserRoleGrant. ir/identity.go
-// names every table and field.
+// gets the Session, UserCredential and UserApiKey (D114) tables beside it,
+// the four tables of an OAuth authorization server (#695), and, when it
+// also has a UserRole table, UserRoleGrant. ir/identity.go names every
+// table and field.
+//
+// The OAuth tables are added beside every User table, as UserApiKey is,
+// whether or not an API turns @userSessions({ oauth }) on: a database
+// schema loads apart from the APIs whose authDb it is, and an empty table
+// costs nothing.
 //
 // The sql, orm and types generators emit the result with no identity
 // specific code. Every type, field and index the expansion adds carries
@@ -17,7 +23,11 @@ import (
 
 // Tables are the tables the expansion can add, in the order it adds them.
 // A schema with a User table reserves every name, UserRoleGrant included.
-var Tables = []string{ir.IdentitySessionTable, ir.IdentityCredentialTable, ir.IdentityAPIKeyTable, ir.IdentityRoleGrantTable}
+var Tables = []string{
+	ir.IdentitySessionTable, ir.IdentityCredentialTable, ir.IdentityAPIKeyTable,
+	ir.IdentityOAuthClientTable, ir.IdentityOAuthGrantTable, ir.IdentityOAuthCodeTable, ir.IdentityOAuthTokenTable,
+	ir.IdentityRoleGrantTable,
+}
 
 // Scalars the added fields use.
 const (
@@ -64,6 +74,26 @@ func apiKeyUserIndex() ir.IndexDef {
 	}
 }
 
+// oauthGrantUserIndex indexes OAuthGrant by its user, whose grants are
+// listed and revoked by it (#695).
+func oauthGrantUserIndex() ir.IndexDef {
+	return ir.IndexDef{
+		Keys:   []string{ir.IdentityOAuthGrantUserField},
+		Name:   "user",
+		Origin: ir.OriginIdentity,
+	}
+}
+
+// oauthTokenGrantIndex indexes OAuthToken by its grant, whose tokens a
+// revocation ends together (#695).
+func oauthTokenGrantIndex() ir.IndexDef {
+	return ir.IndexDef{
+		Keys:   []string{ir.IdentityOAuthTokenGrantField},
+		Name:   "grant",
+		Origin: ir.OriginIdentity,
+	}
+}
+
 // GeneratedIndex is an index the expansion adds: the type whose table
 // holds it, and the index.
 type GeneratedIndex struct {
@@ -77,7 +107,12 @@ func Indexes(schema *ir.Schema) []GeneratedIndex {
 	if schema.UserTable() == nil {
 		return nil
 	}
-	indexes := []GeneratedIndex{{ir.IdentitySessionTable, sessionUserIndex()}, {ir.IdentityAPIKeyTable, apiKeyUserIndex()}}
+	indexes := []GeneratedIndex{
+		{ir.IdentitySessionTable, sessionUserIndex()},
+		{ir.IdentityAPIKeyTable, apiKeyUserIndex()},
+		{ir.IdentityOAuthGrantTable, oauthGrantUserIndex()},
+		{ir.IdentityOAuthTokenTable, oauthTokenGrantIndex()},
+	}
 	if schema.UserRoleTable() != nil {
 		indexes = append(indexes, GeneratedIndex{ir.IdentityRoleGrantTable, grantIndex()})
 	}
@@ -97,6 +132,7 @@ func Expand(schema *ir.Schema) []string {
 	m.addSession()
 	m.addCredential()
 	m.addAPIKey()
+	m.addOAuth()
 	if role := schema.UserRoleTable(); role != nil {
 		m.addRoleGrant(role)
 	}
@@ -210,6 +246,112 @@ func (m *model) addAPIKey() {
 	})
 }
 
+// addOAuth adds the tables of the API's OAuth authorization server
+// (#695): OAuthClient, OAuthGrant, OAuthCode and OAuthToken. The database
+// keeps the SHA-256 of each code and token, never its text. A grant ends
+// at expiresAt or when revokedAt is set, and its tokens with it.
+func (m *model) addOAuth() {
+	minLength := 1
+	m.addType(&ir.TypeDef{
+		Name:    ir.IdentityOAuthClientTable,
+		Comment: "An OAuth client: a metadata document's, cached, or one that registered.",
+		Fields: []*ir.FieldDef{
+			keyFieldDef(),
+			{
+				Name:              ir.IdentityOAuthClientIDField,
+				Comment:           "The client_id the client is known by: its metadata document's URL, or the id registration made.",
+				TypeRef:           ir.TypeRef{Name: "string"},
+				Required:          true,
+				Unique:            true,
+				ValidateMinLength: &minLength,
+			},
+			text(ir.IdentityOAuthClientKindField, true, "metadataDocument or registered."),
+			text(ir.IdentityOAuthClientNameField, true, "What the consent page calls the client."),
+			text(ir.IdentityOAuthClientURIField, false, "The client's home page."),
+			{
+				Name:     ir.IdentityOAuthClientRedirectURIsField,
+				Comment:  "The redirects the client may use.",
+				TypeRef:  ir.TypeRef{Name: "string", IsArray: true},
+				Required: true,
+			},
+			dateTime(ir.IdentityOAuthClientCreatedAtField, true, ""),
+			dateTime(ir.IdentityOAuthClientRefreshedAtField, false, "When the client's metadata document was last fetched."),
+			dateTime(ir.IdentityOAuthClientFreshUntilField, false, "Until when the metadata document's cache headers keep it."),
+			dateTime(ir.IdentityOAuthClientLastUsedAtField, false, "When an authorization last named the client."),
+		},
+	})
+	m.addType(&ir.TypeDef{
+		Name:    ir.IdentityOAuthGrantTable,
+		Comment: "An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.",
+		Fields: []*ir.FieldDef{
+			keyFieldDef(),
+			relation(ir.IdentityOAuthGrantUserField, m.user.Name, "The user the grant calls as."),
+			relation(ir.IdentityOAuthGrantClientField, ir.IdentityOAuthClientTable, "The client that holds the grant."),
+			{
+				Name:    ir.IdentityOAuthGrantPermissionsField,
+				Comment: "The permissions the grant was given, each held while its user holds it; null for every permission its user holds.",
+				TypeRef: ir.TypeRef{Name: "string", IsArray: true},
+			},
+			text(ir.IdentityOAuthGrantResourceField, true, "The URL of the resource the grant was given for."),
+			dateTime(ir.IdentityOAuthGrantCreatedAtField, true, ""),
+			dateTime(ir.IdentityOAuthGrantExpiresAtField, true, "When the grant ends, however often its refresh token rotates."),
+			dateTime(ir.IdentityOAuthGrantLastUsedAtField, false, "When the grant's token last authenticated a request, written at most once a minute."),
+			dateTime(ir.IdentityOAuthGrantRevokedAtField, false, "When the grant was revoked, by its user, by an administrator, by a replayed code or refresh token, or when its user was disabled."),
+		},
+		Indexes: []ir.IndexDef{oauthGrantUserIndex()},
+	})
+	user := relation(ir.IdentityOAuthCodeUserField, m.user.Name, "The user who approved the request.")
+	user.Required = false
+	grant := relation(ir.IdentityOAuthCodeGrantField, ir.IdentityOAuthGrantTable, "The grant approval made.")
+	grant.Required = false
+	m.addType(&ir.TypeDef{
+		Name:    ir.IdentityOAuthCodeTable,
+		Comment: "An OAuth authorization request: pending while its user consents, then the code its client redeems once.",
+		Fields: []*ir.FieldDef{
+			keyFieldDef(),
+			relation(ir.IdentityOAuthCodeClientField, ir.IdentityOAuthClientTable, "The client that asked."),
+			user,
+			grant,
+			text(ir.IdentityOAuthCodeRedirectURIField, true, "The redirect the request named, which the code is bound to."),
+			text(ir.IdentityOAuthCodeChallengeField, true, "The PKCE challenge, S256, which the code's verifier must answer."),
+			text(ir.IdentityOAuthCodeStateField, false, "The state the client sent, which the redirect carries back."),
+			text(ir.IdentityOAuthCodeScopeField, false, "The scope the client asked for, as it sent it."),
+			text(ir.IdentityOAuthCodeResourceField, true, "The resource the request named, which the code is bound to."),
+			text(ir.IdentityOAuthCodeNonceField, true, "The value approve and deny send back, which ties a decision to the request the page read."),
+			{
+				Name:    ir.IdentityOAuthCodeCodeHashField,
+				Comment: "The SHA-256 of the code approval made, which only the client holds.",
+				TypeRef: ir.TypeRef{Name: sha256Scalar},
+				Unique:  true,
+			},
+			dateTime(ir.IdentityOAuthCodeCreatedAtField, true, ""),
+			dateTime(ir.IdentityOAuthCodeExpiresAtField, true, "When the request, or once approved its code, ends."),
+			dateTime(ir.IdentityOAuthCodeUsedAtField, false, "When the code was redeemed; a second redemption revokes its grant."),
+		},
+	})
+	m.addType(&ir.TypeDef{
+		Name:    ir.IdentityOAuthTokenTable,
+		Comment: "An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.",
+		Fields: []*ir.FieldDef{
+			keyFieldDef(),
+			relation(ir.IdentityOAuthTokenGrantField, ir.IdentityOAuthGrantTable, "The grant that issued the token."),
+			text(ir.IdentityOAuthTokenKindField, true, "access or refresh."),
+			{
+				Name:     ir.IdentityOAuthTokenTokenHashField,
+				Comment:  "The SHA-256 of the token, which only its client holds.",
+				TypeRef:  ir.TypeRef{Name: sha256Scalar},
+				Required: true,
+				Unique:   true,
+			},
+			dateTime(ir.IdentityOAuthTokenCreatedAtField, true, ""),
+			dateTime(ir.IdentityOAuthTokenExpiresAtField, true, "When the token ends."),
+			dateTime(ir.IdentityOAuthTokenUsedAtField, false, "When a refresh token rotated; a second use revokes its grant."),
+			dateTime(ir.IdentityOAuthTokenRevokedAtField, false, "When the token was revoked."),
+		},
+		Indexes: []ir.IndexDef{oauthTokenGrantIndex()},
+	})
+}
+
 // addRoleGrant adds UserRoleGrant: one row per role a user holds.
 func (m *model) addRoleGrant(role *ir.TypeDef) {
 	m.addType(&ir.TypeDef{
@@ -255,4 +397,8 @@ func relation(name, target, comment string) *ir.FieldDef {
 
 func dateTime(name string, required bool, comment string) *ir.FieldDef {
 	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: dateTimeScalar}, Required: required}
+}
+
+func text(name string, required bool, comment string) *ir.FieldDef {
+	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: "string"}, Required: required}
 }

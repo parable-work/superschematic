@@ -1360,16 +1360,19 @@ Identity.UUID, into: Identity.UUID): LabelView`) reads both live rows, 404
 for either that holds none, and runs [the
 merge](/superschematic/guides/database-tables/#merging-rows) in the route's
 transaction. A merge of a row into itself, or into a row that references
-it through a relation of the table to itself, is 409. It takes no row rule
+it through a relation of the table to itself, is 409, and one that would
+repoint or delete a row of another table its caller may not write is 403
+(`out_of_reach`), naming the table and nothing of the row. It takes no row rule
 and no parent in its path, since it reaches both rows by their keys. The
 TypeScript server serves it; the Go and Rust servers write no handler of
 it yet, so the operation stays in the implementation's interface, to write
 over `MergeInto` and `merge_into`. A TypeScript server whose database
 lists sqlite first opens it on SQLite, where its repositories merge no
 rows yet, so the build refuses the merge there (D182). The route reads
-both rows as its caller, and the Go and Rust repositories' merges find
-only the rows their caller may write
-([Who may read a row](/superschematic/guides/database-tables/#who-may-read-a-row)).
+both rows as its caller, and the TypeScript, Go and Rust repositories'
+merges find only the two rows their caller may write, and write no row of
+another table their caller may not
+([A merge and who may write the rows](/superschematic/guides/database-tables/#a-merge-and-who-may-write-the-rows)).
 
 A success is the envelope a hand-written route answers, with the status it
 answers, 200. A shape that fits no kind fails the load, and the message
@@ -1932,11 +1935,17 @@ the last two.
 | `inheritFrom` | a to-one relation to another `@audience` table | none |
 | `default` | the audience of a row whose create names none | `inherit` with `inheritFrom`, else `everyone` |
 | `agents` | the agent access of a row whose create names none | `followRole` |
+| `queue` | a `@queue` class, beside `inheritFrom`, whose worker resolves the rows that inherit from a changed parent after the parent's write (#734) | none: in the parent's transaction |
 
 A row that inherits and has no parent is its owner's alone, so a row a
 deleted parent leaves behind is not shown to everyone. When a parent's
 audience changes, a trigger resolves each child that inherits again, in
 the same transaction, and their children in turn.
+
+On Postgres each `@audience` table has a GIN index over its
+`effective_audience`, `idx_<table>_effective_audience`, which serves a
+read's overlap of the column with the caller's ids. SQLite has none: its
+audience is a JSON array a read takes apart with `json_each`.
 
 Every read of the table in an operation keeps to the rows its caller is in
 the audience of: a generated table operation, a repository call in a
@@ -1947,6 +1956,34 @@ is the 404 of one that is not there. An agent run sees a row its own id
 or the id of whom it acts for is in the audience of, and writes it only
 when its agent access is `followRole`. A route with no caller sees the
 rows everyone may.
+
+A table that composes behaviors ([A table's behavior
+operations](#a-tables-behavior-operations)) holds their operations to the
+same rows. That covers a Workflow transition, a Comments post, edit or
+delete, an Approvals sign-off, an Aliased rename and every other
+operation on a row. One that writes runs only for a caller who may write
+the row. One that writes nothing, such as Comments' `listMessages`, runs
+for a caller who sees it. For any other caller the row is the 404 of one
+that is not there: the call is refused before the behaviors' core reads
+the row, and nothing is written. The TypeScript, Go and Rust repositories
+hold every operation on a row to this, and so do the Go and Rust servers'
+behavior routes.
+
+A merge reaches rows past the two it names, and keeps to the caller too.
+It repoints and deletes the rows of every table that references the row
+merged away, and refuses (`out_of_reach`, which a route answers 403) when
+one of them is a row its caller may not write
+([A merge and who may write the rows](/superschematic/guides/database-tables/#a-merge-and-who-may-write-the-rows)).
+And the behaviors' core reads every row, so a behavior's answer that names
+a row is held to the caller where the repositories, and a Rust server's
+behavior routes, hand it back. Aliased's `resolve` answers `{ row: null }`
+for a name a row the caller does not see holds, and the `name_taken` that
+refuses a name another row holds names nothing of that row
+([A row's names](/superschematic/guides/database-tables/#a-rows-names)).
+Pool's `pick` answers `{ member: null }` when the member it picks is one
+the caller does not see
+([A pool of members](/superschematic/guides/database-tables/#a-pool-of-members)).
+Each holds in TypeScript, Go and Rust.
 
 Outside an operation, a job, a worker and `orm.asSystem()` read every row,
 and so does the database's own role. `orm.as(principal)` and
@@ -1986,11 +2023,49 @@ already running, so its triggers count on no other to finish their work:
 | `trg_<table>_audience_update` | after each update whose resolved columns are not what its audience resolves to | the same; its condition stops it once they are, whether or not a connection turns recursive triggers on |
 | `trg_<table>_audience_cascade` | on a table another inherits from, after an update that changes a row's resolved columns | sets each inheriting child's from the parent; a table that inherits from itself sets every inheriting row below the parent through a recursive query, and then the children of each in other tables |
 
-Go's and Rust's repositories on SQLite do not keep to an audience yet. A
-service that lists `sqlite` builds with Go's types, whose repositories
-there refuse each call with `ErrSQLiteUnsupported`
-([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)), and
-is refused with Rust's, naming the language.
+Go's and Rust's repositories on SQLite keep to an audience and grants by
+the same condition, and record the access log
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite),
+[In the Rust server](#in-the-rust-server)).
+
+### A parent with very many children
+
+A parent whose children run to thousands holds them all in the writer's
+transaction when its audience changes. A table whose `@audience` names a
+queue resolves its rows through it instead (#734):
+
+```ts
+@queue()
+export abstract class AudienceResolving {}
+
+@audience<Page>({ inheritFrom: "folder", queue: AudienceResolving })
+export abstract class Page { ... }
+```
+
+The queue declares no fields: the build fills them (`childTable`, the
+inheriting table by its type's name, and `parentKey`, the parent's key as
+text) and keeps one ready message per parent and table. When a folder's
+audience changes, its cascade enqueues the folder and updates none of its
+pages, so the folder's write commits at once. The queue's worker resolves
+the folder's pages a batch of 500 at a time, in key order, each batch a
+statement of its own, and each page's own trigger reads the folder's
+audience again. The table gets an index over its `inheritFrom` and its key
+for the batches, `idx_<table>_audience_parent`.
+
+Until the worker has run, a read of a page keeps to the audience it had:
+a folder made private shows its pages to whom it showed them, and one made
+public hides them, until then. Name a queue only for a table whose rows can
+wait for it.
+
+A `@worker` of the queue is the runtime's, as a `@searchable` queue's is:
+the generated TypeScript API package exports `resolveAudienceMessage`,
+which calls `resolveAudience(deps.orm, message)` from
+`@superschematic/http-runtime/postgres`, and the Go API package's
+`wiring.go` builds the worker's queue over the ORM's
+`ResolveAudience(ctx, childTable, parentKey)`. A Rust app calls
+`orm::resolve_audience(client, definition, message)` from its worker.
+Postgres alone: the loader refuses `queue` in a service that lists
+`sqlite`.
 
 ### Grants
 
@@ -2120,6 +2195,13 @@ buildRouter(implementations, {
 });
 ```
 
+A generated TypeScript server does this itself for a database with an
+`@accessGrants` or an `@accessLog` table: the implementation's
+`authenticate` is `inner`, and an agent run's token goes on to it
+(`runTokens: 'inner'`), which resolves it where it is the dispatcher's
+([agent runs](/superschematic/guides/agent-runs/)). An API whose identity service establishes
+its callers keeps the identity's alone on its routes.
+
 ### In Go
 
 The Go server and ORM serve the same access. The auth provider's
@@ -2129,6 +2211,11 @@ puts one on the request with `session.ContextWithCaller`; a step that puts
 only an id, as the identity runtime does, names a user. Each route binds
 the caller to the ORM with `orm.WithPrincipal`, so the repositories hold
 every read and write of the operation to it, as the TypeScript ones do.
+A behavior's operation on a row, such as `db.Task.Status().Transition`
+or `db.Task.Comments().Post`, checks the row before the core runs, as
+`UpdateOne` does. A row out of reach is `orm.ErrNotFound`, which wraps the
+core's `not_found` of a row that is not there, so the behavior route
+answers 404 for both.
 `orm.AsSystem(ctx)`, and a context outside any operation, read every row.
 
 ```go
@@ -2138,7 +2225,13 @@ api.RegisterRoutes(router, api.Config{DB: db, Logger: logger})
 
 `session.GrantAuthenticator` runs a request with a `grant_` token as the
 grant's holder; the ORM of a database with an `@accessGrants` table is the
-authority it reads the grant from on every call. The grants are the ORM's:
+authority it reads the grant from on every call. A stack's Go server wires
+it itself: its API package's `Authenticator` puts it before the API's own
+auth step, the identity runtime's middleware or the implementation's
+`AuthMiddleware`, which the router's `Config` then takes, or, for an API
+with neither, on the router, so a grant's holder is the caller of every
+route; with the agent dispatcher it is the dispatcher's `Authenticator`,
+which establishes a running run's token too. The grants are the ORM's:
 
 | Function | Does |
 | --- | --- |
@@ -2157,6 +2250,16 @@ operation's transaction. A route of an API whose database has an
 there is no option to pass. A revealed field holds text, and the database
 needs an `@accessLog` table, or the build is refused.
 
+A Go create that leaves `Audience` or `AgentAccess` at `""` takes the
+table's default, `@audience`'s `default` and `agents`, as a create
+through a route does, whose body takes the schema's defaults. A table
+that composes behaviors creates, reads and writes its rows through the
+behaviors' core, which reads `audienceNamed` and `effectiveAudience` as
+lists of ids, so its operations, and a Go deriver of its Derived fields,
+run on a private or a named row. A deriver reads and settles every row,
+as a job does, and the rows keep to their audience for every other
+caller.
+
 A Go server refuses at build time the platform features it does not
 serve yet, on its database's tables and its own: `@party`,
 `@conversations` and `@runRequests`, `@agents`, a provider with no Go
@@ -2171,15 +2274,17 @@ through the HTTP runtime's `notify` package over the ORM's
 "TYPESCRIPT"`). A database keeps its Go types, which its Go ORM, always
 generated, needs.
 
-The Go ORM's repositories on SQLite keep to no audience, grants or access
-log yet: they would read every row for a caller with grants, and the
-server would record its calls in no log. So a DB service that lists
-`sqlite` and declares an `@audience`, `@accessGrants` or `@accessLog`
-table builds, and on SQLite each of its Go repositories that the access
-reaches refuses every call with `ErrSQLiteUnsupported`, naming why. The
-TypeScript repositories serve all three on SQLite (D182); a service that
-enables the Rust types there is refused, naming the decorator and the
-table.
+The Go ORM's repositories on SQLite keep to an audience and grants, and
+write the access log, as on Postgres (#611), with the TypeScript
+repositories' conditions on SQLite (D182). `(*SQLiteDatabase).AuthenticateGrant`
+reads a token's grant on every call. Recurrence, the calendar and search
+run on SQLite too (#615): the calendar and search over the SQLite
+database's `CrossTables()` keep each table's rows to the caller by the
+same conditions. The notifier, the parties and the agents run on SQLite
+too (#618), through the SQLite database's `Notifications()` and
+`Orchestration()`, so a Go server over a database that lists `sqlite`
+first is refused none of them. The Rust repositories serve an audience,
+grants and the access log on SQLite too (#611).
 
 ### In the Rust server
 
@@ -2201,6 +2306,28 @@ Repositories opened without `with_access`, and `as_system()`, read every
 row, as a job does. `audience_conditions(definition, audience, caller,
 args, write)` in `orm` is the predicate a read across tables applies.
 
+A behavior's operation through the repositories (`operation`, and each
+use's typed methods) checks the row as `update_one` does, and answers a
+row out of reach with `Error::NotFound`. `Repository::reach(key, write)`
+is the same check, for code that runs the core itself, and
+`Repository::keep_answer(member, operation, answer)` holds an operation
+of the table as a whole's answer to the caller as `table_operation` does.
+The server's behavior routes run the core through the rules adapter. Over
+a database whose rows keep to a caller (an `@audience` table or grants),
+each route opens the database's Rust repositories for the request's
+caller and checks the row before the core runs. A row out of reach gets
+the core's 404 for a row that is not there. A route of an operation of
+the table as a whole, such as `resolve` or `pick`, answers null for the
+row its answer names when the caller does not see it. So the crate
+depends on the database's Rust types and their Postgres repositories, and
+the build refuses one whose `Deps` names none.
+
+The SQLite repositories keep to the same access on a SQLite file (#611),
+`sqlite::Repositories::new(&connection)?.with_access(...)`, with the
+TypeScript repositories' conditions there
+([On SQLite and D1](#on-sqlite-and-d1)): an audience is the JSON array of
+ids the file's triggers keep, which a read reaches through `json_each`.
+
 The grants and the access log are in the runtime's `access` module:
 
 | TypeScript | Rust |
@@ -2209,18 +2336,87 @@ The grants and the access log are in the runtime's `access` module:
 | `grantAuthenticator({ orm, inner })` | `GrantAuthenticator::new(tables)?.with_inner(inner)` |
 | `accessLog: accessLogOf(orm)` | `Logged::new(authenticator, Arc::new(access_log_of(&tables)?.unwrap()))` |
 
+On a SQLite file they are in `access::sqlite`, over the SQLite
+repositories and the file's `orm::sqlite::Tables`:
+
+| Postgres (`access`) | SQLite (`access::sqlite`) |
+| --- | --- |
+| `issue_grant(&repositories, &input).await` | `issue_grant(&repositories, &input)`, in the connection's transaction |
+| `revoke_grant(&client, definition, id, at).await` | `revoke_grant(&connection, definition, id, at)` |
+| `active_grants(&client, definition, &filter).await` | `active_grants(&connection, definition, &filter)` |
+| `GrantAuthenticator::new(tables)` | `GrantAuthenticator::new(tables)`, which reads a token's grant on a reading connection of the file on every call; `authenticate_grant(&connection, definition, token, now)` is its read |
+| `access_log_of(&tables)` | `access_log_of(&tables)`, each entry a write transaction of its own; `record_access(&connection, definition, &entry, at)` writes one in yours |
+
+A table operation that may reveal a value runs on the file's writing
+connection, since its access-log row is a write.
+
 `Logged` wraps the authenticator the server's `Handlers` take, and records
 a call once the router has its caller, before its permissions are
-checked. A row rule's path and `@decrypted({ permission })` are served by
-the generated table operations, as in TypeScript.
+checked. A generated Rust server wraps the implementation's authenticator
+in both itself, for a database with grants or an access log
+([the generated Rust server's wiring](#the-generated-rust-servers-wiring)).
+A row rule's path and `@decrypted({ permission })` are served by the
+generated table operations, as in TypeScript.
+
+### The generated Rust server's wiring
+
+A generated Rust server builds the runtime parts of its API's database
+itself, on Postgres (#620, #622, #617, #610): the notifier, the agent
+dispatcher, the inbound path, the calendar and search routes and MCP
+tools, the grants' authenticator and the access log, those the database
+has. The API crate's `src/wiring.rs` builds them over the database's pool,
+the API's config and its providers, in the order they take each other,
+and hands each to the implementation's `Wire`, whose methods' defaults are
+the generated wiring. The implementation declares `create_wiring`, which
+the scaffold writes, and changes or adds to a part in the method of it:
+
+```rust
+use schemas_work_api_api::{BoxError, Wire, WiringDeps};
+use superschematic_http_runtime::orm::agents::Agents;
+use superschematic_http_runtime::orm::notify::Notifier;
+
+pub async fn create_wiring(deps: &WiringDeps) -> Result<Arc<dyn Wire>, BoxError> {
+    Ok(Arc::new(Wiring { endpoint: deps.config.agent_endpoint.clone() }))
+}
+
+pub struct Wiring { endpoint: String }
+
+impl Wire for Wiring {
+    fn agent_endpoint(&self) -> String { self.endpoint.clone() }
+    fn agents(&self, agents: Agents) -> Result<Agents, BoxError> {
+        Ok(agents.with_tool("read_task", read_task()))
+    }
+    fn notifier(&self, notifier: Notifier) -> Result<Notifier, BoxError> {
+        Ok(notifier.with_reply("ticket.overdue", "done", Arc::new(MarkDone)))
+    }
+}
+```
+
+| The server | What it builds |
+| --- | --- |
+| `Deps` | `notifier`, `agents` and `inbound`, the parts the database has |
+| its routes | the agent routes under the endpoint's path, the inbox (`GET /api/inbox`, `POST /api/inbox/{id}/read` and `/ack`), the relays' routes (`POST /webhooks/{slot}/inbound` and `/status`), `/api/calendar` and `/api/search`, beside the API's router |
+| its authenticator | the implementation's inside `GrantAuthenticator` and `Logged`, as `Wire::authenticator` answers |
+| its MCP endpoint | the dispatcher's `mcp_gate` as its call gate, and the `calendar` and `search` tools |
+| a worker of a part's queue | the notifier's dispatch queue, the dispatcher's requests, the run requests and a `@searchable` queue run through the part, with no method of `Workers` |
+
+The dispatcher's endpoint defaults to the server's own agent routes on the
+loopback address and `$PORT`. An implementation that admits an agent
+run's token on the API's own routes answers
+`agents.authenticator(Some(implementation))` from `Wire::authenticator`.
+An implementation that predates the parts is refused by the build, which
+says what to add. A database that lists `sqlite` first has no generated
+wiring, as the loader refuses its parts there.
 
 The Rust outputs refuse, at build time, the platform features they do not
 serve yet: `@party`, `@conversations`, `@runRequests` and `@agents` on a
 table of a DB service with Rust types, and on a Rust server `@autonomy`
 and a provider with no Rust crate. References and attachments and the
 runtime providers are served (D185), and so are Recurrence, the calendar
-and search across tables, on Postgres (D188): a Rust server whose database
-lists `sqlite` first is refused Recurrence and a calendar source. Events,
+and search across tables, on Postgres (D188) and on SQLite (#615): a Rust
+server whose database lists `sqlite` first serves Recurrence on the file,
+and `orm::calendar::sqlite` and `orm::search_tables::sqlite` read the
+calendar and search it there. Events,
 the notifier's tables and the channel identities are served on Postgres
 too (D191), through the runtime's `orm::notify`.
 
@@ -2228,13 +2424,13 @@ too (D191), through the runtime's `orm::notify`.
 
 | Not built | Until then |
 | --- | --- |
-| the Go and Rust repositories' audience on SQLite | the TypeScript repositories serve it there; the Go ones refuse each call with `ErrSQLiteUnsupported`, and a service that lists `sqlite` and declares an audience builds no Rust types |
-| the Go and Rust repositories' grants and access log on SQLite | the TypeScript repositories serve them there; the Go ones refuse each call, a service that lists `sqlite` and declares either builds no Rust types, and the Go and Rust servers serve them on Postgres |
+| a generated Rust server over a database that lists `sqlite` first that wires the grants' authenticator and the access log | build `access::sqlite::GrantAuthenticator` and `Logged` over the file's tables in the implementation |
+| a generated Rust server over a database that lists `sqlite` first that mounts the calendar's and the search's routes and runs the search queue's worker | merge `orm::calendar::sqlite::calendar_routes` and `orm::search_tables::sqlite::search_routes` into the router, and call `index_search` in a worker of the queue |
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
-| an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
-| a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |
-| a generated TypeScript server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options; the Go server records its calls itself |
-| a GIN index on `effective_audience` | add one with `@rawSql` for a large table |
+| an audience in a declared query (`@query`) and in raw SQL (options in #735) | a declared query reads every row; filter it by `effective_audience` yourself |
+| a generated route that lists only the active grants, and a declared query of them (options in #735) | `activeGrants` in the TypeScript, Go and Rust runtimes, or a `@tableOperation` over a view of every grant |
+| a row rule whose path ends at a list of ids, and a team as a principal in an audience (options in #735) | a row rule on a member that holds one id; name each member in `audienceNamed` |
+| an `@audience` queue on SQLite, and the generated Rust server's worker of one (#734) | resolve in the writer's transaction on SQLite; call `orm::resolve_audience` from a Rust worker |
 
 ## A table's behavior operations
 
@@ -2694,11 +2890,9 @@ queues no worker runs: its deadlines fall due and its changes wait for
 one, and nothing that hears them runs until a worker does. An API that serves
 `@behaviorOperations(Ticket)` and declares no `@behaviorWorker(Ticket)`
 gets a warning; declare one on that API or on another over the same
-database. The worker claims on Postgres, as every worker does. A
-TypeScript one over a database that lists `sqlite` first is refused, as
-a TypeScript behavior worker claims its queues on Postgres alone; there an
-app's worker runs the `./orm/sqlite` entry's `runDeadline` and `runChange`
-over `sqliteQueue`'s claims (D186). On
+database. A TypeScript one over a database that lists `sqlite` first
+claims its queues over the SQLite file under `stack dev`, and over the
+D1 binding on Workers, each claim in the connection's turn (#702). On
 Cloudflare Workers a TypeScript one drains its table's queues at each
 firing of a Cron Trigger, and a deadline or an event due before the next
 firing wakes it through its Workflow
@@ -2977,8 +3171,8 @@ the route's 400 before the core runs (the TypeScript and Go SDKs check it
 before they send it); and one for a use whose behavior takes none, or a use the table
 lacks, is 400 `invalid_argument` from the core, class
 `PreconditionsError` (`preconditions of Job: /Retries: behavior Retries
-takes no precondition`). An engine type's routes read the token from the
-`Preconditions` header instead
+takes no precondition`). Development mode's routes read the token from
+the `Preconditions` header instead
 ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ### Their worker
@@ -3272,7 +3466,8 @@ with a path parameter in a segment's place (`account/{id}/pick` matching
 serve the table's operations from code of your own. An operation a
 behavior declares on a namespace as a whole (Comments') is not served,
 and the build warns of it, and neither is one a table leaves out
-(Dependencies' `listDependents`, D104's step 4, an engine type's alone).
+(Dependencies' `listDependents`, D104's step 4, which the engine alone
+runs).
 
 ## A version graph's operations
 
@@ -3464,6 +3659,105 @@ Each operation is an MCP tool, `recipe_branch`, `recipe_save` and the rest,
 with the title and the description the build gives it; a set whose
 `@requireService` admits only services hides them.
 
+## A table's references and files
+
+A table's references, the rows that point at it and its files
+([References and files on any row](/superschematic/guides/database-tables/#references-and-files-on-any-row))
+are routes with no code of yours (#723): a class with no members, marked
+`@rowFeatureOperations` with the table, which it imports from its database.
+
+```ts
+// issues-api
+import { auth, rowFeatureOperations } from "@superschematic/api";
+import { Issue, Note } from "@acme/issues-db";
+
+@rowFeatureOperations(Issue)
+@auth
+export abstract class IssueOperations {}
+
+@rowFeatureOperations(Note, {
+  operations: ["references", "addReference", "backlinks", "attachments", "beginUpload", "completeUpload", "download"],
+  permissions: { beginUpload: ["notes.upload"] },
+  bucket: "issue-files"
+})
+@auth
+export abstract class NoteOperations {}
+```
+
+The build adds to the set each operation the table offers: a `@references`
+table its references, a table a reference may point at its backlinks, and
+an `@attachments` table its files. `operations` narrows the set,
+`permissions` replaces the class's `@requirePermission` for one operation,
+and `bucket` names the API's bucket that holds the files, its one bucket
+unless set.
+
+| Operation | Route | Body | Answers | Tool |
+| --- | --- | --- | --- | --- |
+| `references` | `GET issue/{id}/references` | | `RowReference[]`, each to a row the caller can read | `issue_references` |
+| `addReference` | `POST issue/{id}/references` | `RowReferenceInput`: `to` (`{ table, key }`), `role` | `RowReference` | `issue_add_reference` |
+| `removeReference` | `POST issue/{id}/references/remove` | `RowReferenceInput`; no `role` removes every role | `RowReferencesRemoved` | |
+| `backlinks` | `GET issue/{id}/backlinks` | | `RowBacklinks`: `items`, and `hidden` for the owner of a private row | `issue_backlinks` |
+| `attachments` | `GET issue/{id}/files` | | `RowAttachment[]`, the ready files | `issue_attachments` |
+| `beginUpload` | `POST issue/{id}/files` | `RowAttachmentBeginInput`: `name`, `mediaType`, `size`, `sha256`, `caption` | `RowAttachmentBegun`: the pending file and the `upload` the browser PUTs the bytes with | |
+| `completeUpload` | `POST issue/{id}/files/{file}/complete` | | `RowAttachment`, ready | |
+| `download` | `GET issue/{id}/files/{file}` | | `RowAttachmentDownload`: a signed `url`, its `expiresAt`, the file | |
+| `fileAttachment` | `POST issue/{id}/files/{file}/file` | `RowAttachmentFileInput`: `to`, `move`, `role` | `RowAttachment`, the file on the other row | |
+| `removeAttachment` | `DELETE issue/{id}/files/{file}` | | `true` | |
+
+Every route is below `/api`, and every type is added once to the API,
+shared by every set. The SDK methods sit in the set's namespace,
+`sdk.issue.backlinks(id)` and `sdk.issue.completeUpload(id, file)`: name the
+set `<Table>Operations` or `<Table>Actions` to put them under the table's
+name. The reads and the add of a reference are MCP tools; the rest stay
+routes, since a file's bytes go to and from the bucket through a signed URL,
+which no tool call carries.
+
+Each route takes the set's clause, as a `@behaviorOperations` set's does,
+and runs as its caller, so every read keeps to what the caller may read
+([Per-record access](#per-record-access)): a row the caller cannot read is
+the 404 of one that is not there, a reference to one is left out, and only
+the owner of a row whose audience is not everyone gets `hidden`. A route
+that names a file holds it to the row its path names: another row's file is
+a 404 too. A refusal of the declaration's rules is a 422 whose `code` is
+the rule's (`table_not_allowed`, `too_many`, `media_type`, `too_large`,
+`row_full`, `mismatch`, `expired` and the rest), with its `details`.
+
+The TypeScript router runs each through `RouterOptions.orm`, the database's
+repositories, and signs the files' URLs of `RouterOptions.attachmentsBucket`;
+the generated entrypoint passes `deps.orm` and the bucket's `Deps` member.
+The Go server serves them from the module's `rowfeatures.go`, over
+`Config.DB` and `Config.Attachments`, which `AttachmentsOf(deps)` builds:
+
+```go
+issuesapi.RegisterRoutes(router, issuesapi.Config{
+	DB:          db,
+	Attachments: issuesapi.AttachmentsOf(deps),
+	Logger:      logger,
+})
+```
+
+The Rust server serves them from the crate's `src/rowfeatures.rs`, through
+the `references()` and `attachments()` of the database's repositories in
+its Rust types, which the HTTP runtime's `orm::rowfeatures::routes` runs as
+the route's caller. `Implementations::new` takes the pool, or the SQLite
+file of a database that lists sqlite first, and the bucket that holds the
+files; the generated entrypoint passes the ones it opened for `Deps`:
+
+```rust
+let implementations = issues_api::Implementations::new(handlers, pool.clone(), Arc::clone(&issue_files));
+```
+
+An add of a reference, a begin of an upload and a filing run in a
+transaction of their own; the other operations run as their statements do,
+so a completion whose bytes differ removes the file and refuses, and the
+removal stays. The database's Rust types are generated, and a
+content-addressed bucket (D142) is refused for the files, as in Go.
+
+On every server the interface of your implementation has no method for a
+row feature operation. The released queue's worker, which deletes an
+object once no file names it, stays the app's: it calls
+`orm.asSystem().attachments.release(message, { bucket })`.
+
 ## OpenAPI
 
 The build writes `api/<service>/openapi.json`, and every server serves it
@@ -3493,7 +3787,7 @@ reads no file, on Bun, Node.js and Workers alike. It still exports
 `openapi.json` as `<package>/openapi.json`. A server that serves several
 APIs answers both routes from the first API's router.
 
-With `outputs.api.mcp` on, a TypeScript or a Rust API also serves its MCP
+With `outputs.api.mcp` on, a TypeScript, a Rust or a Go API also serves its MCP
 tools at `POST /api/mcp`
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
 A tool whose `@mcp` says `invocationPolicy: "ask"` runs there only once

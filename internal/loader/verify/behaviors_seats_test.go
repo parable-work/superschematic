@@ -6,10 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -311,16 +309,16 @@ func TestReconcileConfigIsHeldToTheTable(t *testing.T) {
 	}
 }
 
-// TestAnEngineTypeRefusesSeatsAndReconcile (D104): Seats and Reconcile are
-// the behaviors' core's alone, which no engine implements
-// (registry.EngineImplements), so an engine type's @behavior use of either,
-// on a DB table and in a General schema alike, is refused, naming the table
-// form: implements Seats<T, { ... }> on a DB table, and observed:
-// Reconcile<{ ... }> beside a Workflow field.
-func TestAnEngineTypeRefusesSeatsAndReconcile(t *testing.T) {
+// TestADBTypeRefusesBehavior (D103): a DB type is a table, so @behavior on
+// it is refused, once per use, naming the form the behavior takes on a
+// table: implements Seats<T, { ... }> for a behavior anchored on the type,
+// and status: Workflow<{ ... }> or observed: Reconcile<{ ... }> for one
+// anchored on its value field. A General schema's type keeps @behavior.
+func TestADBTypeRefusesBehavior(t *testing.T) {
 	const (
-		seatsRefused     = "type Note: behavior Seats is implemented by the behaviors' core alone, which runs it on a table, and no engine implements it: write implements Seats<Note, { ... }> on a DB table (D104)"
-		reconcileRefused = "type Note: behavior Reconcile is implemented by the behaviors' core alone, which runs it on a field of a table, and no engine implements it: write observed: Reconcile<{ ... }> beside a Workflow field on a DB table (D104)"
+		workflowRefused  = "type Note composes behavior Workflow with @behavior, which a DB type does not take: a DB type is a table, which composes it as status: Workflow<{ ... }> (D103)"
+		seatsRefused     = "type Note composes behavior Seats with @behavior, which a DB type does not take: a DB type is a table, which composes it as implements Seats<Note, { ... }> (D103)"
+		reconcileRefused = "type Note composes behavior Reconcile with @behavior, which a DB type does not take: a DB type is a table, which composes it as observed: Reconcile<{ ... }> (D103)"
 	)
 	note := func(behavior map[string]any) func(doc, _ map[string]any) {
 		return func(doc, _ map[string]any) {
@@ -343,75 +341,20 @@ func TestAnEngineTypeRefusesSeatsAndReconcile(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadTasks(t, note(tc.behavior))
-			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Count(err.Error(), "behaviors' core alone") != 1 {
-				t.Fatalf("LoadService = %v, want one problem, %q", err, tc.want)
+			if err == nil || !strings.Contains(err.Error(), workflowRefused) || !strings.Contains(err.Error(), tc.want) || strings.Count(err.Error(), "which a DB type does not take") != 2 {
+				t.Fatalf("LoadService = %v, want two problems, %q and %q", err, workflowRefused, tc.want)
 			}
 		})
 	}
-}
 
-// TestAnEngineTypeNamingSeatsIsRefusedBeforeEnginedoc (D104): enginedoc,
-// engineclientgen and the engine's project generator read only engine types,
-// and registry.EngineImplements is false for Seats, Reconcile and
-// Schedules, so the build refuses an engine type of a General schema that
-// names one when it loads, before any of them reads the schema: none of
-// them names any of these behaviors.
-func TestAnEngineTypeNamingSeatsIsRefusedBeforeEnginedoc(t *testing.T) {
-	reg := registry.New(naming.Default())
-	for _, name := range []string{"Seats", "Reconcile", "Schedules"} {
-		behavior, ok := reg.Behavior(name)
-		if !ok || registry.EngineImplements(behavior) || behavior.Package != registry.RulesPackage {
-			t.Fatalf("%s: package %q, engine implements %v; want %s and false", name, behavior.Package, registry.EngineImplements(behavior), registry.RulesPackage)
-		}
-	}
 	general := `{"name": "notes", "kind": "General", "types": {"Note": {"name": "Note", "role": "EmbeddedStruct",
 	  "behaviors": [{"name": "Workflow", "config": {"states": ["draft", "sent"], "transitions": [{"from": "draft", "to": "sent"}]}},
 	    {"name": "Seats", "config": {"seats": {"authors": {"max": 3}}}}],
 	  "fields": [{"name": "title", "typeRef": {"name": "string"}, "required": true}]}}}`
-	_, err := loader.LoadService(writeFiles(t, map[string]string{
+	if _, err := loader.LoadService(writeFiles(t, map[string]string{
 		"schema.config.json":    `{"name": "notes", "kind": "General", "outputs": {}}`,
 		"src/notes.schema.json": general,
-	}))
-	if want := "type Note: behavior Seats is implemented by the behaviors' core alone, which runs it on a table, and no engine implements it: write implements Seats<Note, { ... }> on a DB table (D104)"; err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("LoadService = %v, want %q", err, want)
-	}
-}
-
-// TestAnEngineTypesByOfASeatIsRefusedAsAnyBy (D104): an engine type's
-// Workflow transition and StateRules state take no by, whatever its
-// entries, so a by of seat:<name> alone is refused in the words a by of
-// fields is, naming the table form, as the engine refuses it.
-func TestAnEngineTypesByOfASeatIsRefusedAsAnyBy(t *testing.T) {
-	note := func(workflowBy, stateBy []any) func(doc, _ map[string]any) {
-		return func(doc, _ map[string]any) {
-			transition := map[string]any{"from": "draft", "to": "sent"}
-			behaviors := []any{map[string]any{"name": "Workflow", "config": map[string]any{"states": []any{"draft", "sent"}, "transitions": []any{transition}}}}
-			if workflowBy != nil {
-				transition["by"] = workflowBy
-			}
-			if stateBy != nil {
-				behaviors = append(behaviors, map[string]any{"name": "StateRules", "config": map[string]any{"states": map[string]any{"sent": map[string]any{"frozen": []any{"title"}, "by": stateBy}}}})
-			}
-			doc["types"].(map[string]any)["Note"] = map[string]any{"name": "Note", "role": "DBTable", "behaviors": behaviors, "fields": []any{
-				taskField("id", "Identity.UUID", map[string]any{"required": true, "key": true}),
-				taskField("title", "string", map[string]any{"required": true}),
-			}}
-		}
-	}
-	for _, tc := range []struct {
-		name string
-		edit func(doc, _ map[string]any)
-		want string
-	}{
-		{"a transition's seat", note([]any{"seat:owners"}, nil),
-			`type Note: @behavior Workflow names by on the transition from "draft" to "sent", which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission, repeat and finished, so leave it out`},
-		{"a state's seat", note(nil, []any{"seat:owners"}),
-			`type Note: @behavior StateRules names by in the rules of "sent", which a table's StateRules takes (implements StateRules<Note, C>, D104); an engine type's StateRules takes required, frozen and permission alone, so leave it out`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := loadTasks(t, tc.edit); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("LoadService = %v, want %q", err, tc.want)
-			}
-		})
+	})); err != nil {
+		t.Fatalf("a General schema's @behavior: LoadService = %v", err)
 	}
 }

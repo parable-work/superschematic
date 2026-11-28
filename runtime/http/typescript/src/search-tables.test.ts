@@ -48,6 +48,9 @@ describe('search across tables', () => {
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ data: { items: [], total: 0, more: false, reranked: false } });
     expect((await route(new Request('http://api.test/api/search', { method: 'POST' })))!.status).toBe(405);
+    const refused = (await route(new Request('http://api.test/api/search?q=walnut', { headers: { 'x-request-id': 'req-9' } })))!;
+    expect(refused.headers.get('content-type')).toBe('application/problem+json');
+    expect(await refused.json()).toEqual({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Authentication required', code: 'unauthorized', requestId: 'req-9' });
   });
 
   test('the MCP tool reads only, and refuses a call without q', async () => {
@@ -128,6 +131,50 @@ function notesOrm(notes: Map<string, { title: string; text: string | null; delet
 }
 
 const hashOf = (text: string) => createHash('sha256').update(text).digest('hex');
+
+describe('a search by vector alone (#740)', () => {
+  /** An ORM with one @searchable table, Note, that records each statement and answers none. */
+  const recording = (config?: string) => {
+    const statements: { text: string; values: readonly unknown[] }[] = [];
+    const definition: SearchableDefinition = { index: '"search_index"', document: 'doc(si)', table: '"note"', key: '"id"', keyType: 'uuid', uuid: true, title: '"title"', ...(config ? { config } : {}) };
+    const orm: Record<string, unknown> = {
+      note: { def: { name: 'Note', searchable: definition }, conditions: () => [] },
+      as: () => orm,
+      asSystem: () => orm,
+      query: async (text: string, values: readonly unknown[] = []) => {
+        statements.push({ text, values });
+        return { rows: [] };
+      },
+    };
+    return { orm, statements };
+  };
+  const embeddings = { model: 'm1', embed: async () => [] };
+
+  test('ranks by the vector, its excluded terms kept out, and needs embeddings to say its model', async () => {
+    const { orm, statements } = recording();
+    const result = await searchTables(orm, { subject: 'u', permissions: [] }, { q: '-draft', vector: [3, 4] }, { embeddings });
+    expect(result).toEqual({ items: [], total: 0, more: false, reranked: true });
+    const [{ text, values }] = statements as [{ text: string; values: readonly unknown[] }];
+    expect(text).toContain('ORDER BY h.similarity DESC, h.source_table, h.source_key');
+    expect(text).toContain("NOT (doc(si) @@ (phraseto_tsquery('simple'::regconfig, $1::text)))");
+    expect(text).not.toContain('ts_rank_cd');
+    expect(values).toContainEqual([0.6, 0.8]);
+    expect(searchTables(orm, null, { q: '', vector: [1, 0] })).rejects.toThrow('a vector needs embeddings');
+  });
+
+  test('a query of excluded terms alone with no vector finds nothing, and asks nothing', async () => {
+    const { orm, statements } = recording();
+    expect(await searchTables(orm, null, { q: '-draft -old' }, { embeddings })).toEqual({ items: [], total: 0, more: false, reranked: false });
+    expect(statements).toHaveLength(0);
+  });
+
+  test("a definition's config is the query's", async () => {
+    const { orm, statements } = recording('search_unaccent');
+    await searchTables(orm, null, { q: 'cafe' });
+    expect(statements[0]!.text).toContain("phraseto_tsquery('search_unaccent'::regconfig, $1::text)");
+    expect(statements[0]!.text).toContain("ts_headline('search_unaccent'::regconfig");
+  });
+});
 
 describe('search indexing', () => {
   test('a reindex runs a page of rows in as many statements as one, with one model call', async () => {

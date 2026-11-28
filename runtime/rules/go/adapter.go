@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The adapter of the behaviors' pure core (D103): the one host every Go
@@ -144,7 +146,7 @@ func (h Host) now() int64 {
 
 func (h Host) request() string {
 	if h.Request == nil {
-		return hyphenatedBytes(randomUUID())
+		return uuid.NewString()
 	}
 	return h.Request()
 }
@@ -757,10 +759,10 @@ func prepared(host Host, table *Table, command Command, opts *ExecuteOptions) (C
 func newKey(table *Table) (string, error) {
 	switch {
 	case uuidTypes[table.Key.Type]:
-		raw := randomUUID()
+		raw := uuid.New()
 		return base62(new(big.Int).SetBytes(raw[:])), nil
 	case table.Key.Type == "string":
-		return hyphenatedBytes(randomUUID()), nil
+		return uuid.NewString(), nil
 	}
 	return "", &Refusal{
 		Code:    CodeInvalidArgument,
@@ -900,7 +902,7 @@ func settle(ctx context.Context, host Host, core Core, spec TypeSpec, command Co
 func sameRequest(a, b ReadRequest) bool {
 	if a.Kind != b.Kind || a.Type != b.Type || a.Key != b.Key || a.UseID != b.UseID || a.Table != b.Table ||
 		a.Field != b.Field || a.Value != b.Value || a.After != b.After || a.Limit != b.Limit ||
-		len(a.Equal) != len(b.Equal) || !slices.Equal(a.Tables, b.Tables) {
+		len(a.Equal) != len(b.Equal) || !slices.Equal(a.Tables, b.Tables) || !slices.Equal(a.Subjects, b.Subjects) {
 		return false
 	}
 	for name, value := range a.Equal {
@@ -991,6 +993,12 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 			}
 		}
 		return Answer{Kind: ReadKindComposing, Specs: specs}, nil
+	case ReadKindPermissions:
+		held, err := readPermissions(ctx, host.Store, host.Layout.Permissions, request.Subjects)
+		if err != nil {
+			return Answer{}, err
+		}
+		return Answer{Kind: ReadKindPermissions, Permissions: held}, nil
 	case ReadKindSubRows:
 		// A read of sub-table rows under a fenced lock is held to its
 		// row's version (fencesOf), unless its use's behavior writes

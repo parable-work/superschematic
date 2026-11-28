@@ -409,7 +409,7 @@ fn object_keywords(
 /// Whether a text matches a pattern of the subset of ECMAScript patterns
 /// the declarations write: `^` and `$`, literal characters and escapes
 /// (`\d`, `\w`, `\.`), classes with ranges (`[A-Za-z0-9_-]`), groups with
-/// alternatives (`(a|b)`), and the quantifiers `?`, `*`, `+`, `{n}` and
+/// alternatives (`(a|b)`, `(?:a|b)`), and the quantifiers `?`, `*`, `+`, `{n}` and
 /// `{m,n}`. Without `^` or `$` a pattern matches anywhere, as `RegExp.test`
 /// does. A pattern outside the subset matches nothing, which a test of each
 /// declaration holds against.
@@ -566,6 +566,11 @@ impl Parser {
             '^' => Node::Start,
             '$' => Node::End,
             '(' => {
+                // `(?:` opens a group that captures nothing, which reads as
+                // a group does: a match has no captures here.
+                if self.chars.get(self.at..self.at + 2) == Some(&['?', ':']) {
+                    self.at += 2;
+                }
                 let inner = self.alternatives()?;
                 if self.chars.get(self.at) != Some(&')') {
                     return None;
@@ -690,6 +695,15 @@ mod tests {
         assert!(matches("^\\d{4}$", "4242"));
         assert!(matches("b", "abc"));
         assert!(!matches("^[A-Z", "A"));
+        // Temporal.Period's pattern, which groups without capturing.
+        let period = "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$";
+        for good in ["P7D", "P1Y6M", "P2W", "PT30M", "P1DT12H", "PT1.5S", "P1DT"] {
+            assert!(matches(period, good), "{good}");
+        }
+        for bad in ["soon", "-P1D", "p7d", "P1.5D", "7D", "P1D2M", "PT1,5S"] {
+            assert!(!matches(period, bad), "{bad}");
+        }
+        assert!(!matches("^(?a)$", "a"));
     }
 
     #[test]

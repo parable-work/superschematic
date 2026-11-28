@@ -197,6 +197,9 @@ path for when the store is unavailable.
   `@userSessions` on an API class) instead of writing auth. Seed the
   roles new users get with `@seedRoles([{ name, permissions }])` on the
   `UserRole` table, so an approved user can act with no admin step.
+  Rows any other table starts with (a default preference, a channel
+  kind's trust) are `@seedRows<T>([...], { key })` on it, not a seed
+  script: the migrations insert each once and never overwrite an edit.
   An agent or a script that calls as a user gets an API key, not the
   user's session and not a key table of your own:
   `@userSessions({ apiKeys: true })` adds `createApiKey`, `listApiKeys`
@@ -205,12 +208,19 @@ path for when the store is unavailable.
   user's permissions or the subset `permissions` names. The subset
   narrows permissions, not routes: give an agent that should reach less a
   user and a role of its own.
+  For Claude's connectors (claude.ai, Desktop, mobile), which sign in by
+  OAuth alone, `@userSessions({ oauth: true })` on a TypeScript API that
+  serves MCP makes the API its own OAuth 2.1 authorization server (#695):
+  discovery, a consent page and grants narrowed as a key is. Do not put an
+  identity provider in front of it.
 - **Who may see a row is declared on its table.** A private folder, a
   shared page, a document that inherits its folder's readers:
   `@audience<Doc>({ owner: "ownerId", inheritFrom: "folder", agents:
   "readOnly" })`, which every repository read in an operation keeps to,
   hand-written handlers' and search's too (a `@query` and raw SQL read
-  every row), never a filter per handler.
+  every row), never a filter per handler. A table whose parents hold
+  very many children names a `@queue` (`queue:`), whose worker resolves
+  the children after the parent's write (#734).
   A caller outside the user table reaches rows through grants
   (`@accessGrants`), a view's `@decrypted({ permission })` field opens an
   `Encrypted<T>` value only for a caller holding the permission, and
@@ -236,8 +246,8 @@ path for when the store is unavailable.
   `mode: "drain"` in an environment's worker settings for a gcp worker
   that runs only when an enqueue wakes it (D145; Go, TypeScript and Rust,
   a behavior worker's among them); and
-  `@deriver` on an API class to fill a table's or an engine type's Derived
-  fields from a model.
+  `@deriver` on an API class to fill the Derived fields of a table that
+  implements Derived from a model (D146).
 - **What every writer must keep is declared.** A status that moves only
   along listed moves is an enum field with `@stateMachine` on its class,
   and a counter that writers compare and set is `@fenced` on its table:
@@ -283,8 +293,9 @@ path for when the store is unavailable.
   your own (D147). A create gives the name; change it with
   `name.rename`, which keeps the old one as an alias, and keep the rest
   with `name.addAlias` and `name.removeAlias`; find a row by any of them
-  with `name.resolve({ name })`. A name another row holds is refused with
-  that row's key (`name_taken`), and a merge moves the aliases.
+  with `name.resolve({ name })`, which answers no row its caller may not
+  read. A name another row holds is refused (`name_taken`) naming nothing
+  of that row, and a merge moves the aliases.
 - **A link to a row of any table, or a file, is a declaration.** Put
   `@references<T>({ tables?, cleared? })` or `@attachments<T>({ released })`
   on the table and use `orm.references` (`add`, `of`, `referencedBy`) and
@@ -354,19 +365,21 @@ path for when the store is unavailable.
 - **Your own HTTP program is an app.** Pages or a back office over a Rust
   API is `@app` on an empty API class: the stack runs the crate at
   `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`
-  gets the API's `Deps`, implementations and engine, beside the API's
+  gets the API's `Deps` and implementations, beside the API's
   servers. Expose it in `@stack`, or no one reaches it. An
   `@app({ extensions: ["topcoat"] })` builds only with
   `superschematic-topcoat`, which each release ships beside
   `superschematic`: `superschematic` plans the stack and refuses
   `build-all`, `stack dev` and deploys, and the generated CI of every
   stack in that services root runs `superschematic-topcoat`. Topcoat's
-  `<service>_with_parts` serves the app's pages alone; the JSON API and
-  engine routes need `_with_parts_and_api`.
+  `<service>_with_parts` serves the app's pages alone; the JSON API needs
+  `_with_parts_and_api`.
 - **No server at all?** If the data's shape is defined at run time, or
-  the need is workflow, comments, revisions, approvals and the like, the
-  engine runs a schema with no generated code: types compose behaviors
-  with `@behavior("Workflow", {...})` (`superschematic catalog behaviors`).
+  the need is workflow, comments, revisions, approvals and the like, a
+  General schema runs with no generated code: its types compose behaviors
+  with `@behavior("Workflow", {...})` (D16; `superschematic catalog
+  behaviors`), which development mode serves. A DB schema's type is a
+  table and takes no `@behavior`.
 - **Working out a schema against sample rows?** Development mode (D117,
   the Rust crates `superschematic-rules-handler` and
   `superschematic-rules-dev`) keeps a type's rows as JSON in fixed tables
@@ -449,10 +462,12 @@ Most are load errors; knowing them saves a build round-trip:
   cannot import `@superschematic/db`.
 - Every plain class in a DB schema is a table; give each one a `@key`.
   A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
-  class and the params and row types it names, and a type that composes
-  a behavior with `@behavior` (an engine type) are not tables; one that
-  implements a behavior or types a field as one stays a table. A table
-  the build fills takes no `@key` and is usually empty:
+  class and the params and row types it names are not tables; a class
+  that implements a behavior or types a field as one stays a table. A DB
+  type takes no `@behavior`, a General schema's (D16): the load refuses
+  it and names the table form, `status: Workflow<{ ... }>` or
+  `implements Timers<Ticket, { ... }>` (D103). A table the build fills
+  takes no `@key` and is usually empty:
   `@accessGrants() export abstract class Grant {}`, and so `@accessLog()`,
   `@notifier(...)`, `@channelIdentities()`, `@conversations(...)`,
   `@runRequests()`, the `@agents(...)` parts and `IdempotencyKey
@@ -465,7 +480,7 @@ Most are load errors; knowing them saves a build round-trip:
   twice, outcomes only on states nothing leaves). A state a row may leave
   that still counts as finished, a done task that may be reopened, goes
   in `finished: { done: "success" }` beside `{ from: "done"; to: "todo" }`
-  (D113), a table's alone; `outcomes` keeps the states nothing leaves.
+  (D113); `outcomes` keeps the states nothing leaves.
 - A field whose shape another field picks (a step's result by its kind)
   is a variant union, from `@superschematic/schema` (D149), declared as an
   exported alias and given to the field: `export type StepResult =
@@ -477,7 +492,8 @@ Most are load errors; knowing them saves a build round-trip:
   reads the member the sibling names; a table's column gets a `CHECK`.
   The build refuses the union as a list, a map, an argument or a result,
   and a type that holds the field without the sibling. Not
-  `@behavior("Variants", ...)`, the engine's form, for a table or a view.
+  `@behavior("Variants", ...)`, a General schema's form, for a table or a
+  view.
 - A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
   table a table (D103): the behavior's fields are columns
   (`status`, `status_entered_at`) that the generated repositories read
@@ -528,8 +544,8 @@ Most are load errors; knowing them saves a build round-trip:
   `ticket_can_transition_state` (Rust), and read `TicketStateTerminal()`
   and its like for whether a row is finished. A `@tableOperation` update
   does not ask for you, and a refused move reaches the caller as the
-  database's error, a 500. Not on a Workflow field, a `@queue` class or
-  an engine type; a machine on a dependency's enum works from a
+  database's error, a 500. Not on a Workflow field or a `@queue` class;
+  a machine on a dependency's enum works from a
   TypeScript schema only. A migration plan creates the guard in
   `contract`, and drops a changed one in `expand`.
 - A row writers compare and set on a counter gets `@fenced` on its table,
@@ -556,8 +572,8 @@ Most are load errors; knowing them saves a build round-trip:
   that composes a behavior (a field typed as one, `status: Workflow<{
   ... }>`, or an `implements` use): the behaviors' core writes its rows
   with statements that advance no fence, so the build refuses it, with
-  `covers` or without; nor on a `@queue` class, an engine type or a
-  version graph's member. For one counter over the whole row that the
+  `covers` or without; nor on a `@queue` class or a version graph's
+  member. For one counter over the whole row that the
   database bumps, `@optimistic` is enough.
 - To serve a table's behavior operations from an API, write a class with
   no members that names the table, imported from the API's database (its
@@ -607,8 +623,6 @@ Most are load errors; knowing them saves a build round-trip:
   `already_in_state`; and have a caller that must not act on a stale read
   send `from`, the state it read, and treat `stale` whose
   `vetoDetails.status` equals its `to` as its own retry having landed.
-  These are a table's Workflow's alone: an engine type's
-  `@behavior("Workflow", ...)` refuses all four.
 - For deadlines on a table's rows (an SLA, an expiring hold, a reminder),
   implement Timers on the table, its first type argument the table itself:
   `export abstract class Ticket implements Timers<Ticket, { deadlines: {
@@ -720,9 +734,7 @@ Most are load errors; knowing them saves a build round-trip:
   `UpdateMany`) skip all three and consume no sign-off: use them only to
   repair a row. The core reads no value of a field encrypted at rest or
   a list or map of date-times, so the build refuses one in Constants,
-  StateRules' `required` and `frozen` and `resetOn`. These members are a
-  table's alone: an engine type's `@behavior` refuses `oneWay`, `by`,
-  `status`, `resetOn`, `pinned` and `version`.
+  StateRules' `required` and `frozen` and `resetOn`.
 - For a row a worker leases, a row retried with a wait, a row a device or
   agent keeps alive, or usage capped per period, implement Lease, Retries,
   Presence and Budget on the table beside its Workflow field (D104), never
@@ -780,9 +792,7 @@ Most are load errors; knowing them saves a build round-trip:
   or `presence_*` column or a `*_budget_*` row is never refused but runs
   no rule and re-arms no deadline: repair with the operations
   (`lease.release` with `overridePermission`, `lease.resetExpiries`,
-  `budget.setLimit`) where you can. These members are a table's alone: an
-  engine type's `@behavior` refuses `status`, Retries' waits, `ttlByState`
-  and Budget's new resets, `window`, `observePermission` and `observe`.
+  `budget.setLimit`) where you can.
 - When a row has named roles that subjects take and leave (an accountable
   person and responsible agents, a document's owner and editors, a
   ticket's assignees, handles an agent claims), implement Seats on the
@@ -842,12 +852,10 @@ Most are load errors; knowing them saves a build round-trip:
   a terminal one must reach and which must reach every state (the build
   refuses otherwise). On a table with Lease, list `"Reconcile.observe"`
   (and `"Seats.takeSeat"`, `"Seats.leaveSeat"` for Seats) in Lease's
-  `exempt` to let them through another principal's lease. Both are the
-  behaviors' core's alone: no engine type composes them, and
-  `@behavior("Seats", ...)` does not compile. A raw SQL write of a
-  `*_seats_occupants` row, of an `observed_*` column or of the status is
-  never refused but runs none of their rules and re-arms nothing until the
-  stale deadline falls due: repair with `seats.leaveSeat` by a caller
+  `exempt` to let them through another principal's lease. A raw SQL write
+  of a `*_seats_occupants` row, of an `observed_*` column or of the status
+  is never refused but runs none of their rules and re-arms nothing until
+  the stale deadline falls due: repair with `seats.leaveSeat` by a caller
   holding `assign`, or a newer observation, where you can.
 - When a row wakes on times its users or agents set (reminders, an agent's
   wake-ups, a recurring invoice, a digest, a report's delivery), implement
@@ -887,8 +895,7 @@ Most are load errors; knowing them saves a build round-trip:
   read as it is at the schedule's next fire, nothing re-arms on it, and an
   event deleted with SQL is never handed on. Repair with the operations
   (`pauseSchedule`, `resumeSchedule`, a replacing `setSchedule`,
-  `cancelSchedule`) where you can. Schedules is the behaviors' core's
-  alone: no engine type composes it.
+  `cancelSchedule`) where you can.
 - When work runs on one of several interchangeable rows that a provider
   can refuse for a while (a person's accounts at model vendors, paid
   keys, payment processors, SMS gateways, API credentials), implement Pool
@@ -903,7 +910,9 @@ Most are load errors; knowing them saves a build round-trip:
   `account_pool_pick`); it answers `{ member: { key, availability, order,
   preferred } }`, the open members `prefer` keeps first, then its near
   ones, then the rest, or `{ member: null, until }`: wait until `until` on
-  a deadline of your own, never in a loop that picks again. When the
+  a deadline of your own, never in a loop that picks again. On an
+  `@audience` table a member the caller does not see is answered as
+  `{ member: null }`, so `match` the caller's own (`{ owner }`). When the
   provider refuses, call `pool.markOut(key, { until?, reason })` with the
   time it names (thirty minutes when it names none); an out member keeps
   the later time. An out member comes back only through
@@ -926,8 +935,7 @@ Most are load errors; knowing them saves a build round-trip:
   field you pick by a value (a boolean `retired`, not a null). A raw SQL
   write of a `pool_*` column is never refused but runs none of Pool's
   rules and re-arms no recheck: repair with `markOut` and `reportRoom`
-  where you can. Pool is the behaviors' core's alone: no engine type
-  composes it.
+  where you can.
 - When a row waits for the rows that point at it (a batch done once its
   steps are, a barrier released once every agent is ready, D104),
   implement Rollups on the table rather than a count column you keep by
@@ -946,7 +954,7 @@ Most are load errors; knowing them saves a build round-trip:
   { id })` (`POST /api/step/{id}/dependencies/add-blocker`), or in a
   create's parameters; a move into a gated state is refused as `blocked`
   while a blocker is not done with an outcome `satisfiedBy` lists, and a
-  cycle as `cycle`. `listDependents` is an engine type's alone. A raw SQL
+  cycle as `cycle`. A table serves no `listDependents`. A raw SQL
   write of the `<table>_dependencies_blockers` sub-table is never refused
   but runs none of its checks: add and remove edges through the
   operations.
@@ -959,7 +967,7 @@ Most are load errors; knowing them saves a build round-trip:
   copied fields, and Dependencies when a step has `after`. The create
   stamps every child in its own write, blocked after its steps; a `when`
   (`{ field, equals }` or `{ field, includes }`) leaves a step out. Steps
-  are inline (`from` is an engine type's alone). `children` is computed at
+  are inline, with no `from`. `children` is computed at
   a read and no column holds it; the table has no upserts.
 - When a row needs a number a person reads (an invoice's INV-2026-0042,
   a ticket's T-17), type a field as a Numbering rather than a counter
@@ -1165,7 +1173,7 @@ Each is Markdown on stdout; save one to a scratch file or pipe it through
 | `superschematic catalog capabilities` | need → declaration → what is generated → what you write |
 | `superschematic catalog scalars` | every scalar: its checks, its SQL type, its type in each language |
 | `superschematic catalog decorators` | every decorator and wrapper: its TypeScript declaration, where it may sit, which kinds may use it |
-| `superschematic catalog behaviors` | every engine behavior: its config, what it requires, the fields and operations it adds |
+| `superschematic catalog behaviors` | every behavior: its config, what it requires, the fields and operations it adds |
 
 The decorator catalog is long. Find one entry with
 ``superschematic catalog decorators | grep -A 15 '^### `@paginated`'``.

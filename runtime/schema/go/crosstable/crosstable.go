@@ -13,10 +13,11 @@
 // ambient caller, the context, and a read across tables still takes the
 // caller's principal and binds it itself (Host.As), as the Rust runtime's
 // does (D188): a feed's route reads as the feed's holder, not as the
-// request's caller. Postgres alone: a Go server serves search, Recurrence
-// and the calendar on Postgres, and the build refuses them over a database
-// that lists sqlite first (verify.GoServerSQLiteErr), whose search the
-// TypeScript repositories alone serve (D186).
+// request's caller. On SQLite (#615) the generated ORM's SQLite database
+// is a DialectHost: the calendar and search write their statements in
+// SQLite's words there, search's words an FTS5 table ranked by bm25, as
+// the TypeScript runtime's on SQLite and D1 (D186), and embeddings are
+// refused (dialect.go, search_sqlite.go).
 package crosstable
 
 import (
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
+	"github.com/parable-work/superschematic/runtime/schema/go/fieldcrypt"
 	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 )
 
@@ -120,16 +122,42 @@ type CalendarOccurrences struct {
 // and its owner are of; Timestamp when its field is a date-time, and
 // OwnerUUID when its owner holds a UUID.
 type CalendarSource struct {
-	Name        string               `json:"name"`
-	Kind        string               `json:"kind"`
-	Color       string               `json:"color,omitempty"`
-	Title       string               `json:"title"`
-	Field       string               `json:"field,omitempty"`
-	End         string               `json:"end,omitempty"`
-	Timestamp   bool                 `json:"timestamp,omitempty"`
-	Owner       string               `json:"owner,omitempty"`
-	OwnerUUID   bool                 `json:"ownerUuid,omitempty"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Color     string `json:"color,omitempty"`
+	Title     string `json:"title"`
+	Field     string `json:"field,omitempty"`
+	End       string `json:"end,omitempty"`
+	Timestamp bool   `json:"timestamp,omitempty"`
+	Owner     string `json:"owner,omitempty"`
+	OwnerUUID bool   `json:"ownerUuid,omitempty"`
+	// Permission is the permission the schema's source needs (#601);
+	// CalendarOptions.Permissions may name another, which wins.
+	Permission string `json:"permission,omitempty"`
+	// TitleSealed says the title's column holds an Encrypted<T> field's
+	// envelope (D85, #616), which the read opens through the host's keys
+	// (Unsealer), bound to the table type, TitleField and the row's key.
+	TitleSealed bool                 `json:"titleSealed,omitempty"`
+	TitleField  string               `json:"titleField,omitempty"`
 	Occurrences *CalendarOccurrences `json:"occurrences,omitempty"`
+}
+
+// Unsealer is a Host that holds the keys of its database's Encrypted<T>
+// fields (D85): a calendar source titled by one opens each title through
+// them (#616). A Host that is none reads such a title as an error that
+// wraps fieldcrypt.ErrNoKeys.
+type Unsealer interface {
+	FieldKeys() *fieldcrypt.Keyring
+}
+
+// permissionUnder is the permission a caller needs to read the source
+// under options, and whether it needs one: the one options name for it,
+// else the schema's.
+func (s CalendarSource) permissionUnder(options CalendarOptions) (string, bool) {
+	if permission, ok := options.Permissions[s.Name]; ok {
+		return permission, true
+	}
+	return s.Permission, s.Permission != ""
 }
 
 // CalendarTable is a table with calendar sources: the table and its key
@@ -190,6 +218,16 @@ type Searchable struct {
 	Audience  *SearchAudience `json:"audience,omitempty"`
 	Comments  *SearchComments `json:"comments,omitempty"`
 	Files     *SearchFiles    `json:"files,omitempty"`
+	// FTS is the FTS5 table of the index's words on SQLite, quoted, which
+	// a search there matches and ranks in place of Document, and
+	// IndexAudience how the index's audience, a JSON array, is compared
+	// there (D186).
+	FTS           string               `json:"fts,omitempty"`
+	IndexAudience *SearchIndexAudience `json:"indexAudience,omitempty"`
+	// Config is the text search configuration the index's words are in on
+	// Postgres, simple when empty; search_unaccent folds diacritics
+	// (#740).
+	Config string `json:"config,omitempty"`
 }
 
 // Definitions are what the generated ORM is generated with: its tables'
@@ -213,16 +251,6 @@ func MustParse(calendar, searchable string) *Definitions {
 			panic(fmt.Sprintf("crosstable: the search definition: %v", err))
 		}
 	}
-	return out
-}
-
-// sortedKeys are a map's keys, sorted.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
 	return out
 }
 

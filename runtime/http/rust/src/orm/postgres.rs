@@ -605,12 +605,14 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     /// index holds live rows alone, repoints the rest, moves an Aliased
     /// field's aliases and names, and then deletes `from` as `delete_one`
     /// does. It answers the rows repointed and deleted by table.
-    /// [`Error::NotFound`] when either is no live row; [`Error::Merge`]
-    /// when they are one row, or when `into` references `from` through a
-    /// relation of the table to itself; [`Error::NoUser`] when it stamps a
-    /// row deleted and no user acts; [`Error::Invalid`] for a table that
-    /// does not implement Mergeable, and for a client outside a
-    /// transaction.
+    /// [`Error::NotFound`] when either is no live row, or opened for a
+    /// caller (D156) one the caller may not write; [`Error::Merge`] when
+    /// they are one row, when `into` references `from` through a relation
+    /// of the table to itself, and opened for a caller when a row it would
+    /// repoint or delete is one the caller may not write (`out_of_reach`);
+    /// [`Error::NoUser`] when it stamps a row deleted and no user acts;
+    /// [`Error::Invalid`] for a table that does not implement Mergeable,
+    /// and for a client outside a transaction.
     pub async fn merge_into(
         &self,
         from: &Value,
@@ -625,7 +627,9 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     /// Workflow's `transition` of `status`, say, with its parameters in
     /// their wire form. It answers the operation's result; the core's
     /// refusal is [`Error::Refused`], and a key no live row holds
-    /// [`Error::NotFound`].
+    /// [`Error::NotFound`], as is, opened for a caller (D156), a row the
+    /// caller may not write, or for an operation that writes nothing does
+    /// not see.
     pub async fn operation(
         &self,
         member: &str,
@@ -637,6 +641,16 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         self.runner()
             .operation(member, operation, key, params, options)
             .await
+    }
+
+    /// Refuses, as [`Error::NotFound`], the row whose key is `key` when the
+    /// caller the repositories keep to (D156) does not see it, or with
+    /// `write` may not write it, as an update, a delete and a behavior's
+    /// operation are refused before they run: the check of a caller that
+    /// runs the behaviors' core itself, a Rust server's behavior route
+    /// (D181). Opened for no caller, and as the system, every row passes.
+    pub async fn reach(&self, key: &Value, write: bool) -> Result<(), Error> {
+        self.runner().require_reach(key, write).await
     }
 
     /// Runs `operation` of the behavior under `member` on the table as a
@@ -661,6 +675,22 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     /// holds is [`Error::NotFound`].
     pub async fn view(&self, member: &str, key: &Value) -> Result<Values, Error> {
         self.runner().view(member, key).await
+    }
+
+    /// Holds `answer`, what the behaviors' core answered `operation` of the
+    /// behavior under `member` on the table as a whole, to the caller the
+    /// repositories keep to (D156), as [`Repository::table_operation`]
+    /// holds its own: the row an answer names (Aliased's `resolve`, Pool's
+    /// `pick`) is null for a caller who does not see it. The check of a
+    /// caller that runs the core itself, a Rust server's behavior route
+    /// (D181). Opened for no caller, and as the system, every row is seen.
+    pub async fn keep_answer(
+        &self,
+        member: &str,
+        operation: &str,
+        answer: &mut Value,
+    ) -> Result<(), Error> {
+        self.runner().keep_answer(member, operation, answer).await
     }
 
     /// Reseals under the current field key every envelope of the table's

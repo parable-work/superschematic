@@ -40,12 +40,15 @@
 //! the system's, read every row.
 
 pub mod agents;
+#[cfg(feature = "postgres")]
+pub mod audience_resolve;
 pub mod calendar;
 pub mod fieldcrypt;
-#[cfg(feature = "postgres")]
+pub mod file_processing;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod inbound;
 pub mod notify;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod parties;
 mod plan;
 #[cfg(feature = "postgres")]
@@ -58,6 +61,8 @@ pub mod search_tables;
 pub mod sqlite;
 #[cfg(feature = "sqlite")]
 mod sqlite_file;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod store;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -71,6 +76,8 @@ use crate::auth::{ActingFor, GrantReach, Principal, PrincipalKind};
 use crate::civil::from_days;
 use crate::uuid62::parse_uuid;
 
+#[cfg(feature = "postgres")]
+pub use audience_resolve::{resolve_audience, AudienceResolving, AUDIENCE_RESOLVE_BATCH};
 pub use fieldcrypt::FieldKeyring;
 pub use plan::fill;
 // A value in its wire form, as a member of [`Values`] holds one, for a
@@ -482,6 +489,30 @@ pub struct MergeStep {
     pub collisions: Vec<MergeStatement>,
     /// Repoints every row that references the row merged away.
     pub repoint: MergeStatement,
+    /// The rows the step writes as per-record access holds them (D156);
+    /// none for a step whose rows are the merged rows' own (an Aliased
+    /// use's, and the pairs of a `@manyToMany` the table declares).
+    #[serde(default)]
+    pub reach: Option<MergeReach>,
+}
+
+/// The code of [`Error::Merge`] for a merge opened for a caller (D156)
+/// that would repoint or delete a row of another table the caller may not
+/// write.
+pub const MERGE_OUT_OF_REACH: &str = "out_of_reach";
+
+/// The rows a merge's step writes as per-record access holds them (D156):
+/// a merge opened for a caller refuses, before it writes, when one of them
+/// is a row the caller may not write.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct MergeReach {
+    /// The table type whose access holds the rows.
+    #[serde(rename = "type")]
+    pub table: String,
+    /// Reads one of them, `SELECT 1 FROM` the table `WHERE` a condition
+    /// that takes the key of the row merged away first, which the
+    /// conditions of the caller's write of the table's rows are added to.
+    pub rows: String,
 }
 
 /// One statement of a merge (D147): its SQL, and how it takes the acting
@@ -528,7 +559,8 @@ pub struct Many {
 /// key in the keys of its source's rows of the WHERE `%s`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Audience {
-    /// The effective audience's column, a `UUID[]`.
+    /// The effective audience's column: a `UUID[]` on Postgres, a JSON
+    /// array of the ids' text on SQLite.
     pub effective: String,
     /// The effective agent access's column: `followRole`, `readOnly` or
     /// `none`.
@@ -536,6 +568,11 @@ pub struct Audience {
     /// A projection's probe of its source's rows.
     #[serde(default)]
     pub probe: Option<String>,
+    /// The statement that resolves again a batch of the table's rows that
+    /// inherit from one parent, on a table whose `@audience` names a queue
+    /// (#734): [`resolve_audience`] runs it.
+    #[serde(default)]
+    pub resolve: Option<String>,
 }
 
 /// What [`Table::access`] names: the table of grants (D156).
@@ -575,6 +612,44 @@ pub struct Behaviors {
     /// insert would leave unwritten, so the table has no upserts.
     #[serde(default)]
     pub no_upsert: bool,
+    /// The operations on a row that write nothing, by the member they sit
+    /// under (`comments`: `listMessages`), as the core declares them: a
+    /// caller who sees the row may run one of them, and every other
+    /// operation needs a caller who may write it (D156).
+    #[serde(default)]
+    pub reads: BTreeMap<String, Vec<String>>,
+    /// The operations of the table as a whole whose answer names one of
+    /// its rows (Aliased's `resolve`), which the repositories keep to their
+    /// caller (D156): the core reads every row.
+    #[serde(default)]
+    pub answers: Vec<AnsweredRow>,
+}
+
+/// An operation of a table as a whole whose answer names one of the
+/// table's rows (D156): under `row`, an object whose `key` is the row's
+/// key in its wire form, or null for none. Opened for a caller, the
+/// repositories answer null there for a row the caller does not see, as
+/// for an answer of no row.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AnsweredRow {
+    /// The member the use's operations sit under.
+    pub member: String,
+    /// The operation.
+    pub operation: String,
+    /// The member of the answer that holds the row.
+    pub row: String,
+}
+
+impl Behaviors {
+    /// Whether `operation` under `member` writes: every operation the
+    /// definition does not name a read, so one written before it named
+    /// them needs a caller who may write the row.
+    pub fn writes(&self, member: &str, operation: &str) -> bool {
+        !self
+            .reads
+            .get(member)
+            .is_some_and(|reads| reads.iter().any(|read| read == operation))
+    }
 }
 
 impl Table {
@@ -774,10 +849,13 @@ pub enum Error {
     /// says it. Boxed, so a result that may hold one stays small.
     Refused(Box<Refusal>),
     /// A merge the repository refuses before it writes (D147): of a row
-    /// into itself (`self`), or into a row that references the one merged
-    /// away through a relation of the table to itself (`self_reference`).
+    /// into itself (`self`), into a row that references the one merged
+    /// away through a relation of the table to itself (`self_reference`),
+    /// or, opened for a caller (D156), one that would repoint or delete a
+    /// row of another table the caller may not write (`out_of_reach`),
+    /// which a table operation answers 403.
     Merge {
-        /// `self` or `self_reference`.
+        /// `self`, `self_reference` or `out_of_reach`.
         code: &'static str,
         /// What it says.
         message: String,
@@ -1665,7 +1743,10 @@ impl AccessCaller {
 /// them, or with `write` write them. A caller with no id, an anonymous one
 /// or one whose subject is no UUID, sees the rows everyone may. A
 /// projection's probe holds the view to its source's rows that do.
-/// Postgres alone: an audience is a `UUID[]` compared by array overlap.
+/// On Postgres an audience is a `UUID[]` compared by array overlap; on
+/// SQLite it is a JSON array of the ids' hyphenated text, which a trigger
+/// keeps and `json_each` reads (D182, #611), sqlutil's
+/// `SQLiteAudienceContains`.
 pub fn audience_conditions(
     definition: &Definition,
     audience: &Audience,
@@ -1673,12 +1754,6 @@ pub fn audience_conditions(
     args: &mut Vec<Bound>,
     write: bool,
 ) -> Result<Vec<String>, Error> {
-    if definition.dialect != Dialect::Postgres {
-        return Err(Error::Definition(format!(
-            "an audience (D156) is a UUID[] column a read compares by array overlap, which {} has none of",
-            definition.dialect
-        )));
-    }
     let ids = caller.audience_ids();
     let mut parts = Vec::new();
     if ids.is_empty() {
@@ -1695,11 +1770,16 @@ pub fn audience_conditions(
             });
             placeholders.push(plan::fill(&definition.clauses.placeholder, &[&args.len()])?);
         }
-        parts.push(format!(
-            "({effective} IS NULL OR {effective} && ARRAY[{ids}]::uuid[])",
-            effective = audience.effective,
-            ids = placeholders.join(", ")
-        ));
+        let ids = placeholders.join(", ");
+        let effective = &audience.effective;
+        parts.push(match definition.dialect {
+            Dialect::Postgres => {
+                format!("({effective} IS NULL OR {effective} && ARRAY[{ids}]::uuid[])")
+            }
+            Dialect::Sqlite => format!(
+                "({effective} IS NULL OR EXISTS (SELECT 1 FROM json_each({effective}) WHERE json_each.value IN ({ids})))"
+            ),
+        });
     }
     if caller.kind == PrincipalKind::Agent {
         parts.push(if write {
@@ -1835,15 +1915,9 @@ pub fn epoch_millis(text: &str) -> Option<i64> {
         }
         _ => return None,
     };
-    // Howard Hinnant's `days_from_civil`.
-    let shifted = if month <= 2 { year - 1 } else { year };
-    let era = shifted.div_euclid(400);
-    let yoe = shifted.rem_euclid(400);
-    let mp = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second - offset;
+    let seconds =
+        crate::civil::to_days(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second
+            - offset;
     Some(seconds * 1000 + millis)
 }
 
@@ -1930,6 +2004,21 @@ mod tests {
             .of_kind(PrincipalKind::Party)
             .acting_for(ActingFor::user(owner));
         assert_eq!(AccessCaller::of(Some(&party)).audience_ids(), [user]);
+    }
+
+    #[test]
+    fn a_behavior_operation_writes_unless_the_definition_names_it_a_read() {
+        // A caller who sees a row runs a read; every other operation, and
+        // every one of a definition that names none, needs write reach
+        // (D156).
+        let behaviors: Behaviors =
+            serde_json::from_str(r#"{"owned": [], "reads": {"comments": ["listMessages"]}}"#)
+                .unwrap();
+        assert!(!behaviors.writes("comments", "listMessages"));
+        assert!(behaviors.writes("comments", "post"));
+        assert!(behaviors.writes("status", "listMessages"));
+        let before: Behaviors = serde_json::from_str(r#"{"owned": []}"#).unwrap();
+        assert!(before.writes("comments", "listMessages"));
     }
 
     #[test]

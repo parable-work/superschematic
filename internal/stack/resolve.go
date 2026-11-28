@@ -3,9 +3,9 @@ package stack
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/registry"
@@ -60,7 +60,7 @@ func Servers(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.resolveBuckets()
 	r.resolveMemoryStores()
 	var servers []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableServer {
 			continue
@@ -96,7 +96,7 @@ func Jobs(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.resolveBuckets()
 	r.resolveMemoryStores()
 	var jobs []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableJob {
 			continue
@@ -211,9 +211,9 @@ type settings struct {
 
 	// instances, maxInstances and concurrency are a worker's, with
 	// enabled: what the environment chain sets, the later over the
-	// earlier. workerFrom names the environment that set each (D53). An
-	// engine's runner takes enabled alone (D58). A deriver takes enabled,
-	// instances and concurrency (D74). An app takes enabled alone (D78).
+	// earlier. workerFrom names the environment that set each (D53). A
+	// deriver takes enabled, instances and concurrency (D74). An app takes
+	// enabled alone (D78).
 	instances, maxInstances, concurrency *int
 	workerFrom                           map[string]string
 
@@ -254,7 +254,6 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.defaultWorkers()
 	r.defaultDerivers()
 	r.defaultApps()
-	r.defaultRunners()
 	r.resolveImages()
 	r.applySettings()
 	r.disableDeployables()
@@ -273,7 +272,6 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.checkBehaviorQueues()
 	r.runDerivers()
 	r.runApps()
-	r.runRunners()
 	if r.failed() {
 		return nil
 	}
@@ -615,7 +613,7 @@ func (r *resolver) declareDeployables() {
 // member API service is a job of its own, named after its API and its
 // class (ir.JobDeployableName, D52).
 func (r *resolver) defaultDeployables() {
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		if _, claimed := r.byService[name]; claimed {
 			continue
 		}
@@ -656,7 +654,7 @@ func (r *resolver) defaultDeployables() {
 		r.deployables[name] = &deployable{res: res}
 		r.byService[name] = name
 	}
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		svc := r.services[name]
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
@@ -698,8 +696,6 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 	case ref.Service != nil && ref.Deployable != "":
 		r.fail(CodeInvalidStack, "%s names both service %s and deployable %s", where, ref.Service.Name, ref.Deployable)
 		return nil, false
-	case ref.Runner:
-		return r.resolveRunnerRef(where, ref)
 	case ref.App != "":
 		return r.resolveAppRef(where, ref)
 	case ref.Deriver != "":
@@ -791,7 +787,7 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
-			if r.applyAppSettings(where, env.Name, d, entry) || r.applyDeriverSettings(where, env.Name, d, entry) || r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) || r.applyMemoryStoreSettings(where, env.Name, d, entry) {
+			if r.applyAppSettings(where, env.Name, d, entry) || r.applyDeriverSettings(where, env.Name, d, entry) || r.applyWorkerSettings(where, env.Name, d, entry) || r.applyMemoryStoreSettings(where, env.Name, d, entry) {
 				continue
 			}
 			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil && entry.OnDeploy == nil {
@@ -836,7 +832,7 @@ func (r *resolver) applySettings() {
 // bound, not refused. A worker takes its API's server's env as a job does
 // (D53), and so do a deriver (D74) and an app (D78).
 func (r *resolver) inheritServerEnv() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		var api string
 		switch {
@@ -883,7 +879,7 @@ func (r *resolver) inheritServerEnv() {
 // amended).
 func (r *resolver) scheduleJobs() {
 	parameterized := len(r.env.parameters) > 0
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableJob || d.job == nil {
 			continue
@@ -926,7 +922,7 @@ func (r *resolver) scheduleJobs() {
 // place puts each deployable on its platform and checks the platform can
 // realize it.
 func (r *resolver) place() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		res := d.res
 		slices.SortFunc(res.Services, func(a, b ir.ServiceRef) int { return strings.Compare(a.Name, b.Name) })
@@ -980,8 +976,6 @@ func (r *resolver) place() {
 		switch res.Kind {
 		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver, ir.DeployableApp:
 			r.placeServer(d)
-		case ir.DeployableRunner:
-			r.placeRunner(d)
 		case ir.DeployableDatabase:
 			r.placeDatabase(d)
 		case ir.DeployableSite:
@@ -1030,31 +1024,6 @@ func (r *resolver) placeServer(d *deployable) {
 			}
 		}
 	}
-	if d.res.Artifact == ir.ArtifactBundle {
-		r.refuseEngineInBundle(d)
-	}
-}
-
-// refuseEngineInBundle refuses a server or a job on a platform whose
-// artifact is a bundle (D64) when an API of it connects to an engine
-// database: the entrypoint opens the engine on it (D58), and the engine
-// is a native addon, the Rust engine through Node-API, which a bundle,
-// run in an isolate with no native code, cannot load.
-func (r *resolver) refuseEngineInBundle(d *deployable) {
-	for _, served := range d.res.Services {
-		svc := r.services[served.Name]
-		if svc == nil || svc.Kind != ir.SchemaKindAPI {
-			continue
-		}
-		db, ok := r.connectsQuietly(svc)
-		if !ok {
-			continue
-		}
-		if engine := r.services[db]; engine != nil && engine.Engine {
-			r.fail(CodeUnrealizable, "%s %s serves %s, which connects to %s, an engine database whose engine its entrypoint opens (D58), and platform %s builds a bundle, which cannot load the engine: it is a native addon, the Rust engine through Node-API; place %s on a platform that builds an image",
-				d.res.Kind, d.res.Name, svc.Name, db, d.platform.Name, d.res.Name)
-		}
-	}
 }
 
 // unbuiltDeployables names, by kind and then language, the decision that
@@ -1087,7 +1056,7 @@ func (r *resolver) serverLanguage(res *ir.ResolvedDeployable) (string, bool) {
 	}
 	if len(languages) > 1 {
 		var parts []string
-		for _, lang := range sortedKeys(languages) {
+		for _, lang := range slices.Sorted(maps.Keys(languages)) {
 			parts = append(parts, fmt.Sprintf("%s in %s", strings.Join(languages[lang], ", "), lang))
 		}
 		r.fail(CodeUnrealizable, "server %s serves %s; one process runs one language", res.Name, strings.Join(parts, " and "))
@@ -1167,7 +1136,7 @@ func (r *resolver) expose() {
 		}
 		d.res.Exposed = true
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		if d := r.deployables[name]; d.res.Kind == ir.DeployableSite {
 			d.res.Exposed = true
 		}
@@ -1194,7 +1163,7 @@ func (r *resolver) dropUnplaced() {
 // stays a call, to the server's own address. A job calls what its API
 // calls (D52), and a site what its Site service calls (D55).
 func (r *resolver) resolveCalls() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if !d.res.Kind.RollsOut() {
 			continue
@@ -1218,7 +1187,7 @@ func (r *resolver) resolveCalls() {
 // the `buckets` of the APIs it serves, so two APIs of one server that list
 // one bucket share it. A job reaches what its API lists (D54).
 func (r *resolver) resolveBuckets() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if !d.res.Kind.RunsCode() {
 			continue
@@ -1257,7 +1226,7 @@ func (r *resolver) stackEnvironment() registry.StackEnvironment {
 // nameDeployables asks each platform for its deployable's name and
 // address, and for an exposed deployable's public address.
 func (r *resolver) nameDeployables() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		ctx := registry.PlatformContext{Environment: r.stackEnvironment(), Deployable: cloneDeployable(d.res)}
 		where := fmt.Sprintf("platform %s names %s with", d.platform.Name, name)
@@ -1331,13 +1300,13 @@ func (r *resolver) output() *ir.ResolvedEnvironment {
 	if len(r.env.values) > 0 {
 		out.Values = deepCopy(r.env.values).(map[string]any)
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		out.Deployables = append(out.Deployables, r.deployables[name].res)
 	}
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		out.Edges = append(out.Edges, r.edges[id].res)
 	}
-	for _, name := range sortedKeys(r.disabled) {
+	for _, name := range slices.Sorted(maps.Keys(r.disabled)) {
 		out.Disabled = append(out.Disabled, r.disabled[name])
 	}
 	out.Secrets = r.secrets()
@@ -1351,15 +1320,6 @@ func article(kind ir.DeployableKind) string {
 		return "an"
 	}
 	return "a"
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // cloneDeployable copies a deployable for a platform, deep enough that the
@@ -1402,10 +1362,6 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	if d.Worker != nil {
 		worker := *d.Worker
 		c.Worker = &worker
-	}
-	if d.Runner != nil {
-		runner := *d.Runner
-		c.Runner = &runner
 	}
 	if d.Deriver != nil {
 		deriver := *d.Deriver

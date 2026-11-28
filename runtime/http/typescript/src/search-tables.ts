@@ -1,7 +1,10 @@
 import type { Principal } from './auth.js';
 import { accessCallerOf } from './caller.js';
-import { audienceConditions, ormDialect } from './orm.js';
-import { sha256 } from './sha256.js';
+import { requestIdOf } from './envelope.js';
+import { audienceConditions, ormDialect, type PlainRepository } from './orm.js';
+import { badRequest, methodNotAllowed, problemResponse, unauthorized, type HttpProblem } from './problem.js';
+import { ftsQuery, postgresQuery, searchPlan, type SearchPlan } from './search-query.js';
+import { sha256Hex } from './sha256.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
 
 /*
@@ -23,18 +26,23 @@ searchTables ranks every table's index rows in one query, so its pages and
 its total are exact and a row the caller may not read never shows, as a gap
 or otherwise:
 
-- The words: each whitespace-separated word of the query is a phrase of
-  the words Postgres's parser finds in it, and a row matches when it holds
-  every word, as the engine's Search reads a plain query (D58). Words fold
-  to lower case and none is stemmed or dropped (the simple configuration,
-  the engine's index without unaccent).
+- The words: the query is read into a plan (search-query.ts, #740):
+  quoted phrases, prefixes (wal*), excluded terms (-oak) and OR between
+  terms, each term a phrase of the words Postgres's parser finds in it. A
+  row matches when it holds a term of every group and no excluded term.
+  Words fold to lower case and none is stemmed or dropped (the simple
+  configuration), and with outputs.sql.search.foldDiacritics their
+  diacritics fold too (the search_unaccent configuration, the definition's
+  config).
 - The order: ts_rank_cd over the row's words, weighed by where each is
   (title A, body B, conversation C, files D, the weights the engine gives
   four weight classes), then the table and the key. With an embedding, the
   first RRF_WINDOW by text are re-ranked by reciprocal rank fusion of their
   text place and their place by cosine similarity, RRF_K the engine's
   constant (superschematic_engine::search); a row past the window keeps its
-  text order after them.
+  text order after them. A query with no term to hold that brings a
+  vector ranks by the vector alone: every index row the caller may read
+  whose embedding is of the model, by cosine similarity (#740).
 - Access: the caller's audience is checked on the index row's copied
   columns with audienceConditions, as a repository checks a row's. A
   caller with grants, a party or an agent run, reaches a table's rows only
@@ -49,10 +57,11 @@ or otherwise:
 On SQLite and D1 (D186) the index is the same table, its audience a JSON
 array (D182), and its words an FTS5 table beside it, search_index_fts,
 which the index table's triggers keep in the statement that writes an index
-row. A search matches it with each word a quoted phrase of the words FTS5's
-unicode61 tokenizer finds in it (folded to lower case, no diacritic removed
-and none stemmed, as the simple configuration reads them), every one
-required, and only in the four texts; it ranks by bm25 with the same weights
+row. A search matches it with the plan's FTS5 expression: each term a
+quoted phrase of the words FTS5's unicode61 tokenizer finds in it (folded
+to lower case and none stemmed, as the simple configuration reads them;
+diacritics removed with foldDiacritics), groups OR, excluded terms NOT,
+and only in the four texts; it ranks by bm25 with the same weights
 of the title, the body, the conversation and the files (1, 0.4, 0.2, 0.1),
 best first, then the table and the key; a snippet is FTS5's, of the first
 of the four texts that holds every word, as on Postgres. Access is checked
@@ -94,11 +103,13 @@ export interface SearchableDefinition {
   readonly fts?: string;
   /** On SQLite: how the index's audience, a JSON array, holds one of a caller's ids, and a parameter (sqlutil.SQLiteAudienceContains). */
   readonly indexAudience?: { readonly contains: string; readonly placeholder: string };
+  /** On Postgres: the text search configuration the index's words are in, simple unless set; search_unaccent folds diacritics (#740). */
+  readonly config?: string;
 }
 
 /** A search. */
 export interface SearchRequest {
-  /** The words: a row matches when it holds every one. */
+  /** The query (#740): words and quoted phrases a row holds each of, prefixes (wal*), excluded terms (-oak) and OR between terms. */
   readonly q: string;
   /** Only these tables, by type name; every @searchable table the caller may read when absent. */
   readonly tables?: readonly string[];
@@ -107,7 +118,7 @@ export interface SearchRequest {
   /** The page: at most limit hits (20 unless set, at most 100) after offset (at most 10000). */
   readonly limit?: number;
   readonly offset?: number;
-  /** A query embedding, from SearchEmbeddings.model, which re-ranks the first hits; the options' embeddings compute one when absent. */
+  /** A query embedding, from SearchEmbeddings.model, which re-ranks the first hits, or ranks alone when q holds no term to hold; the options' embeddings compute one when absent. */
   readonly vector?: readonly number[];
 }
 
@@ -190,10 +201,10 @@ const WEIGHTS = `'{0.1, 0.2, 0.4, 1}'::real[]`;
 
 type Values = Record<string, unknown>;
 
-interface RepositoryShape {
-  readonly def?: { readonly name?: string; readonly searchable?: SearchableDefinition };
+/** A repository as search runs it: its definition, and the conditions of its reads, which no generated Repository type has. */
+type RepositoryShape = Pick<PlainRepository, 'def'> & {
   conditions(filter: null, args: unknown[], offset: number, write?: boolean): string[];
-}
+};
 
 interface OrmShape {
   as(principal: Principal | null | undefined): OrmShape;
@@ -213,7 +224,7 @@ export function searchSourcesOf(orm: object): Map<string, { readonly definition:
   return out;
 }
 
-/** The words of a query that count: its runs of characters that are not white space, the first MAX_SEARCH_WORDS. */
+/** The words of a query as D155 read them, runs of characters that are not white space, the first MAX_SEARCH_WORDS; searchTables reads a query with searchPlan (#740). */
 export function searchWords(q: string): string[] {
   return q
     .split(WHITE_SPACE)
@@ -269,9 +280,10 @@ export async function searchTables(orm: object, principal: Principal | null, req
   if (typeof request.q !== 'string') throw new TypeError('searchTables: q is the text to search for');
   const limit = whole(request.limit, 20, 1, MAX_LIMIT, 'limit');
   const offset = whole(request.offset, 0, 0, MAX_OFFSET, 'offset');
-  const words = searchWords(request.q);
+  const plan = searchPlan(request.q);
   const empty: SearchResult = { items: [], total: 0, more: false, reranked: false };
-  if (words.length === 0) return empty;
+  // A query with no term to hold matches nothing, unless a vector ranks it.
+  if (plan.all.length === 0 && request.vector === undefined) return empty;
   const db = (orm as OrmShape).as(principal);
   const all = searchSourcesOf(db);
   for (const table of request.tables ?? []) {
@@ -285,9 +297,10 @@ export async function searchTables(orm: object, principal: Principal | null, req
   if (sources.length === 0) return empty;
   if (ormDialect(db) === 'sqlite') {
     if (request.vector || options.embeddings) refuseEmbeddings('searchTables', request.vector !== undefined);
-    return searchOnSQLite(db, principal, words, sources, all, request.scope, limit, offset);
+    return searchOnSQLite(db, principal, plan, sources, all, request.scope, limit, offset);
   }
-  const { index, document } = sources[0]![1].definition;
+  const { index, document, config = 'simple' } = sources[0]![1].definition;
+  const regconfig = `'${config}'::regconfig`;
 
   const caller = accessCallerOf(principal);
   const args: unknown[] = [];
@@ -295,8 +308,9 @@ export async function searchTables(orm: object, principal: Principal | null, req
     args.push(value);
     return `$${args.length}`;
   };
-  const query = words.map(word => `phraseto_tsquery('simple'::regconfig, ${param(word)})`).join(' && ');
-  const conditions = [`${document} @@ q.q`];
+  const byVector = plan.all.length === 0;
+  const query = postgresQuery(plan, regconfig, param);
+  const conditions = byVector ? (plan.none.length > 0 ? [`NOT (${document} @@ (${query}))`] : []) : [`${document} @@ q.q`];
   // The tables: for a caller with grants, each through its repository's
   // conditions for that caller, an EXISTS back to its rows.
   if (caller.grants === undefined) {
@@ -316,6 +330,10 @@ export async function searchTables(orm: object, principal: Principal | null, req
   // The caller's audience, on the index row's copy of each row's.
   conditions.push(...audienceConditions({ effective: 'si.audience', agents: 'si.agents' }, caller, args, args.length));
   if (request.scope !== undefined) conditions.push(`si.scope = ANY(${param(scopeForms(request.scope))}::text[])`);
+  if (byVector) {
+    if (!options.embeddings) throw new TypeError('searchTables: a vector needs embeddings, which say its model');
+    return searchByVector(db, all, index, conditions, args, unit(request.vector!), options.embeddings.model, limit, offset);
+  }
 
   // The query's embedding, when embeddings are on or the request brings one.
   let vector: number[] | undefined;
@@ -360,7 +378,7 @@ export async function searchTables(orm: object, principal: Principal | null, req
     order = `(r.text_place > ${RRF_WINDOW}), CASE WHEN r.text_place <= ${RRF_WINDOW} THEN 1.0 / (${RRF_K} + r.text_place) + COALESCE(1.0 / (${RRF_K} + r.vector_place), 0) END DESC, r.text_place`;
   }
   const headline = `'StartSel=${OPEN}, StopSel=${CLOSE}, MaxWords=24, MinWords=12, ShortWord=0, HighlightAll=false, MaxFragments=0'`;
-  const matches = (column: string) => `to_tsvector('simple'::regconfig, COALESCE(p.${column}, '')) @@ q.q`;
+  const matches = (column: string) => `to_tsvector(${regconfig}, COALESCE(p.${column}, '')) @@ q.q`;
   const sql = `WITH q AS (SELECT ${query} AS q),
     hits AS (
       SELECT si.source_table, si.source_key, si.title, si.body, si.comments, si.files, si.embedding, si.embedding_model,
@@ -370,7 +388,7 @@ export async function searchTables(orm: object, principal: Principal | null, req
     ),
     ${ranked}${fused}
     SELECT c.total, p.source_table, p.source_key, p.title, p.matched,
-      ts_headline('simple'::regconfig, p.shown, q.q, ${headline}) AS snippet
+      ts_headline(${regconfig}, p.shown, q.q, ${headline}) AS snippet
     FROM (SELECT count(*) AS total FROM hits) AS c
     CROSS JOIN q
     LEFT JOIN LATERAL (
@@ -406,6 +424,62 @@ export async function searchTables(orm: object, principal: Principal | null, req
   return { items, total, more: offset + items.length < total, reranked: vector !== undefined };
 }
 
+/**
+ * A search by vector alone (#740): every index row conditions keep whose
+ * embedding is of model and of vector's length, by cosine similarity,
+ * best first, then table and key; one page of them and how many there
+ * are, each matched by its title.
+ */
+async function searchByVector(
+  db: OrmShape,
+  all: ReadonlyMap<string, { readonly definition: SearchableDefinition }>,
+  index: string,
+  conditions: string[],
+  args: unknown[],
+  vector: number[],
+  model: string,
+  limit: number,
+  offset: number
+): Promise<SearchResult> {
+  const param = (value: unknown): string => {
+    args.push(value);
+    return `$${args.length}`;
+  };
+  const v = param(vector);
+  conditions.push('si.embedding IS NOT NULL', `si.embedding_model = ${param(model)}`, `cardinality(si.embedding) = cardinality(${v}::float8[])`);
+  const sql = `WITH hits AS (
+      SELECT si.source_table, si.source_key, si.title,
+        (SELECT sum(a * b) FROM unnest(si.embedding, ${v}::float8[]) AS t(a, b)) AS similarity
+      FROM ${index} AS si
+      WHERE ${conditions.join(' AND ')}
+    ),
+    ranked AS (
+      SELECT h.*, row_number() OVER (ORDER BY h.similarity DESC, h.source_table, h.source_key) AS place FROM hits AS h
+    )
+    SELECT c.total, p.source_table, p.source_key, p.title, p.place
+    FROM (SELECT count(*) AS total FROM hits) AS c
+    LEFT JOIN (SELECT * FROM ranked ORDER BY place LIMIT ${limit} OFFSET ${offset}) AS p ON TRUE
+    ORDER BY p.place`;
+  const { rows } = await db.asSystem().query(sql, args);
+  const total = Number(rows[0]?.total ?? 0);
+  const items: SearchHit[] = [];
+  for (const row of rows) {
+    if (row.source_table === null || row.source_table === undefined) continue;
+    const table = String(row.source_table);
+    const key = String(row.source_key);
+    const title = String(row.title ?? '');
+    items.push({
+      table,
+      key: all.get(table)?.definition.uuid ? uuidFromDb(key) : key,
+      title,
+      matched: 'title',
+      snippet: title === '' ? [] : [{ text: title }],
+      place: offset + items.length + 1,
+    });
+  }
+  return { items, total, more: offset + items.length < total, reranked: true };
+}
+
 /** Throws for embeddings on SQLite, which re-rank on Postgres alone (D186): a TypeError for a request's vector, an Error for the options'. */
 function refuseEmbeddings(what: string, request: boolean): never {
   const message = `${what}: embeddings re-rank and are stored on Postgres alone; a search on SQLite and D1 ranks by its words (D186)`;
@@ -432,12 +506,6 @@ const FTS_WEIGHTS = '1.0, 0.4, 0.2, 0.1, 0.0, 0.0, 0.0';
 /** The texts a search on SQLite matches, the FTS5 table's first four columns, in the order a hit's matched names them. */
 const FTS_TEXTS = ['title', 'body', 'comments', 'files'] as const;
 
-/** A query's words as an FTS5 expression, each a quoted phrase, every one required; none for words with no letter or digit, which match nothing on Postgres either. */
-function ftsPhrases(words: readonly string[]): string | null {
-  const phrases = words.filter(word => /[\p{L}\p{N}]/u.test(word)).map(word => `"${word.replaceAll('"', '""')}"`);
-  return phrases.length === 0 ? null : phrases.join(' ');
-}
-
 /**
  * searchTables on SQLite and D1 (D186): the rows whose FTS5 words hold
  * every word, of those principal may read, ranked by bm25, one page of
@@ -447,7 +515,7 @@ function ftsPhrases(words: readonly string[]): string | null {
 async function searchOnSQLite(
   db: OrmShape,
   principal: Principal | null,
-  words: readonly string[],
+  plan: SearchPlan,
   sources: readonly (readonly [string, { readonly definition: SearchableDefinition; readonly repository: RepositoryShape }])[],
   all: ReadonlyMap<string, { readonly definition: SearchableDefinition }>,
   scope: string | readonly string[] | undefined,
@@ -455,7 +523,7 @@ async function searchOnSQLite(
   offset: number
 ): Promise<SearchResult> {
   const empty: SearchResult = { items: [], total: 0, more: false, reranked: false };
-  const phrases = ftsPhrases(words);
+  const phrases = ftsQuery(plan);
   if (phrases === null) return empty;
   const { index, fts = '"search_index_fts"', indexAudience } = sources[0]![1].definition;
   const caller = accessCallerOf(principal);
@@ -548,10 +616,6 @@ function clean(text: unknown): string | null {
   return out.trim() === '' ? null : out;
 }
 
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
 /**
  * Builds the index row of the row a @searchable declaration's queue names
  * (D155), as the system, which its worker calls for each message: the
@@ -639,7 +703,7 @@ async function indexRows(system: OrmShape, table: string, d: SearchableDefinitio
       const comment = comments ? clean(comments.get(key)) : null;
       const file = files ? clean(files.get(key)) : null;
       const text = [title, body, comment, file].filter((t): t is string => t !== null).join('\n');
-      const hash = hex(sha256(new TextEncoder().encode(text)));
+      const hash = sha256Hex(text);
       return { key, title, body, comment, file, scope: (row.scope ?? null) as unknown, text, hash, model: undefined as string | null | undefined };
     });
     // The access columns come from the row itself, which the share lock
@@ -745,7 +809,7 @@ async function indexOnSQLite(system: OrmShape, d: SearchableDefinition, message:
       files = clean(read.rows[0]?.text);
     }
     const text = [title, body, comments, files].filter((t): t is string => t !== null).join('\n');
-    const hash = hex(sha256(new TextEncoder().encode(text)));
+    const hash = sha256Hex(text);
     const key = String(row.key);
     const audience = d.audience ? `s.${d.audience.effective.split('.').pop()}` : 'NULL';
     const agents = d.audience ? `s.${d.audience.agents.split('.').pop()}` : `'followRole'`;
@@ -827,8 +891,9 @@ export interface SearchRoutesOptions extends SearchOptions {
   readonly base?: string;
 }
 
-function problem(status: number, title: string, detail: string): Response {
-  return new Response(JSON.stringify({ type: 'about:blank', title, status, detail }), { status, headers: { 'content-type': 'application/problem+json' } });
+/** The refusal of a request, through the shared problem envelope, which carries its requestId and code. */
+function problem(request: Request, refusal: HttpProblem): Response {
+  return problemResponse(refusal, requestIdOf(request));
 }
 
 function list(values: readonly string[]): string[] {
@@ -848,9 +913,9 @@ export function searchRoutes(options: SearchRoutesOptions): (request: Request) =
   return async (request: Request) => {
     const url = new URL(request.url);
     if (url.pathname !== base) return null;
-    if (request.method !== 'GET') return problem(405, 'Method Not Allowed', 'search is a GET');
+    if (request.method !== 'GET') return problem(request, methodNotAllowed('search is a GET'));
     const principal = await options.authenticate(request);
-    if (!principal) return problem(401, 'Unauthorized', 'Authentication required');
+    if (!principal) return problem(request, unauthorized());
     const tables = list(url.searchParams.getAll('tables'));
     const scope = list(url.searchParams.getAll('scope'));
     const number = (name: string) => (url.searchParams.has(name) ? Number(url.searchParams.get(name)) : undefined);
@@ -871,7 +936,7 @@ export function searchRoutes(options: SearchRoutesOptions): (request: Request) =
       );
       return new Response(JSON.stringify({ data: result }), { status: 200, headers: { 'content-type': 'application/json' } });
     } catch (error) {
-      if (error instanceof TypeError) return problem(400, 'Bad Request', error.message);
+      if (error instanceof TypeError) return problem(request, badRequest(error.message));
       throw error;
     }
   };

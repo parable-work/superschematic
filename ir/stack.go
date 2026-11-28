@@ -13,9 +13,8 @@ import "sort"
 // EnvironmentDecl), and StackOf assembles a schema's declarations into its
 // Stack. A service handle is a ServiceRef, a declared deployable's class is
 // its name, and the keys of one `settings` element other than `of`, `job`,
-// `worker`, `runner`, `deriver`, `app`, `platform`, `env`, `schedule`,
-// `timeZone`, `enabled`, `instances` and `concurrency` are the platform
-// settings.
+// `worker`, `deriver`, `app`, `platform`, `env`, `schedule`, `timeZone`,
+// `enabled`, `instances` and `concurrency` are the platform settings.
 
 // DeployableKind is the kind of a deployable: what runs (section 3.1).
 type DeployableKind string
@@ -51,20 +50,11 @@ const (
 	// handles each. Its needs are its API's, as a job's are (D53).
 	DeployableWorker DeployableKind = "worker"
 
-	// DeployableRunner runs the engine's runner over the database of one
-	// DB service whose types compose behaviors, an engine database (D58):
-	// the reactions that follow a commit, the schedules, Timers' deadlines
-	// and the event log's retention. It is named after its database
-	// (RunnerDeployableName) and written in the language of the first API,
-	// by name, that connects to it; its one need is its database. On
-	// Postgres one process runs at a time, under the runner's lock.
-	DeployableRunner DeployableKind = "runner"
-
 	// DeployableDeriver runs one `@deriver` of an API schema until it is
-	// stopped: it fills the Derived fields of engine types of the API's
-	// engine database, calling the project's model for each stale field
-	// (D74). Its needs are its API's, as a worker's are; it claims from no
-	// queue.
+	// stopped: it fills the Derived fields of tables of the API's database
+	// that implement Derived, calling the project's model for each stale
+	// field (D146). Its needs are its API's, as a worker's are; it claims
+	// from no queue.
 	DeployableDeriver DeployableKind = "deriver"
 
 	// DeployableMemoryStore is one MemoryStore service: a Redis or Valkey
@@ -75,25 +65,24 @@ const (
 	DeployableMemoryStore DeployableKind = "memoryStore"
 
 	// DeployableApp runs one `@app` of an API schema: the project's own
-	// HTTP program over the API's Deps, implementations, identity and
-	// engine, which serves requests as a server does (D78). Its needs are
+	// HTTP program over the API's Deps, implementations and identity, which
+	// serves requests as a server does (D78). Its needs are
 	// its API's, as a job's are, and it is exposed as a server is.
 	DeployableApp DeployableKind = "app"
 )
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableMemoryStore || k == DeployableApp
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableDeriver || k == DeployableMemoryStore || k == DeployableApp
 }
 
 // RunsCode reports whether a deployable of kind k runs code the stack's
 // build writes an entrypoint for, with a config and edges of its APIs: a
-// server, a job (D52), a worker (D53), a deriver (D74) or an app (D78), or
-// an engine's runner (D58), whose one edge is to its database. Each has an
-// artifact a deploy builds, pins and records, an image unless its platform
-// builds a bundle (ResolvedDeployable.Artifact, D64).
+// server, a job (D52), a worker (D53), a deriver (D146) or an app (D78).
+// Each has an artifact a deploy builds, pins and records, an image unless
+// its platform builds a bundle (ResolvedDeployable.Artifact, D64).
 func (k DeployableKind) RunsCode() bool {
-	return k == DeployableServer || k == DeployableJob || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableApp
+	return k == DeployableServer || k == DeployableJob || k == DeployableWorker || k == DeployableDeriver || k == DeployableApp
 }
 
 // RollsOut reports whether a deployable of kind k rolls out in the deploy
@@ -105,7 +94,7 @@ func (k DeployableKind) RollsOut() bool {
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableRunner, DeployableDeriver, DeployableMemoryStore, DeployableApp}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableDeriver, DeployableMemoryStore, DeployableApp}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -114,8 +103,7 @@ type EdgeKind string
 
 const (
 	// EdgeSQL runs from a server to the database that hosts a served API's
-	// database schema, from a job or a worker to its API's, and from an
-	// engine's runner to its engine database's (D58).
+	// database schema, and from a job or a worker to its API's.
 	EdgeSQL EdgeKind = "sql"
 
 	// EdgeHTTP runs from a server to the server that serves an API it
@@ -150,9 +138,8 @@ func (k EdgeKind) Valid() bool {
 // deployable that hosts or serves that service, or by the name of a
 // declared deployable's class. Exactly one is set. With Job beside an API
 // service's handle, it names that job of the API (D52), with Worker that
-// worker (D53), with Deriver that deriver (D74), with App that app (D78),
-// and with Runner beside a DB service's handle the engine's runner of that
-// database (D58).
+// worker (D53), with Deriver that deriver (D74), and with App that app
+// (D78).
 type DeployableRef struct {
 	// Service is a handle to a service the deployable hosts or serves.
 	Service *ServiceRef `json:"service,omitempty" yaml:"service,omitempty"`
@@ -175,11 +162,6 @@ type DeployableRef struct {
 	// App names an app of the API service Service names: the name of its
 	// `@app` class (`{of: ShopStock, app: "Backoffice"}`, D78).
 	App string `json:"app,omitempty" yaml:"app,omitempty"`
-
-	// Runner names the engine's runner of the DB service Service names, an
-	// engine database (`{of: ShopDb, runner: true}`): the deployable
-	// RunnerDeployableName names.
-	Runner bool `json:"runner,omitempty" yaml:"runner,omitempty"`
 }
 
 // String renders the reference the way resolution errors quote it.
@@ -196,9 +178,6 @@ func (r DeployableRef) String() string {
 		}
 		if r.App != "" {
 			return r.Service.Name + " app " + r.App
-		}
-		if r.Runner {
-			return r.Service.Name + " runner"
 		}
 		return r.Service.Name
 	}
@@ -267,12 +246,12 @@ type Origin struct {
 
 // DeployableImage is one element of `@stack`'s images (D144): what the
 // stack adds to the image of one deployable that runs code, a server, a
-// job, a worker, a deriver, an app or an engine's runner. At least one of
-// Packages and Extend is set.
+// job, a worker, a deriver or an app. At least one of Packages and Extend
+// is set.
 type DeployableImage struct {
 	// Of names the deployable, as a settings element's `of` does: a
 	// service's handle or a declared server's class, with a job, a worker,
-	// a deriver, an app or the runner beside the handle.
+	// a deriver or an app beside the handle.
 	Of DeployableRef `json:"of" yaml:"of"`
 
 	// Packages are Debian packages the image's final stage installs with
@@ -381,12 +360,8 @@ type DeployableSettings struct {
 	// except in a parameterized environment, whose members run none unless
 	// their settings turn it on. A job whose schedule is off runs only on
 	// demand. A worker's turns it on or off: one that is off runs no
-	// instance, and its queue's messages wait (D53). An engine's runner's
-	// turns it on or off too: one that is off runs no instance, so no
-	// reaction, schedule, Timers deadline or retention pass runs until it is
-	// on again, when each reaction reads on from its cursor, a schedule
-	// that came due runs once and every overdue deadline fires (D58). A
-	// deriver's turns it on or off too: one that is off runs no instance,
+	// instance, and its queue's messages wait (D53). A deriver's turns it
+	// on or off too: one that is off runs no instance,
 	// and its fields stay stale until it is on again (D74). An app's turns
 	// it on or off: one that is off is in the environment, with its edges,
 	// and its target runs nothing for it (D78).
@@ -628,11 +603,4 @@ func StackReferences(schema *Schema) []ServiceRef {
 		}
 	}
 	return refs
-}
-
-// RunnerDeployableName names the engine's runner of the engine database
-// db (D58): the DB service's name and -engine-runner
-// (`shop-db-engine-runner`), whichever API's language it is written in.
-func RunnerDeployableName(db string) string {
-	return db + "-engine-runner"
 }

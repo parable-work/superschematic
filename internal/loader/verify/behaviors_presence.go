@@ -48,7 +48,7 @@ func checkPresenceConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, 
 func presenceProblem(schema *ir.Schema, td *ir.TypeDef, uses map[string]registry.Behavior, principalField string,
 	onMissed, onBeat *statusMove, releaseLeases []string, sweepMs bool, ttlByState map[string]int64, status *string) string {
 	if sweepMs {
-		return "sweepMs is the engine's runner's, which missed the instances past their deadline every sweepMs: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)"
+		return "sweepMs is how often a sweep missed the instances past their deadline: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)"
 	}
 	rule := fieldRule{at: "principalField", member: "principalField", names: "the table's own field that holds the principal", operations: true, holds: "one subject",
 		types: func(t string) bool { return slices.Contains(subjectTypes, t) }, wrong: "is not a string field"}
@@ -123,19 +123,4 @@ func leaseOverridePermission(config json.RawMessage) string {
 		return ""
 	}
 	return lease.OverridePermission
-}
-
-// checkEnginePresenceConfig refuses, on an engine type, ttlByState and
-// status, which a table's Presence alone takes (D104). The declaration is
-// shared, so the configSchema accepts them; the engine's Presence refuses
-// them too, and the build says so first, naming the table form. A config
-// the configSchema refuses is reported by checkTypeBehaviors and left alone
-// here.
-func checkEnginePresenceConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	if configNames(ref.Config, "ttlByState") {
-		r.errorf(td.Owner, "type %s: @behavior Presence names ttlByState, which a table's Presence takes (implements Presence<%s, C>, D104); an engine type's instance stays present ttlMs after each beat, so leave it out", td.Name, td.Name)
-	}
-	if configNames(ref.Config, "status") {
-		r.errorf(td.Owner, "type %s: @behavior Presence names status, the Workflow field a table's Presence reads (implements Presence<%s, C>, D104); an engine type's Presence reads its one Workflow, so leave status out", td.Name, td.Name)
-	}
 }

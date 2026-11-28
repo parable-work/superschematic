@@ -125,6 +125,11 @@ type Input struct {
 	// read them from, which leaves the dialects' rules unchecked.
 	Dialects []string
 
+	// SearchFoldsDiacritics is outputs.sql.search.foldDiacritics (#740):
+	// the database's search index folds diacritics, which the search
+	// expansion reads.
+	SearchFoldsDiacritics bool
+
 	// GoServer is an API whose server is Go (outputs.api, language GO or
 	// unset, with the Go types on), which the loader reads from the config.
 	// checkGoFeatures refuses in it, and in its Database, each platform
@@ -136,6 +141,12 @@ type Input struct {
 	// config. A merge it serves over a sqlite-first database is refused
 	// (D147, D182, sqlite_features.go).
 	TypeScriptServer bool
+
+	// MCPServer is an API whose enabled server serves MCP (outputs.api.mcp),
+	// which the loader reads from the config. @userSessions({ oauth })
+	// (#695) needs it in a TypeScript server, whose MCP endpoint the grants
+	// sign Claude's connectors in to.
+	MCPServer bool
 
 	// DatabaseDialects are the SQL dialects the config of the API's
 	// database lists (outputs.sql.dialects), postgres alone when it lists
@@ -298,6 +309,8 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkIdempotency(schema, in, r)
 	checkBehaviorOperations(schema, in, r)
 	checkGraphOperations(schema, in, r)
+	checkRowFeatureOperations(schema, in, r)
+	checkTriageOperations(schema, in, r)
 	checkWritableBy(schema, in, r)
 	checkProjections(schema, r)
 	checkArraysOfArrays(schema, r)
@@ -339,6 +352,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkVectorColumns(schema, r)
 	checkDefaultNow(schema, r)
 	checkSeedRoles(schema, in, r)
+	checkSeedRows(schema, in, r)
 	checkQueueMessageScalars(schema, r)
 	checkRawSQL(schema, r)
 	checkQueries(schema, r)

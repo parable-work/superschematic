@@ -16,8 +16,8 @@
 
 use super::{
     caller_of, check_route_tools, outcome_of, problem_of, serve, tool_request, CallGate,
-    CallOutcome, ConfirmationStore, Confirmations, Options, Problem, RouteTool, ServerInfo, Tool,
-    ToolError, ToolSet, MCP_MAX_BODY_BYTES, MCP_PATH,
+    CallOutcome, ConfirmationStore, Confirmations, EndpointTool, Options, Problem, RouteTool,
+    ServerInfo, Tool, ToolError, ToolSet, MCP_MAX_BODY_BYTES, MCP_PATH,
 };
 use crate::request_id::{request_id_of, request_ids};
 use crate::response::problem_body;
@@ -117,6 +117,10 @@ pub struct EndpointOptions {
     /// dispatcher's gate, which holds an agent run's call to its autonomy.
     /// None runs every call its route admits.
     pub call_gate: Option<Arc<dyn CallGate>>,
+    /// The tools the endpoint serves beside its routes' (#617): the
+    /// calendar's and the search's, which a generated server passes for a
+    /// database that has them.
+    pub tools: Vec<Arc<dyn EndpointTool>>,
 }
 
 impl EndpointOptions {
@@ -140,6 +144,13 @@ impl EndpointOptions {
         self.call_gate = Some(gate);
         self
     }
+
+    /// The options with `tools` beside the routes' tools.
+    #[must_use]
+    pub fn with_tools(mut self, tools: impl IntoIterator<Item = Arc<dyn EndpointTool>>) -> Self {
+        self.tools.extend(tools);
+        self
+    }
 }
 
 // Debug leaves the key out, and says only whether a store is given.
@@ -157,6 +168,10 @@ impl fmt::Debug for EndpointOptions {
                 &self.confirmation_store.as_ref().map(|_| ".."),
             )
             .field("call_gate", &self.call_gate.as_ref().map(|_| ".."))
+            .field(
+                "tools",
+                &self.tools.iter().map(|t| t.tool().name).collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -173,8 +188,15 @@ impl PartialEq for EndpointOptions {
             (Some(one), Some(other)) => std::ptr::addr_eq(Arc::as_ptr(one), Arc::as_ptr(other)),
             _ => false,
         };
+        let same_tools = self.tools.len() == other.tools.len()
+            && self
+                .tools
+                .iter()
+                .zip(&other.tools)
+                .all(|(one, other)| std::ptr::addr_eq(Arc::as_ptr(one), Arc::as_ptr(other)));
         same_store
             && same_gate
+            && same_tools
             && self.server_info == other.server_info
             && self.instructions == other.instructions
             && self.rate_limit_per_minute == other.rate_limit_per_minute
@@ -247,6 +269,14 @@ impl Mount<'_> {
         let tools: Vec<RouteTool> = serde_json::from_str(self.tools)
             .map_err(|error| format!("the MCP tool table of {api} does not read: {error}"))?;
         check_route_tools(&tools)?;
+        for extra in &options.tools {
+            let name = extra.tool().name;
+            if tools.iter().any(|tool| tool.tool.name == name) {
+                return Err(format!(
+                    "MCP tool {name} of {api} is both a route's and the endpoint's own"
+                ));
+            }
+        }
         let mut entries = Vec::with_capacity(tools.len());
         for tool in tools {
             let operation = self
@@ -349,6 +379,7 @@ impl Mount<'_> {
             manual_routes: self.manual_routes,
             authenticator: self.authenticator,
             call_gate: options.call_gate.clone(),
+            tools: options.tools.clone(),
             server,
         });
         let route = controls.apply(post(answer).get(answer).delete(answer));
@@ -377,6 +408,8 @@ struct Endpoint {
     authenticator: Option<Arc<dyn Authenticator>>,
     // What holds each call before its route runs (D158).
     call_gate: Option<Arc<dyn CallGate>>,
+    // The tools beside the routes' (#617), offered to a caller alone.
+    tools: Vec<Arc<dyn EndpointTool>>,
     // What the transport says about the server, without a request's caller
     // and id.
     server: Options,
@@ -510,13 +543,17 @@ impl RouterTools<'_> {
 #[async_trait]
 impl ToolSet for RouterTools<'_> {
     async fn list(&self) -> Result<Vec<Tool>, ToolError> {
-        Ok(self
+        let mut tools: Vec<Tool> = self
             .endpoint
             .entries
             .iter()
             .filter(|entry| self.offered(entry))
             .map(|entry| entry.tool.listed())
-            .collect())
+            .collect();
+        if self.principal.is_some() {
+            tools.extend(self.endpoint.tools.iter().map(|tool| tool.tool()));
+        }
+        Ok(tools)
     }
 
     async fn call(
@@ -524,6 +561,11 @@ impl ToolSet for RouterTools<'_> {
         name: &str,
         arguments: &Map<String, Value>,
     ) -> Result<CallOutcome, ToolError> {
+        if let Some(principal) = &self.principal {
+            if let Some(tool) = self.endpoint.tools.iter().find(|t| t.tool().name == name) {
+                return tool.call(principal, arguments).await;
+            }
+        }
         let entry = self.entry(name)?;
         let request = match self.request_of(entry, arguments) {
             Ok(request) => request,

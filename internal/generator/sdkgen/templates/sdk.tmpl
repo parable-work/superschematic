@@ -33,11 +33,11 @@
  {{- range .Namespaces}}
  {{- if .IsScopedNS}}
  * // Scoped namespace: the scope parameter is passed once
- * const scoped = sdk.{{toCamelCase .Name}}('scope-id');
+ * const scoped = sdk.{{joinCamelCase .Name}}('scope-id');
  * const result = await scoped.someMethod();
  {{- else}}
  * // {{.Name}} endpoints
- * const result = await sdk.{{toCamelCase .Name}}.someMethod();
+ * const result = await sdk.{{joinCamelCase .Name}}.someMethod();
  {{- end}}
  {{- end}}
  * ```
@@ -72,7 +72,7 @@ export class {{.SDKClassName}} {
   private readonly client: HttpClient;
   {{- range .Namespaces}}
   {{- if not .IsScopedNS}}
-  public readonly {{toCamelCase .Name}}: {{.ClassName}};
+  public readonly {{joinCamelCase .Name}}: {{.ClassName}};
   {{- end}}
   {{- end}}
 
@@ -82,7 +82,7 @@ export class {{.SDKClassName}} {
     // Initialize namespace instances
     {{- range .Namespaces}}
     {{- if not .IsScopedNS}}
-    this.{{toCamelCase .Name}} = new {{.ClassName}}(this.client);
+    this.{{joinCamelCase .Name}} = new {{.ClassName}}(this.client);
     {{- end}}
     {{- end}}
   }
@@ -95,7 +95,7 @@ export class {{.SDKClassName}} {
    * @param {{.ScopeParamName}} - Scope identifier
    * @returns {{.ClassName}} instance
    */
-  public {{toCamelCase .Name}}({{.ScopeParamName}}: string): {{.ClassName}} {
+  public {{joinCamelCase .Name}}({{.ScopeParamName}}: string): {{.ClassName}} {
     return new {{.ClassName}}(this.client, {{.ScopeParamName}});
   }
   {{- end}}

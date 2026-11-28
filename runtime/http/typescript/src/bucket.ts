@@ -1,3 +1,6 @@
+import { readCapped } from './read-capped.js';
+import { subtleSha256Hex } from './sha256.js';
+
 /*
 The provider-neutral interface of a bucket an API lists in its config's
 buckets (D54, section 8.9 of docs/stack-model.md), the twin of the Go
@@ -206,31 +209,9 @@ async function readWhole(body: BucketBody, bucket: string, maxBytes: number): Pr
     if (body.byteLength > maxBytes) throw new ContentTooLargeError(bucket, maxBytes);
     return body;
   }
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new ContentTooLargeError(bucket, maxBytes);
-    }
-    chunks.push(value);
-  }
-  const whole = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    whole.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const whole = await readCapped(body, maxBytes);
+  if (!whole) throw new ContentTooLargeError(bucket, maxBytes);
   return whole;
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>));
-  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /** How many heads missing runs at once. */
@@ -253,7 +234,7 @@ export function contentBucket(bucket: Bucket, options: { readonly maxBytes?: num
     raw: bucket,
     async put(body, put = {}) {
       const bytes = await readWhole(body, bucket.name, maxBytes);
-      const hash = await sha256Hex(bytes);
+      const hash = await subtleSha256Hex(bytes);
       const result = await bucket.put(CONTENT_PREFIX + hash, bytes, { contentType: put.contentType, ifAbsent: true });
       return { hash, size: bytes.byteLength, created: result.created };
     },

@@ -102,14 +102,14 @@ ContactEmail = Annotated[
 ]
 
 # Crypto.SHA256 - Lowercase hexadecimal SHA-256 digest
-_CryptoSHA256_pattern = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
+_CryptoSHA256_pattern = re.compile(r"^[0-9a-f]{64}\Z")
 
 def _validate_crypto_sha256_pattern(v: Any) -> Any:
     """Validate Crypto.SHA256 against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _CryptoSHA256_pattern.match(s):
+    if not _CryptoSHA256_pattern.search(s):
         raise ValueError("invalid format for Crypto.SHA256")
     return v
 
@@ -131,7 +131,7 @@ CryptoSHA256 = Annotated[
         description="Lowercase hexadecimal SHA-256 digest",
         max_length=64,
         min_length=64,
-        pattern=re.compile(r"^[0-9a-f]{64}$", re.ASCII),
+        pattern=re.compile(r"^[0-9a-f]{64}\Z"),
     ),
     AfterValidator(_validate_crypto_sha256_pattern),
     AfterValidator(_validate_crypto_sha256_length),
@@ -162,14 +162,14 @@ IdentityName = Annotated[
 ]
 
 # Identity.UUID - UUID v4 with automatic base62 encoding for client-facing APIs
-_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII)
+_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z")
 
 def _validate_identity_uuid_pattern(v: Any) -> Any:
     """Validate Identity.UUID against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _IdentityUUID_pattern.match(s):
+    if not _IdentityUUID_pattern.search(s):
         raise ValueError("invalid format for Identity.UUID")
     return v
 
@@ -178,7 +178,7 @@ IdentityUUID = Annotated[
     str,
     Field(
         description="UUID v4 with automatic base62 encoding for client-facing APIs",
-        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII),
+        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z"),
     ),
     BeforeValidator(_custom_parse_identity_uuid),
     AfterValidator(_validate_identity_uuid_pattern),

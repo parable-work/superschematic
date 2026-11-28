@@ -25,7 +25,7 @@ import (
 
 // AudienceDef is the @audience declaration of a DB table (D156).
 //
-// In TypeScript: @audience<T>({ owner?, inheritFrom?, default?, agents? })
+// In TypeScript: @audience<T>({ owner?, inheritFrom?, default?, agents?, queue? })
 type AudienceDef struct {
 	// Owner is the field that holds the row's owner, the one principal a
 	// private row is visible to and a named row always is: a field that
@@ -48,7 +48,31 @@ type AudienceDef struct {
 	// nothing: AgentsFollowRole, AgentsReadOnly or AgentsNone. Empty is
 	// followRole.
 	Agents string `json:"agents,omitempty" yaml:"agents,omitempty"`
+
+	// Queue names a @queue class of the schema, beside InheritFrom: when a
+	// parent's resolved audience changes, the parent's trigger enqueues a
+	// message on it (AudienceResolveFields) instead of resolving the
+	// table's rows that inherit from it in the writer's transaction, and
+	// the queue's worker resolves them again after the commit, a batch at
+	// a time. Until it has, a read of such a row keeps to the audience it
+	// had (#734). Empty resolves them in the writer's transaction.
+	Queue string `json:"queue,omitempty" yaml:"queue,omitempty"`
 }
+
+// The fields of a message of an @audience queue (AudienceDef.Queue), which
+// the loader fills on a @queue class that declares none.
+const (
+	// AudienceResolveTableField names the table whose rows inherit from
+	// the parent, by its type's name.
+	AudienceResolveTableField = "childTable"
+	// AudienceResolveParentField is the parent row's key as the database
+	// writes it as text.
+	AudienceResolveParentField = "parentKey"
+)
+
+// AudienceResolveFields are the fields of an @audience queue's message,
+// in order.
+var AudienceResolveFields = []string{AudienceResolveTableField, AudienceResolveParentField}
 
 // The audiences a row may have (AudienceDef, the audience column).
 const (
@@ -196,10 +220,20 @@ const (
 	AccessLogKeyCall = "keyCall"
 	// AccessLogGrantCall is a call made with a grant's token.
 	AccessLogGrantCall = "grantCall"
+	// AccessLogOAuthCall is a call made with an OAuth access token (#695),
+	// its credential the OAuth grant's id.
+	AccessLogOAuthCall = "oauthCall"
+	// AccessLogOAuthGrant is an OAuth grant a person gave a client on the
+	// consent page (#695).
+	AccessLogOAuthGrant = "oauthGrant"
+	// AccessLogOAuthRevoke is an OAuth grant revoked (#695): by its user,
+	// an administrator, the client, or a replayed code or refresh token.
+	AccessLogOAuthRevoke = "oauthRevoke"
 )
 
-// AccessLogKinds are the kinds of an access log row, in order.
-var AccessLogKinds = []string{AccessLogReveal, AccessLogAgentRead, AccessLogKeyCall, AccessLogGrantCall}
+// AccessLogKinds are the kinds of an access log row, in order. The OAuth
+// kinds are the TypeScript runtime's alone until Go and Rust serve OAuth.
+var AccessLogKinds = []string{AccessLogReveal, AccessLogAgentRead, AccessLogKeyCall, AccessLogGrantCall, AccessLogOAuthCall, AccessLogOAuthGrant, AccessLogOAuthRevoke}
 
 // The kinds of principal (D156). Every route, MCP tool, reply and search
 // resolves its caller to exactly one, and permissions are checked the same
@@ -294,6 +328,9 @@ func validateAudience(td *TypeDef) []error {
 	}
 	if a.Agents != "" && !containsString(AgentAccesses, a.Agents) {
 		errs = append(errs, fmt.Errorf("%s: @audience agents %q is none of %v", td.Name, a.Agents, AgentAccesses))
+	}
+	if a.Queue != "" && a.InheritFrom == "" {
+		errs = append(errs, fmt.Errorf("%s: @audience queue resolves the rows that inherit from a changed parent, and %s names no inheritFrom; leave queue out", td.Name, td.Name))
 	}
 	if td.AccessGrants != nil || td.AccessLog != nil {
 		errs = append(errs, fmt.Errorf("%s: @audience marks a table of the application's rows, and %s is the access tables' own", td.Name, td.Name))

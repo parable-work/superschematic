@@ -2,6 +2,8 @@ package tswriter
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -75,9 +77,8 @@ func (e *emitter) emitStackDeclarations(def *ir.TypeDef) {
 }
 
 // imageLiteral renders one images element (D144): of, a job's, a worker's,
-// a deriver's or an app's name beside its API's handle, or runner: true
-// beside a DB's, as a settings element names one, then packages and
-// extend.
+// a deriver's or an app's name beside its API's handle, as a settings
+// element names one, then packages and extend.
 func (e *emitter) imageLiteral(owner string, image *ir.DeployableImage) string {
 	parts := []string{"of: " + e.deployableRef(owner+" of", image.Of)}
 	if image.Of.Job != "" {
@@ -91,9 +92,6 @@ func (e *emitter) imageLiteral(owner string, image *ir.DeployableImage) string {
 	}
 	if image.Of.App != "" {
 		parts = append(parts, "app: "+quote(image.Of.App))
-	}
-	if image.Of.Runner {
-		parts = append(parts, "runner: true")
 	}
 	if len(image.Packages) > 0 {
 		parts = append(parts, "packages: "+stringListLiteral(image.Packages))
@@ -140,10 +138,10 @@ func (e *emitter) environmentLiteral(name string, env *ir.EnvironmentDecl) strin
 }
 
 // settingsLiteral renders one settings element: of, a job's, a worker's,
-// a deriver's or an app's name beside its API's handle, or runner: true
-// beside a DB's, platform, a job's schedule, timeZone, enabled and
-// onDeploy, a worker's and a deriver's instances, concurrency and enabled,
-// an app's enabled, env, and the platform settings in every other key.
+// a deriver's or an app's name beside its API's handle, platform, a job's
+// schedule, timeZone, enabled and onDeploy, a worker's and a deriver's
+// instances, concurrency and enabled, an app's enabled, env, and the
+// platform settings in every other key.
 func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings) string {
 	parts := []string{"of: " + e.deployableRef(owner+" of", settings.Of)}
 	if settings.Of.Job != "" {
@@ -157,9 +155,6 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	if settings.Of.App != "" {
 		parts = append(parts, "app: "+quote(settings.Of.App))
-	}
-	if settings.Of.Runner {
-		parts = append(parts, "runner: true")
 	}
 	if settings.Platform != "" {
 		parts = append(parts, "platform: "+quote(settings.Platform))
@@ -191,9 +186,9 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	if settings.Idle != "" {
 		parts = append(parts, "idle: "+quote(settings.Idle))
 	}
-	for _, key := range sortedKeys(settings.Values) {
+	for _, key := range slices.Sorted(maps.Keys(settings.Values)) {
 		switch key {
-		case "of", "job", "worker", "deriver", "app", "runner", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
+		case "of", "job", "worker", "deriver", "app", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
 			e.failf("%s: a platform setting named %q has no TypeScript form; the element's own key takes it", owner, key)
 			continue
 		}
@@ -201,7 +196,7 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	if len(settings.Env) > 0 {
 		env := make([]string, 0, len(settings.Env))
-		for _, field := range sortedKeys(settings.Env) {
+		for _, field := range slices.Sorted(maps.Keys(settings.Env)) {
 			value := settings.Env[field]
 			if value.Parameter != "" {
 				env = append(env, propertyName(field)+": { parameter: "+quote(value.Parameter)+" }")

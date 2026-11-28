@@ -51,7 +51,7 @@ func rustBehaviorAttr(member behaviortypes.Member) string {
 		parts = append(parts, "default")
 	}
 	if strings.TrimPrefix(rustBehaviorField(member), "r#") != member.JSON {
-		parts = append(parts, "rename = "+rustString(member.JSON))
+		parts = append(parts, "rename = "+rustutil.Quote(member.JSON))
 	}
 	if !member.Required {
 		parts = append(parts, `skip_serializing_if = "Option::is_none"`)

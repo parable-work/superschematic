@@ -100,12 +100,12 @@ func (e *Engine) Sweep(ctx context.Context, opts SweepOptions) (*SweepReport, er
 		for _, ref := range discarded {
 			var rows int64
 			for _, k := range e.kinds {
-				n, err := tx.RemoveRefRows(ctx, k.Name, ref.ID, actor)
+				n, err := tx.RemoveRefRows(ctx, k.Kind, ref.ID, actor)
 				if err != nil {
 					return err
 				}
 				if n > 0 {
-					report.CollectedRows[k.Name] += n
+					report.CollectedRows[k.Kind] += n
 					rows += n
 				}
 			}
@@ -114,12 +114,12 @@ func (e *Engine) Sweep(ctx context.Context, opts SweepOptions) (*SweepReport, er
 			}
 		}
 		for _, k := range e.kinds {
-			n, err := tx.Prune(ctx, k.Name, 0, opts.PruneBatch)
+			n, err := tx.Prune(ctx, k.Kind, 0, opts.PruneBatch)
 			if err != nil {
 				return err
 			}
 			if n > 0 {
-				report.Pruned[k.Name] = n
+				report.Pruned[k.Kind] = n
 			}
 		}
 		report.Snapshots, err = e.backfill(ctx, tx)

@@ -772,6 +772,12 @@ func (w *walker) walkClass(node *astNode) {
 	if routes == nil {
 		routes = graphOperationsDecorator(decorators)
 	}
+	if routes == nil {
+		routes = rowFeatureOperationsDecorator(decorators)
+	}
+	if routes == nil {
+		routes = triageOperationsDecorator(decorators)
+	}
 	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
 			if routes != nil {
@@ -1796,6 +1802,20 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 		w.schema.OperationSets = append(w.schema.OperationSets, set)
 		return
 	}
+	if set.IsRowFeatureOperations() {
+		w.checkRowFeatureOperationsClass(node, set, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
+	}
+	if set.IsTriageOperations() {
+		w.checkTriageOperationsClass(node, set, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
+	}
 	// The class-level @auth, @requirePermission and @publicRoute are a
 	// @behaviorOperations set's and a @graphOperations set's alone (D103,
 	// D138).
@@ -2034,13 +2054,7 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 		if fd.ValidatePrecision != nil || fd.ValidateScale != nil || fd.ValidateDimensions != nil {
 			return nil, "", errorAtNode(p, "Validate precision, scale and dimensions bound a field of a type, not an operation's argument; take the value in a type's field (support for arguments follows)")
 		}
-		arg.ValidateMin = fd.ValidateMin
-		arg.ValidateMax = fd.ValidateMax
-		arg.ValidateMinLength = fd.ValidateMinLength
-		arg.ValidateMaxLength = fd.ValidateMaxLength
-		arg.ValidateListMin = fd.ValidateListMin
-		arg.ValidateListMax = fd.ValidateListMax
-		arg.ValidatePattern = fd.ValidatePattern
+		arg.ValueRules = fd.ValueRules
 	}
 	return arg, info.sortItem, nil
 }

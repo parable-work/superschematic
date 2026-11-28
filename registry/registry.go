@@ -268,6 +268,7 @@ type (
 	// workflow's binary links (D78).
 	CIRendererSpec = registry.CIRendererSpec
 	CIRequest      = registry.CIRequest
+	CITasksRequest = registry.CITasksRequest
 	CIArchive      = registry.CIArchive
 	CIApp          = registry.CIApp
 	CIStack        = registry.CIStack
@@ -299,6 +300,7 @@ type (
 	TaskResolverSpec   = registry.TaskResolverSpec
 	TaskResolveRequest = registry.TaskResolveRequest
 	TaskResolution     = registry.TaskResolution
+	TaskValue          = registry.TaskValue
 	TaskGeneratedPath  = registry.TaskGeneratedPath
 	TaskTree           = registry.TaskTree
 	TaskTreeEntry      = registry.TaskTreeEntry

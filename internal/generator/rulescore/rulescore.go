@@ -2,9 +2,9 @@
 // tables compose a behavior the core's crate does not ship (D103's step
 // 5): one a class or an extension declares, whose hooks a Rust crate
 // implements over the core's API (registry.BehaviorSpec.Rules). A
-// project's core is a value its build assembles, as its engine is (D58,
-// projectengine): the core's behaviors (superschematic_rules_behaviors::
-// core) with each composed behavior's crate added (Core::with). A schema
+// project's core is a value its build assembles: the core's behaviors
+// (superschematic_rules_behaviors::core) with each composed behavior's
+// crate added (Core::with). A schema
 // whose tables compose the core's behaviors alone needs no crate: the
 // stock core, the release's archive and module, runs them.
 //
@@ -43,6 +43,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -233,9 +234,9 @@ func (d Dependency) spec(defaultFeatures bool) string {
 		features = ", default-features = false"
 	}
 	if d.Path != "" {
-		return fmt.Sprintf("{ path = %s%s }", quoteTOML(filepath.ToSlash(d.Path)), features)
+		return fmt.Sprintf("{ path = %s%s }", codegen.QuoteTOML(filepath.ToSlash(d.Path)), features)
 	}
-	return fmt.Sprintf("{ version = %s%s }", quoteTOML(Version), features)
+	return fmt.Sprintf("{ version = %s%s }", codegen.QuoteTOML(Version), features)
 }
 
 // Files are the crate's files by their path in it.
@@ -255,10 +256,10 @@ func (c *Crate) manifest() []byte {
 	b.WriteString("# from its crate, behind the core's ABI: the archive and module that\n")
 	b.WriteString("# stand in the stock ones' place.\n")
 	b.WriteString("[package]\n")
-	fmt.Fprintf(&b, "name = %s\n", quoteTOML(c.Name))
+	fmt.Fprintf(&b, "name = %s\n", codegen.QuoteTOML(c.Name))
 	b.WriteString("version = \"0.0.0\"\nedition = \"2021\"\n")
 	if c.RustVersion != "" {
-		fmt.Fprintf(&b, "rust-version = %s\n", quoteTOML(c.RustVersion))
+		fmt.Fprintf(&b, "rust-version = %s\n", codegen.QuoteTOML(c.RustVersion))
 	}
 	b.WriteString("publish = false\n\n")
 	b.WriteString("[lib]\n")
@@ -274,7 +275,7 @@ func (c *Crate) manifest() []byte {
 			continue
 		}
 		seen[composed.Crate] = true
-		fmt.Fprintf(&b, "%s = { path = %s }\n", composed.Crate, quoteTOML(filepath.ToSlash(composed.Path)))
+		fmt.Fprintf(&b, "%s = { path = %s }\n", composed.Crate, codegen.QuoteTOML(filepath.ToSlash(composed.Path)))
 	}
 	b.WriteString("\n# A workspace of its own, wherever the output root lies.\n[workspace]\n")
 	return b.Bytes()
@@ -357,11 +358,6 @@ func (c *Crate) Write(dir string) error {
 		}
 	}
 	return nil
-}
-
-// quoteTOML is s as a TOML basic string.
-func quoteTOML(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 // RemoveStale removes the crate in dir when its manifest is one a build

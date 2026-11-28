@@ -330,7 +330,7 @@ func (o *APIOutput) TableArgs() []string {
 // table operation, which it serves from the table's repository (D106).
 // Its namespace's trait has no method for it.
 func (e EndpointInfo) RouterServed() bool {
-	return e.Behavior != nil || e.Table != nil || e.Graph != nil
+	return e.Behavior != nil || e.Table != nil || e.Graph != nil || e.RowFeature != nil
 }
 
 // checkTableDeps refuses table operations the crate cannot serve: an API
@@ -370,20 +370,24 @@ func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 	refuse := func(what string) error {
 		return fmt.Errorf("rustrestgen: %s is a Rust API on %s, whose DB service lists sqlite first, and %s on Postgres alone so far (D116); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", o.SchemaName, deps.Database, what, deps.Database)
 	}
-	if len(o.Derivers) > 0 || deps.Engine != nil {
-		return refuse("the Rust server opens an engine")
+	if len(o.Derivers) > 0 {
+		return refuse("the Rust server runs a deriver")
 	}
 	if len(o.PostgresFeatures) > 0 {
-		return refuse("the Rust server serves " + strings.Join(o.PostgresFeatures, ", ") + " (D152, D157, D158, D188, D193)")
+		return refuse("the Rust server wires " + strings.Join(o.PostgresFeatures, ", ") + " (D157, D158, D193, #725)")
 	}
 	return nil
 }
 
-// postgresFeaturesOf are the features of databases a Rust server serves on
-// Postgres alone (D188), each "Type: feature", in type order: a table that
-// composes Recurrence, whose operations and deadline worker the Rust
-// adapter runs on Postgres, and a calendar source, which the runtime's
-// orm::calendar reads through the Postgres repositories.
+// postgresFeaturesOf are the features of databases a Rust server wires on
+// Postgres alone, each "Type: feature", in type order: parties, the
+// inbound path and the agent orchestration (D193). The Rust runtime serves
+// them on SQLite too (#618), over orm::store; the generated server's
+// wiring of them is Postgres's (#707), so a server over a sqlite-first
+// database is refused them until it wires them there (#725). Recurrence,
+// whose operations and deadline worker the Rust adapter runs on SQLite
+// too, and a calendar source, which orm::calendar::sqlite reads (#615),
+// are served on either dialect.
 func postgresFeaturesOf(databases []*ir.Schema) []string {
 	var out []string
 	for _, database := range databases {
@@ -394,17 +398,9 @@ func postgresFeaturesOf(databases []*ir.Schema) []string {
 		slices.Sort(names)
 		for _, name := range names {
 			td := database.Types[name]
-			for _, ref := range td.ImplementsBehaviors() {
-				if ref.Name == "Recurrence" {
-					out = append(out, name+": Recurrence")
-				}
-			}
-			if len(td.CalendarSources) > 0 {
-				out = append(out, name+": @calendarSource")
-			}
 			// Parties and the inbound path (D157) and the agent
-			// orchestration (D158) claim their queues through the Postgres
-			// queue client alone (D193).
+			// orchestration (D158): the generated wiring is Postgres's
+			// alone (#725).
 			switch {
 			case td.Party != nil:
 				out = append(out, name+": @party")

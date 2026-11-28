@@ -58,7 +58,7 @@ func (Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.TaskResolverSpec{
 		{Kind: GoModule, Spec: dirSpec, Resolve: resolveGoModule},
 		{Kind: RustCrate, Spec: dirSpec, Resolve: resolveRustCrate},
-		{Kind: JSPackage, Spec: dirSpec, Resolve: resolveJSPackage},
+		{Kind: JSPackage, Spec: jsSpecSchema, Resolve: resolveJSPackage},
 		{Kind: Image, Spec: imageSpec, Resolve: resolveImage},
 	} {
 		spec.Extension = Name
@@ -112,8 +112,21 @@ func (r *resolution) add(file string) bool {
 // addUnder takes every tracked file under dir but those inside one of
 // the nested directories.
 func (r *resolution) addUnder(dir string, nested []string) {
+	// Each nested directory's prefix is made once: a repository's root
+	// module holds every other, and its files are tried against each.
+	prefixes := make([]string, len(nested))
+	for i, inner := range nested {
+		prefixes[i] = inner + "/"
+	}
 	for _, entry := range registry.TaskEntriesUnder(r.tree.Entries(), dir) {
-		if !within(entry.Path, nested) {
+		own := true
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry.Path, prefix) {
+				own = false
+				break
+			}
+		}
+		if own {
 			r.paths[entry.Path] = true
 		}
 	}

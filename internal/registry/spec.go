@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -272,11 +272,7 @@ func (s DecoratorSpec) ValidateArgs(args []any) error {
 	if err != nil {
 		return fmt.Errorf("@%s argument: %w", s.Name, err)
 	}
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		return fmt.Errorf("@%s argument: %w", s.Name, err)
-	}
-	if err := s.compiledArgs.Validate(instance); err != nil {
+	if err := jsonschemas.Validate(s.compiledArgs, raw); err != nil {
 		return fmt.Errorf("@%s argument: %w", s.Name, err)
 	}
 	return nil
@@ -399,8 +395,7 @@ type LoadContext struct {
 // GeneratorSpec describes one generator a kind's pipeline can name.
 type GeneratorSpec struct {
 	// Name is the pipeline identifier. Core: "types", "sql", "orm", "api",
-	// "sdks", "envConfig", "enginedoc", "projectengine", "stack", "server",
-	// "site", "ci".
+	// "sdks", "envConfig", "rulescore", "stack", "server", "site", "ci".
 	Name      string
 	Extension string
 	// Kinds lists kinds whose pipeline may include this generator, and
@@ -425,19 +420,6 @@ type GeneratorSpec struct {
 	Enabled func(ctx GenerateContext) (bool, string)
 	// Generate emits the outputs and records them on ctx.Result.
 	Generate func(ctx GenerateContext) error
-	// RendersBehaviors marks a generator whose output covers what a type's
-	// behaviors add (ir.TypeDef.Behaviors): their fields and operations,
-	// or nothing of a type at all. Run refuses to run a generator without
-	// it on a schema one of whose types composes a behavior, or that
-	// imports a DB service's type that does, rather than generate the type
-	// without them (D16). Of the core's generators, types sets it, since
-	// it writes each behavior's fields as <T>Behaviors, and so do the ones
-	// a DB schema's engine types build through: sql and orm, which leave
-	// an engine type to the engine, enginedoc, which writes the engine
-	// document, and envConfig, which reads no type that composes one
-	// (D58). An API's own type never composes one: behaviors compose on
-	// DB types.
-	RendersBehaviors bool
 	// RendersFieldBehaviors marks a generator whose output covers what a
 	// behavior adds to a table that stays a table, implemented by it or
 	// anchored on a field (D103, ir.TypeDef.TableBehaviors): the columns
@@ -452,8 +434,8 @@ type GeneratorSpec struct {
 	// the columns, and types, whose TypeScript package's repositories
 	// (orm.ts) read the owned columns and run the operations through the
 	// behaviors' core and whose other languages write the owned fields as
-	// any field; enginedoc, projectengine and envConfig, which read no
-	// table, set it too.
+	// any field; rulescore and envConfig, which read no table, set it
+	// too.
 	RendersFieldBehaviors bool
 	// ReadsCalls marks a generator whose output imports the SDK of each
 	// API the service calls: the core API server's Deps
@@ -499,13 +481,7 @@ type GenerateContext struct {
 	// schemas resolved) for generators that emit configuration derived
 	// from it. (nil, nil) means the schema declares no @envVars type.
 	EnvConfig func() (*envgen.ConfigOutput, error)
-	// EngineDocument memoises the engine document of a schema whose kind's
-	// structs are DB tables (D58), as engine/<schema>.json holds it, so the
-	// enginedoc generator and the types generator, which holds it as a
-	// constant, write the same bytes. (nil, nil) means no type of the
-	// schema composes a behavior, or the kind has no tables.
-	EngineDocument func() ([]byte, error)
-	Result         *Result
+	Result    *Result
 }
 
 // Logf writes to the run's log when one is configured.

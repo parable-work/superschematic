@@ -1,40 +1,46 @@
 //! fixture-notifications-db end to end in the Rust repositories and runtime
-//! (D153, D191), run by TestRustNotificationsEndToEnd: tickets that raise
-//! events, some named to a few readers, approvals asked of those who hold
-//! their permission, the notifier's tables, its dispatch queue and the
-//! channel identities replies resolve through. The generated create.sql is
-//! applied in a schema of the test's own at NOTIFY_TEST_DATABASE_URL, and
-//! the cases are the TypeScript repositories' (tsgen's
-//! notifications.test.ts), through the runtime's orm::notify over the
-//! generated repositories, with an SMS relay and a mail relay as stand-in
-//! channel adapters (D159). drain() runs what the dispatch queue's worker
-//! runs: each due message, handed to Notifier::handle.
+//! (D153, D191, #618), run by TestRustNotificationsEndToEnd: tickets that
+//! raise events, some named to a few readers, approvals asked of those who
+//! hold their permission, the notifier's tables, its dispatch queue and the
+//! channel identities replies resolve through. Each case runs on the
+//! database RUST_E2E_STORE names (tests/backend): a SQLite file with the
+//! build's SQLite DDL applied, or a schema of the test's own at
+//! RUST_E2E_DATABASE_URL with create.sql applied. The cases are the
+//! TypeScript repositories' (tsgen's notifications.test.ts), through the
+//! runtime's orm::notify over the generated repositories, with an SMS relay
+//! and a mail relay as stand-in channel adapters (D159); each prints its
+//! answers, which the Go test holds equal on the two databases. drain()
+//! runs what the dispatch queue's worker runs: each due message, handed to
+//! Notifier::handle.
+
+mod backend;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use backend::{answer, in_tx, rows_of, Backend};
 use runtime::identity::{
-    hash_password, verify_password, Argon2Params, Config, NewUser, PostgresPool, Scalars, Service, SqlStore, Store,
+    hash_password, verify_password, Argon2Params, Config, NewUser, PostgresPool, Rusqlite, Scalars, Service, SqlStore,
+    Store,
 };
 use runtime::orm::notify::{
     approval_replies, AddIdentity, Notifier, NotifierError, RaiseInput, RecipientRef, ReplyAction, ReplyContext,
     ReplyInput, PasswordReset,
 };
-use runtime::orm::postgres::{deadpool_postgres, tokio_postgres};
+use runtime::orm::store::{PartQueue, Store as Tables, TxRepositories};
 use runtime::orm::rowfeatures::RowRef;
-use runtime::orm::{FindOptions, OrderBy, Values, WriteOptions};
+use runtime::orm::{Values, WriteOptions};
 use runtime::providers::{
     providers_from, ChannelAdapter, ChannelHealth, ConfigValue, DeliveryState, DeliveryStatus, InboundMessage,
     OutboundMessage, ProviderDefinition, ProviderInstance, ProvidersOptions, RuntimeInterface, SendResult,
     WebhookRequest,
 };
-use runtime::queue::{PostgresQueue, QueueDefinition};
+use runtime::queue::QueueDefinition;
 use runtime::worker::WorkerQueue;
 use runtime::BoxError;
 use serde_json::{json, Value};
-use types::orm::postgres::Repositories;
 
 const RELAY_TOKEN: &str = "relay-token";
 
@@ -275,20 +281,13 @@ impl Scalars for Catalog {
     }
 }
 
-async fn connect(config: &tokio_postgres::Config) -> tokio_postgres::Client {
-    let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
-    tokio::spawn(connection);
-    client
-}
-
 type Expand = runtime::orm::notify::Expand;
 
 /// A schema of its own holding fixture-notifications-db's tables, the
 /// notifier over it, and the people and the ticket of every case.
 struct World {
-    pool: deadpool_postgres::Pool,
-    admin: tokio_postgres::Client,
-    schema: String,
+    backend: Backend,
+    store: Tables,
     notifier: Notifier,
     relays: Relays,
     ann: String,
@@ -304,18 +303,8 @@ struct Options {
 }
 
 async fn world(options: Options) -> World {
-    let url = std::env::var("NOTIFY_TEST_DATABASE_URL").expect("NOTIFY_TEST_DATABASE_URL names the database");
-    let config: tokio_postgres::Config = url.parse().unwrap();
-    let admin = connect(&config).await;
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let schema = format!("notify_rust_{nanos}");
-    admin.batch_execute(&format!("CREATE SCHEMA {schema}")).await.unwrap();
-    let mut scoped = config;
-    scoped.options(format!("-c search_path={schema},public"));
-    let client = connect(&scoped).await;
-    client.batch_execute(include_str!("../create.sql")).await.unwrap();
-    let manager = deadpool_postgres::Manager::new(scoped, tokio_postgres::NoTls);
-    let pool = deadpool_postgres::Pool::builder(manager).max_size(8).build().unwrap();
+    let backend = Backend::open("notify_rust", include_str!("../create.sqlite.sql"), include_str!("../create.sql")).await;
+    let store = backend.store();
 
     let relays = Relays::default();
     let (sms, mail) = (relays.clone(), relays.clone());
@@ -339,7 +328,7 @@ async fn world(options: Options) -> World {
     .unwrap();
     let dispatch = QueueDefinition::parse(types::queues::NOTICE_WORK_QUEUE).unwrap();
     let [(approve, approve_action), (deny, deny_action)] = approval_replies("Approval", "agents.approve");
-    let mut notifier = Notifier::new(types::orm::postgres::tables(pool.clone()), dispatch)
+    let mut notifier = Notifier::new(store.clone(), dispatch)
         .unwrap()
         .with_providers(Arc::new(providers))
         .with_reply("ticket.overdue", "done", Arc::new(MarkDone))
@@ -354,9 +343,8 @@ async fn world(options: Options) -> World {
     }
 
     let mut w = World {
-        pool,
-        admin,
-        schema,
+        backend,
+        store,
         notifier,
         relays,
         ann: String::new(),
@@ -367,16 +355,15 @@ async fn world(options: Options) -> World {
     let (ann, ben, cal, ticket) = w
         .tx(async |r| {
             let account = |email: &str| values(json!({ "email": email }));
-            let ann = text(&r.untyped().table("Account")?.create_one(&account(EMAIL_ANN)).await?, "id");
-            let ben = text(&r.untyped().table("Account")?.create_one(&account(EMAIL_BEN)).await?, "id");
-            let cal = text(&r.untyped().table("Account")?.create_one(&account(EMAIL_CAL)).await?, "id");
+            let ann = text(&r.table("Account")?.create_one(&account(EMAIL_ANN)).await?, "id");
+            let ben = text(&r.table("Account")?.create_one(&account(EMAIL_BEN)).await?, "id");
+            let cal = text(&r.table("Account")?.create_one(&account(EMAIL_CAL)).await?, "id");
             let worker = r
-                .untyped()
                 .table("Role")?
                 .create_one(&values(json!({ "name": "worker", "permissions": ["tickets.work"] })))
                 .await?;
             for user in [&ann, &ben] {
-                r.untyped()
+                r
                     .table("UserRoleGrant")?
                     .create_one(&values(json!({ "userId": user, "roleId": worker["id"], "grantedAt": "2026-01-01T00:00:00Z" })))
                     .await?;
@@ -384,7 +371,6 @@ async fn world(options: Options) -> World {
             // Ann owns the ticket; Ben is named on it; Cal watches it and
             // may not read it.
             let ticket = r
-                .untyped()
                 .table("Ticket")?
                 .create_one(&values(json!({
                     "title": "Boiler pressure low", "status": "open", "owner": ann,
@@ -393,7 +379,7 @@ async fn world(options: Options) -> World {
                 .await?;
             for (who, phone, email) in [(&ann, PHONE_ANN, EMAIL_ANN), (&ben, PHONE_BEN, EMAIL_BEN), (&cal, PHONE_CAL, EMAIL_CAL)] {
                 for (kind, address) in [("phone", phone), ("email", email)] {
-                    r.untyped()
+                    r
                         .table("ChannelIdentity")?
                         .create_one(&values(json!({
                             "kind": kind, "address": address, "principal": who,
@@ -402,20 +388,10 @@ async fn world(options: Options) -> World {
                         .await?;
                 }
             }
-            r.untyped()
-                .table("NoticePreference")?
-                .create_one(&values(json!({ "principal": null, "eventKind": "*", "urgency": "*", "channels": ["sms", "email"] })))
-                .await?;
-            r.untyped()
-                .table("ChannelTrust")?
-                .create_one(&values(json!({ "channelKind": "sms", "level": "low", "permissions": [] })))
-                .await?;
-            r.untyped()
-                .table("ChannelTrust")?
-                .create_one(&values(json!({ "channelKind": "email", "level": "standard", "permissions": null })))
-                .await?;
-            r.untyped()
-                .table("NoticeRoute")?
+            // Everyone's preference (SMS, then email) and each channel
+            // kind's trust (SMS low, email standard) are the schema's seed
+            // rows (#625), which create.sql and create.sqlite.sql wrote.
+            r.table("NoticeRoute")?
                 .create_one(&values(json!({
                     "name": "Overdue tickets page their people",
                     "eventKind": "ticket.overdue",
@@ -437,26 +413,14 @@ async fn world(options: Options) -> World {
 impl World {
     /// Runs `work` over the system's repositories in a transaction it
     /// commits.
-    async fn tx<T>(&self, work: impl AsyncFnOnce(&Repositories<'_, deadpool_postgres::Transaction<'_>>) -> T) -> T {
-        let mut client = self.pool.get().await.unwrap();
-        let tx = client.transaction().await.unwrap();
-        let repos = Repositories::new(&tx).unwrap().as_system();
-        let out = work(&repos).await;
-        drop(repos);
-        tx.commit().await.unwrap();
-        out
+    async fn tx<T>(&self, work: impl AsyncFnOnce(&TxRepositories<'_, '_>) -> T) -> T {
+        in_tx(&self.store, work).await
     }
 
     /// The rows of `table` that `filter` finds, read as the system, in
     /// the order of `order`.
     async fn rows(&self, table: &str, filter: Value, order: Option<&str>) -> Vec<Values> {
-        let client = self.pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
-        let options = FindOptions {
-            order_by: order.map(OrderBy::asc).into_iter().collect(),
-            ..FindOptions::default()
-        };
-        repos.untyped().table(table).unwrap().find_many(Some(&values(filter)), &options).await.unwrap().rows
+        rows_of(&self.store, table, filter, order).await
     }
 
     async fn ticket_status(&self) -> String {
@@ -466,8 +430,7 @@ impl World {
 
     async fn route(&self, name: &str, kind: &str, recipients: Value) {
         self.tx(async |r| {
-            r.untyped()
-                .table("NoticeRoute")?
+            r.table("NoticeRoute")?
                 .create_one(&values(json!({ "name": name, "eventKind": kind, "recipients": recipients })))
                 .await
         })
@@ -477,11 +440,11 @@ impl World {
 
     /// Raises `kind` on the ticket in a transaction of its own.
     async fn raise(&self, kind: &str, id: Option<String>) -> Result<String, NotifierError> {
-        let mut client = self.pool.get().await.unwrap();
+        let mut client = self.store.client().await.unwrap();
         let tx = client.transaction().await.unwrap();
         let mut input = RaiseInput::of("Ticket", self.ticket.clone(), kind);
         input.id = id;
-        let raised = self.notifier.raise(&tx, input).await;
+        let raised = self.notifier.raise(tx.db(), input).await;
         if raised.is_ok() {
             tx.commit().await.unwrap();
         }
@@ -513,11 +476,13 @@ impl World {
 
     /// Makes the queue's waiting messages of `step` due now: time passing.
     async fn advance(&self, step: &str) {
-        let client = self.pool.get().await.unwrap();
-        client
-            .execute("UPDATE notice_work_queue SET due_at = now() WHERE step = $1 AND state = 'ready'", &[&step])
-            .await
-            .unwrap();
+        self.backend
+            .execute(
+                "UPDATE notice_work_queue SET due_at = now() WHERE step = $1 AND state = 'ready'",
+                "UPDATE notice_work_queue SET due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second') WHERE step = ?1 AND state = 'ready'",
+                &[step],
+            )
+            .await;
     }
 
     async fn notices_of(&self, user: &str) -> Vec<Values> {
@@ -529,9 +494,9 @@ impl World {
     }
 
     async fn drop_schema(self) {
-        drop(self.notifier);
-        self.pool.close();
-        self.admin.batch_execute(&format!("DROP SCHEMA {} CASCADE", self.schema)).await.unwrap();
+        let World { backend, store, notifier, .. } = self;
+        drop((store, notifier));
+        backend.drop_database().await;
     }
 }
 
@@ -548,9 +513,6 @@ fn now_millis() -> u64 {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn notifications() {
-    if std::env::var("NOTIFY_TEST_DATABASE_URL").is_err() {
-        panic!("set NOTIFY_TEST_DATABASE_URL");
-    }
 
     {
         case("an urgent event reaches two recipients by SMS, skips one who cannot read the record, and escalates to email when not acknowledged in time");
@@ -587,6 +549,11 @@ async fn notifications() {
             got,
             [("sms".into(), "sent".into(), "1".into()), ("email".into(), "sent".into(), "2".into())]
         );
+        let unreadable = w.notices_of(&w.cal).await.len();
+        answer(
+            "an urgent event",
+            json!({ "sms": Relays::to(&w.relays.sms()), "mail": Relays::to(&w.relays.mail()), "unreadable": unreadable, "deliveries": got }),
+        );
         w.drop_schema().await;
     }
 
@@ -606,6 +573,10 @@ async fn notifications() {
         w.drain().await;
         // Ann acknowledged: only Ben's email went out.
         assert_eq!(Relays::to(&w.relays.mail()), [EMAIL_BEN]);
+        answer(
+            "ack",
+            json!({ "outcome": acked.outcome, "echo": acked.echo, "state": text(notice, "state"), "mail": Relays::to(&w.relays.mail()) }),
+        );
         let undone = w.reply("sms", PHONE_ANN, "undo 1").await;
         assert_eq!(undone.outcome, "done", "{undone:?}");
         assert_eq!(text(&w.notices_of(&w.ann).await[0], "state"), "unread");
@@ -617,8 +588,7 @@ async fn notifications() {
         let w = world(Options::default()).await;
         // Ann has had 141 notices before this one.
         w.tx(async |r| {
-            r.untyped()
-                .table("Notice")?
+            r.table("Notice")?
                 .create_one(&values(json!({
                     "recipient": w.ann, "reference": 141, "eventId": "0f8b6c4e-1b2a-4c3d-9e8f-123456789abc",
                     "eventKind": "ticket.assigned", "urgency": "record", "title": "Earlier", "state": "read",
@@ -652,6 +622,9 @@ async fn notifications() {
         assert_eq!(text(audit, "principal"), w.ann);
         let notice = w.notices_of(&w.ann).await.into_iter().find(|n| text(n, "reference") == "142").unwrap();
         assert_eq!(text(&notice, "state"), "done");
+        let ticket = w.ticket_status().await;
+        let audited: Vec<String> = ["channelKind", "interpreter", "verb", "reference", "outcome"].iter().map(|m| text(audit, m)).collect();
+        answer("done 142", json!({ "outcome": done.outcome, "echo": echo, "ticket": ticket, "audit": audited }));
         // Undo puts the ticket back as it was.
         assert_eq!(w.reply("email", EMAIL_ANN, "undo 142").await.outcome, "done");
         assert_eq!(w.ticket_status().await, "open");
@@ -672,8 +645,7 @@ async fn notifications() {
         // Ben's email, entered by hand, is trusted only to acknowledge.
         let ben = w.ben.clone();
         w.tx(async |r| {
-            r.untyped()
-                .table("ChannelIdentity")?
+            r.table("ChannelIdentity")?
                 .update_many(
                     Some(&values(json!({ "principal": { "eq": ben }, "kind": { "eq": "email" } }))),
                     &values(json!({ "trust": "entered" })),
@@ -710,7 +682,7 @@ async fn notifications() {
         case("an address is verified by the code sent to it and replied with, and an unknown sender reaches nothing");
         let w = world(Options::default()).await;
         let dana = w
-            .tx(async |r| r.untyped().table("Account")?.create_one(&values(json!({ "email": "dana@example.test" }))).await)
+            .tx(async |r| r.table("Account")?.create_one(&values(json!({ "email": "dana@example.test" }))).await)
             .await
             .unwrap();
         let dana = text(&dana, "id");
@@ -781,7 +753,7 @@ async fn notifications() {
         let w = world(Options { now: Some(fixed), expand: Some(expand) }).await;
         let (ann, ben) = (w.ann.clone(), w.ben.clone());
         w.tx(async |r| {
-            let prefs = r.untyped().table("NoticePreference")?;
+            let prefs = r.table("NoticePreference")?;
             prefs
                 .create_one(&values(json!({
                     "principal": ben, "eventKind": "*", "urgency": "normal", "channels": ["sms"],
@@ -801,7 +773,7 @@ async fn notifications() {
         w.route("Summaries", "ticket.summary", json!([{ "path": "owner" }])).await;
         w.route("History", "reference.cleared", json!([{ "path": "owner" }])).await;
         {
-            let mut client = w.pool.get().await.unwrap();
+            let mut client = w.store.client().await.unwrap();
             let tx = client.transaction().await.unwrap();
             for (kind, id) in [
                 ("ticket.assigned", None),
@@ -811,7 +783,7 @@ async fn notifications() {
             ] {
                 let mut input = RaiseInput::of("Ticket", w.ticket.clone(), kind);
                 input.id = id.map(str::to_owned);
-                w.notifier.raise(&tx, input).await.unwrap();
+                w.notifier.raise(tx.db(), input).await.unwrap();
             }
             tx.commit().await.unwrap();
         }
@@ -825,15 +797,13 @@ async fn notifications() {
         let record = w.notices_of(&w.ann).await.into_iter().find(|n| text(n, "eventKind") == "reference.cleared").unwrap();
         assert_eq!(text(&record, "state"), "read");
         // One digest is waiting for Ann's two summaries.
-        let client = w.pool.get().await.unwrap();
-        let mut steps: Vec<String> = client
-            .query("SELECT step FROM notice_work_queue WHERE state = 'ready'", &[])
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| row.get(0))
-            .collect();
-        drop(client);
+        let mut steps: Vec<String> = w
+            .backend
+            .texts(
+                "SELECT step FROM notice_work_queue WHERE state = 'ready'",
+                "SELECT step FROM notice_work_queue WHERE state = 'ready'",
+            )
+            .await;
         steps.sort();
         assert_eq!(steps, ["deliver", "digest"]);
         w.advance("digest").await;
@@ -877,27 +847,27 @@ async fn notifications() {
         let (ticket, ann) = (w.ticket.clone(), w.ann.clone());
         w.tx(async |r| {
             let other = r
-                .untyped()
                 .table("Ticket")?
                 .create_one(&values(json!({ "title": "Parts order", "status": "open", "owner": ann })))
                 .await?;
             let other = text(&other, "id");
             r.references()?.add(&RowRef::new("Ticket", &ticket), &RowRef::new("Ticket", &other), "").await?;
-            r.untyped().table("Ticket")?.delete_one(&json!(other), &WriteOptions::default()).await?;
+            r.table("Ticket")?.delete_one(&json!(other), &WriteOptions::default()).await?;
             Ok::<_, BoxError>(())
         })
         .await
         .unwrap();
-        let cleared = PostgresQueue::<Value>::new(
-            w.pool.clone(),
+        let cleared = PartQueue::<Value>::of(
+            &w.store,
             QueueDefinition::parse(types::queues::REFERENCE_CLEARED_QUEUE).unwrap(),
-        );
+        )
+        .unwrap();
         let claims = cleared.claim(10, Duration::from_secs(30)).await.unwrap();
         assert_eq!(claims.len(), 1);
         {
-            let mut client = w.pool.get().await.unwrap();
+            let mut client = w.store.client().await.unwrap();
             let tx = client.transaction().await.unwrap();
-            w.notifier.cleared(&tx, &claims[0].message).await.unwrap();
+            w.notifier.cleared(tx.db(), &claims[0].message).await.unwrap();
             tx.commit().await.unwrap();
         }
         cleared.complete(&claims[0].id, &claims[0].token).await.unwrap();
@@ -910,10 +880,10 @@ async fn notifications() {
         // hands it.
         w.route("Missed", "recurrence.missed", json!([{ "path": "owner" }])).await;
         {
-            let mut client = w.pool.get().await.unwrap();
+            let mut client = w.store.client().await.unwrap();
             let tx = client.transaction().await.unwrap();
             w.notifier
-                .from_behavior_event(&tx, "Ticket", "recurrence", "missed", &w.ticket, Some(&json!({ "key": "2027-01-01T09:00" })))
+                .from_behavior_event(tx.db(), "Ticket", "recurrence", "missed", &w.ticket, Some(&json!({ "key": "2027-01-01T09:00" })))
                 .await
                 .unwrap();
             tx.commit().await.unwrap();
@@ -928,9 +898,15 @@ async fn notifications() {
         case("password reset sends a code through the email adapter and the code sets the password");
         let w = world(Options::default()).await;
         let params = Argon2Params { memory_kib: 64, iterations: 1, parallelism: 1 };
-        let store: Arc<dyn Store> = Arc::new(
-            SqlStore::new(PostgresPool::new(w.pool.clone()), types::identity::IDENTITY_DESCRIPTOR, Arc::new(Catalog)).unwrap(),
-        );
+        let store: Arc<dyn Store> = match &w.backend {
+            Backend::Postgres { pool, .. } => Arc::new(
+                SqlStore::new(PostgresPool::new(pool.clone()), types::identity::IDENTITY_DESCRIPTOR, Arc::new(Catalog)).unwrap(),
+            ),
+            Backend::Sqlite { dir, .. } => Arc::new(
+                SqlStore::new(Rusqlite::open(dir.join("database.db")).unwrap(), types::identity::IDENTITY_DESCRIPTOR, Arc::new(Catalog))
+                    .unwrap(),
+            ),
+        };
         let config = Config::parse(br#"{"password":{"argon2":{"memoryKiB":64,"iterations":1,"parallelism":1}}}"#).unwrap();
         let service = Service::new(store.clone(), config).unwrap();
         store
@@ -968,28 +944,27 @@ async fn notifications() {
         let (first, second) = w
             .tx(async |r| {
                 let approver = r
-                    .untyped()
                     .table("Role")?
                     .create_one(&values(json!({ "name": "approver", "permissions": ["agents.approve"] })))
                     .await?;
-                r.untyped()
+                r
                     .table("UserRoleGrant")?
                     .create_one(&values(json!({ "userId": ben, "roleId": approver["id"], "grantedAt": "2026-01-01T00:00:00Z" })))
                     .await?;
                 let approval = |summary: &str| {
                     values(json!({ "operation": "pay_invoice", "summary": summary, "permission": "agents.approve", "state": "pending" }))
                 };
-                let first = r.untyped().table("Approval")?.create_one(&approval("Pay invoice 7 for 120")).await?;
-                let second = r.untyped().table("Approval")?.create_one(&approval("Pay invoice 8 for 300")).await?;
+                let first = r.table("Approval")?.create_one(&approval("Pay invoice 7 for 120")).await?;
+                let second = r.table("Approval")?.create_one(&approval("Pay invoice 8 for 300")).await?;
                 Ok::<_, BoxError>((text(&first, "id"), text(&second, "id")))
             })
             .await
             .unwrap();
         w.route("Approvals go to approvers", "approval.requested", json!([{ "role": "approver" }])).await;
         for approval in [&first, &second] {
-            let mut client = w.pool.get().await.unwrap();
+            let mut client = w.store.client().await.unwrap();
             let tx = client.transaction().await.unwrap();
-            w.notifier.raise(&tx, RaiseInput::of("Approval", approval.clone(), "approval.requested")).await.unwrap();
+            w.notifier.raise(tx.db(), RaiseInput::of("Approval", approval.clone(), "approval.requested")).await.unwrap();
             tx.commit().await.unwrap();
         }
         w.drain().await;

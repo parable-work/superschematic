@@ -28,9 +28,7 @@ func (postgresDialect) rebuild(*tableRebuild) (rendered, error) {
 var q = sqlutil.QuoteIdentifier
 
 // literal renders a SQL string literal.
-func literal(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
+var literal = sqlutil.QuoteLiteral
 
 // quoteList quotes each name and joins them with commas.
 func quoteList(names []string) string {
@@ -125,6 +123,8 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		return one(stepFor(c, c.role.Insert)), nil
 	case opUpdateRole:
 		return one(stepFor(c, c.role.Update)), nil
+	case opSeedRow:
+		return one(stepFor(c, c.row.Insert)), nil
 	case opCreateView:
 		return one(stepFor(c, createViewSQL(c.view)...)), nil
 	case opReplaceView:

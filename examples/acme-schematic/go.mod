@@ -4,13 +4,11 @@ go 1.27.3
 
 require (
 	github.com/microsoft/typescript-go/shim v0.0.0
-	github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd
+	github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3
 	github.com/parable-work/superschematic v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/spf13/cobra v1.10.2
 )
-
-require github.com/microsoft/typescript-go v0.0.0 // indirect
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
@@ -21,16 +19,17 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
+	github.com/microsoft/typescript-go v0.0.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 // The example builds against the checkout it lives in. A real extension

@@ -140,6 +140,8 @@ func (d *differ) expandedModel() (*Model, error) {
 		}
 		m.Roles = append(m.Roles, r)
 	}
+	// Every new seed row is inserted in expand (#625).
+	m.Rows = append(m.Rows, d.to.Rows...)
 
 	m.sort()
 	return m, nil

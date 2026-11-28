@@ -14,7 +14,6 @@ declare module "@superschematic/stack" {
       site: {};
       bucket: { versioning?: boolean; deleteAfterDays?: number; cors?: ({ origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; exposeHeaders?: string[]; maxAge?: string })[] };
       worker: { cpu?: string; memory?: string; telemetry?: boolean; tick?: string };
-      runner: { cpu?: string; memory?: string; telemetry?: boolean };
       deriver: { cpu?: string; memory?: string; telemetry?: boolean };
       memoryStore: { nodeType?: "SHARED_CORE_NANO" | "STANDARD_SMALL" | "HIGHCPU_MEDIUM" | "HIGHMEM_MEDIUM" | "HIGHMEM_XLARGE" | "STANDARD_LARGE" | "HIGHMEM_2XLARGE" | "CUSTOM_PICO" | "CUSTOM_MICRO" | "CUSTOM_MINI"; replicas?: number };
       app: { minInstances?: number; maxInstances?: number; concurrency?: number; cpu?: string; cpuAlwaysAllocated?: boolean; memory?: string; telemetry?: boolean };

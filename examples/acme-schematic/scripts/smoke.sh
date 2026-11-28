@@ -7,10 +7,10 @@
 # Needs: the pinned Go toolchain, the superscalar dependency built by
 # scripts/superscalar-dep.sh, the version-graph core's archive built by
 # scripts/versiongraph-archive.sh, which shop-db's generated ORM links (the
-# Makefile's `setup` runs both), cargo, which builds the Rust engine and
-# acme.Rating's crate, and jq. Nothing is installed from the network beyond Go modules. Generated
-# output goes to the example's own schemas/dist (gitignored); the core-only
-# builds go to a temp dir that is removed on exit.
+# Makefile's `setup` runs both), and jq. Nothing is installed from the
+# network beyond Go modules. Generated output goes to the example's own
+# schemas/dist (gitignored); the core-only builds go to a temp dir that is
+# removed on exit.
 #
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
@@ -102,35 +102,12 @@
 #      (db.PlanogramGraph()), which compiled with the ORM module in step
 #      17; format writes the declarations, not the expansion, and the YAML
 #      twin expands to the same types;
-#  20. acme.Rating runs in the engine (D58): the declaration's copy in
-#      the acme-behaviors crate (crates/behaviors) is what `acme-schematic
-#      behaviors --check` would write; the crate passes rustfmt and clippy,
-#      and its tests, the TypeScript test's cases, pass on SQLite (and on
-#      Postgres when SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one); the
-#      binary, building shop-ratings as a service of this project, writes
-#      the project's engine crate (engine/rust/shop-ratings), which depends
-#      on acme-behaviors and registers acme_behaviors::Rating after the
-#      core's behaviors, with its ffi member, the C ABI's archive over
-#      those behaviors that a Go server links, and its napi member, the
-#      Node-API addon over them that a TypeScript server loads; the crate's
-#      workspace builds and passes clippy and its tests: the library's opens
-#      the engine on SQLite and finds acme.Rating registered, and the
-#      archive's opens one through its own eng_open, as the Go binding does,
-#      and finds it too; its resolve holds napi-derive-backend at the
-#      version that compiles; and scripts/engine-napi.sh builds the addon,
-#      which Node.js loads as @superschematic/engine loads a project's (the
-#      engine option addon, SUPERSCHEMATIC_ENGINE_ADDON): an engine on it
-#      with acme's meta-schema and tools publishes shop-ratings' Product,
-#      creates one and rates it, acme.Rating the crate's, in Rust, and its
-#      rate tool asks acme's confirm.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
-# dependencies from the npm registry. Step 20 builds the Rust engine with
-# cargo, with the toolchain tools.env pins, into CARGO_TARGET_DIR or the
-# crate's target/, from the crates.io index unless cargo's cache has the
-# engine's dependencies, and the addon with the napi CLI the engine's
-# package pins, which scripts/engine-napi.sh installs with bun when the
-# package has not, and needs Node.js 24.
+# dependencies from the npm registry. acme.Rating's rules are the
+# declarative vocabulary's, which the behaviors' core interprets with no
+# crate (D103's step 5): the rules testkit replays testdata/rules/
+# acme-rating.json, and no step builds Rust.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -264,12 +241,15 @@ cp "$DIST/acme/inventory.json" "$OUT/inventory.json"
 # and builds none; the hook must still run and see the same manifests.
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" >/dev/null
 rm -rf "$DIST"
-# The core's own hook installs shop-tasks' task file (D203). With the
-# committed file gone, the all-restored build, which runs no generator,
-# must put it back byte for byte.
+# The core's own hook installs shop-tasks' task file and the workflow the
+# github renderer writes from it (D203). With the committed files gone,
+# the all-restored build, which runs no generator, must put each back
+# byte for byte.
 TASK_FILE="$EXAMPLE_DIR/ci/tasks.json"
+TASK_WORKFLOW="$EXAMPLE_DIR/ci/workflows/shop-tasks.yml"
 cp "$TASK_FILE" "$OUT/tasks.json"
-rm "$TASK_FILE"
+cp "$TASK_WORKFLOW" "$OUT/shop-tasks.yml"
+rm "$TASK_FILE" "$TASK_WORKFLOW"
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" | tee "$OUT/restored.log"
 test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 6
 if grep -q '(built' "$OUT/restored.log"; then
@@ -278,8 +258,9 @@ if grep -q '(built' "$OUT/restored.log"; then
 fi
 cmp "$OUT/inventory.json" "$DIST/acme/inventory.json"
 cmp "$OUT/tasks.json" "$TASK_FILE"
+cmp "$OUT/shop-tasks.yml" "$TASK_WORKFLOW"
 
-echo "==> the task file is what shop-tasks gives, its schema inputs hold what the build read, and a commit plans"
+echo "==> the task file and the workflow are what shop-tasks gives, its schema inputs hold what the build read, and a commit plans"
 "$OUT/acme-schematic" tasks "$SCHEMAS/services/shop-tasks" --check
 # Each schema input's static set, found from tracked text at HEAD, holds
 # the services and the files the build above recorded reading.
@@ -579,90 +560,5 @@ printf '{"name": "shop-db", "kind": "DB", "outputs": {}}\n' >"$PLANOGRAM/schema.
 GRAPH_DEFS='[.types, .enums | to_entries[] | select(.key | test("^(Planogram|Bay$|Facing$)")) | .value | del(.owner)]'
 jq -e "$GRAPH_DEFS | length == 10" "$OUT/planogram-ir.json" >/dev/null
 cmp <(jq -S "$GRAPH_DEFS" "$OUT/db-ir.json") <(jq -S "$GRAPH_DEFS" "$OUT/planogram-ir.json")
-
-echo "==> behaviors: acme.Rating runs in the engine, and the project's engine crate"
-# Every crate states tools.env's RUST_VERSION as its rust-version.
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-$(grep -E '^RUST_VERSION=' "$REPO_ROOT/tools.env" | cut -d= -f2)}"
-export RUSTUP_TOOLCHAIN
-CRATE="$EXAMPLE_DIR/crates/behaviors"
-# One target directory for both crates: the engine crate takes the versions
-# acme's crate locked, so the engine builds once.
-CARGO_TARGET="${CARGO_TARGET_DIR:-$CRATE/target}"
-"$OUT/acme-schematic" behaviors --extension acme --out "$CRATE/declarations" --check
-(cd "$CRATE" && cargo fmt --check)
-(cd "$CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo clippy --locked --quiet --all-targets -- -D warnings)
-(cd "$CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" ACME_META_SCHEMA="$OUT/acme-schema-file.json" cargo test --locked --quiet)
-# shop-ratings sits outside the schemas root, so a build of it reads no
-# [paths] and its project would be ext/. A copy under dist (gitignored) is a
-# service of this project: its schemas root is schemas/, whose naming file
-# names the checkout's engine crates, and acme.Rating's crate is at
-# crates/behaviors in the project, the parent of the schemas root.
-FIXTURE="$DIST/engine-fixture"
-rm -rf "$FIXTURE"
-cp -R "$RATINGS" "$FIXTURE"
-"$OUT/acme-schematic" build "$FIXTURE" --out "$OUT/engine-dist" >"$OUT/engine-build.log"
-rm -rf "$FIXTURE"
-ENGINE_CRATE="$OUT/engine-dist/engine/rust/shop-ratings"
-grep -q '^  + engine-rust written to ' "$OUT/engine-build.log"
-grep -qx 'name = "acme-shop-ratings-engine"' "$ENGINE_CRATE/Cargo.toml"
-grep -q '^acme-behaviors = { path = ".*/examples/acme-schematic/crates/behaviors" }$' "$ENGINE_CRATE/Cargo.toml"
-grep -qx '        .with(acme_behaviors::Rating)' "$ENGINE_CRATE/src/lib.rs"
-grep -q '"key": "confirm",' "$ENGINE_CRATE/src/lib.rs"
-grep -qx 'members = \["ffi", "napi"\]' "$ENGINE_CRATE/Cargo.toml"
-grep -qx 'name = "acme-shop-ratings-engine-ffi"' "$ENGINE_CRATE/ffi/Cargo.toml"
-grep -q '^superschematic-engine-abi = { path = ".*/runtime/engine/rust/abi", default-features = false }$' "$ENGINE_CRATE/ffi/Cargo.toml"
-grep -qx 'superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);' "$ENGINE_CRATE/ffi/src/lib.rs"
-grep -qx 'name = "acme-shop-ratings-engine-napi"' "$ENGINE_CRATE/napi/Cargo.toml"
-grep -q '^superschematic-engine-napi = { path = ".*/runtime/engine/rust/napi", default-features = false }$' "$ENGINE_CRATE/napi/Cargo.toml"
-grep -qx 'superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors);' "$ENGINE_CRATE/napi/src/lib.rs"
-# The workspace, library, archive and addon, resolves acme's locked
-# versions, to which cargo adds the C ABI's library and the addon's with
-# the napi crates, napi-derive-backend held at 6.1.4 by the addon library's
-# manifest.
-cp "$CRATE/Cargo.lock" "$ENGINE_CRATE/Cargo.lock"
-(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo clippy --quiet --workspace --all-targets -- -D warnings)
-(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo test --quiet --workspace)
-[ "$(grep -A1 -x 'name = "napi-derive-backend"' "$ENGINE_CRATE/Cargo.lock" | tail -n 1)" = 'version = "6.1.4"' ]
-# The addon, as a TypeScript server's build would build it (a debug build:
-# the crate's tests built the same dependencies), loaded as
-# @superschematic/engine loads a project's: acme.Rating runs on it, the
-# crate's, under acme's meta-schema and tool options.
-ADDON="$(CARGO_TARGET_DIR="$CARGO_TARGET" "$REPO_ROOT/scripts/engine-napi.sh" --debug --crate "$ENGINE_CRATE/napi" --out "$OUT/engine-addon")"
-node -e 'const addon = require(process.argv[1]); if (addon.project() !== "acme-shop-ratings-engine-napi" || addon.bridgeCall !== undefined) { console.error(`the addon is ${addon.project()}`); process.exit(1); }' "$ADDON"
-RATING_DB="$(mktemp -d "$OUT/rating-XXXXXX")"
-node - "$ADDON" "$OUT/acme-schema-file.json" "$RATINGS/src/product.schema.json" "$RATING_DB/shop.db" <<'JS'
-const [addonPath, metaSchemaPath, productPath, path] = process.argv.slice(2);
-const { readFileSync } = require('node:fs');
-const addon = require(addonPath);
-const metaSchema = readFileSync(metaSchemaPath, 'utf8');
-const product = JSON.parse(readFileSync(productPath, 'utf8'));
-// acme's binary's invocation policy and vendor keys (ext/mcp.go).
-const tools = {
-  invocationPolicy: { key: 'confirm', values: ['never', 'always'], default: 'never' },
-  keys: { scalar: 'x-acme-scalar', guidance: 'acme/operation-guidance', parameters: [{ key: 'x-acme-arguments', value: 1 }] },
-};
-const engine = addon.NativeEngine.open(JSON.stringify({ path, policy: 'allowAll', metaSchema, behaviors: ['acme.Rating'], tools }));
-const shopper = { subject: 'shopper', permissions: [] };
-const call = (op, ...args) => {
-  const text = engine.callSync(JSON.stringify({ op, principal: shopper, args }));
-  return text === '' ? undefined : JSON.parse(text);
-};
-const expect = (what, got, want) => {
-  if (JSON.stringify(got) !== JSON.stringify(want)) {
-    console.error(`${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
-    process.exit(1);
-  }
-};
-call('schemas.define', { kind: 'General', name: 'Product', ...product });
-expect('publish', call('schemas.publish', 'Product').version, 1);
-expect('create', call('instances.create', 'Product', { sku: 'walnut-desk', name: 'Walnut desk' }, { id: 'p1' }).behaviors, {
-  'acme.Rating': { ratingCount: 0, ratingAverage: 0 },
-});
-call('instances.invoke', 'Product', 'p1', 'rate', { stars: 4 });
-expect('rate', call('instances.invoke', 'Product', 'p1', 'rate', { stars: 5 }), { ratingCount: 2, ratingAverage: 4.5 });
-expect('the rate tool', call('tools.manifest').tools.find((tool) => tool.name === 'product.rate').mcp.confirm, 'always');
-engine.close();
-JS
-rm -rf "$RATING_DB"
 
 echo "acme smoke: ok"

@@ -122,14 +122,25 @@ pub struct Deps {
     /// while it is unreachable is held until it reconnects.
     pub {{ .Field }}: Arc<dyn MemoryStore>,
 {{- end }}
-{{- with .Engine }}
-    /// The engine of {{ .Database }}, the API's engine database (D58), which the
-    /// entrypoint opens in the background, so it starts while the database
-    /// is not up yet: `engine.wait().await` returns it once it opens, and
-    /// `engine.engine()` at once, or why it is not open. Its types'
-    /// instances are the engine's, in namespace {{ .Namespace }}. The engine is
-    /// synchronous: call it off the async threads (`spawn_blocking`).
-    pub engine: {{ .CrateIdent }}::background::Background,
+{{- end }}
+{{- with .Wiring }}
+{{- if .Notifier }}
+    /// The notifier of {{ $.Deps.Database }} (D153, D191, #620), which the entrypoint
+    /// builds as the implementation's `create_wiring` shapes it: raise an
+    /// event in the transaction of the change that caused it
+    /// (`notifier.raise(&tx, RaiseInput::of(table, key, kind))`).
+    pub notifier: Notifier,
+{{- end }}
+{{- if .Agents }}
+    /// The agent dispatcher of {{ $.Deps.Database }} (D158, D193, #622), which the
+    /// entrypoint builds as the implementation's `create_wiring` shapes it:
+    /// a run request, its administration and its approvals.
+    pub agents: Agents,
+{{- end }}
+{{- if .Inbound }}
+    /// The inbound path of {{ $.Deps.Database }} (D157, D193): a party's messages and
+    /// the sends to it.
+    pub inbound: Inbound,
 {{- end }}
 {{- end }}
     /// The API's span: the implementation logs inside it, so each event
@@ -160,7 +171,7 @@ pub struct Handlers {
 
 impl Implementations {
     /// The API's `Implementations`: the handlers the implementation's
-    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
+    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
 {{- if .Identity }}
     ///
     /// `authenticator` is the identity runtime's (D50), which the
@@ -189,6 +200,10 @@ impl Implementations {
     ///
     /// `db` is the pool of {{ .GraphDatabase }}, on which the graph operations run
     /// (D138): the pool `Deps.db` holds.
+{{- else if .HasRowFeatureOperations }}
+    ///
+    /// `db` is {{ .RowFeatureDatabase }}, through whose repositories the row feature
+    /// operations run (#723): what `Deps.db` holds.
 {{- end }}
 {{- if .HasIdempotent }}
     ///
@@ -200,6 +215,12 @@ impl Implementations {
     /// `field_keys` are the keys of the `Encrypted<T>` fields of {{ .TableDatabase }}
     /// (D85), which the table operations' repositories seal and open with:
     /// `tables::field_keys` reads them from the API's config.
+{{- end }}
+{{- if .RowFeatureBucket }}
+    ///
+    /// `attachments` is the bucket that holds the files of the row feature
+    /// operations, {{ .RowFeatureBucket }}, whose URLs a file's upload and download sign
+    /// (#723): what `Deps.{{ .RowFeatureBucketField }}` holds.
 {{- end }}
 {{ .NewSignature }}
 {{- if not $handlers }}
@@ -217,18 +238,21 @@ impl Implementations {
 {{- end }}
 {{- if .HasIdempotent }}
             idempotency_store: Arc::new({{ .IdempotencyStoreType }}::new(
-                db{{ if or .HasBehaviorOperations .HasTableOperations .HasGraphOperations }}.clone(){{ end }},
+                db{{ if or .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }},
                 &crate::IDEMPOTENCY_TABLE,
             )),
 {{- end }}
 {{- if .HasBehaviorOperations }}
-            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations }}.clone(){{ end }}),
+            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }}),
 {{- end }}
 {{- if .HasTableOperations }}
-            tables: crate::tables::tables(db{{ if .HasGraphOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
+            tables: crate::tables::tables(db{{ if or .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
 {{- end }}
 {{- if .HasGraphOperations }}
-            graphs: crate::graphs::Graphs::new(db),
+            graphs: crate::graphs::Graphs::new(db{{ if .HasRowFeatureOperations }}.clone(){{ end }}),
+{{- end }}
+{{- if .HasRowFeatureOperations }}
+            row_features: crate::rowfeatures::RowFeatures::new(db{{ if .RowFeatureBucket }}, attachments{{ end }}),
 {{- end }}
         }
     }
@@ -244,6 +268,11 @@ impl Implementations {
 /// The error a job's or a worker's method fails with: any error, which
 /// fails the run or the message. It is the HTTP runtime's.
 {{- end }}
+pub use {{ .RuntimeCrateIdent }}::BoxError;
+{{- else if .HasWiring }}
+
+/// The error the wiring of the runtime parts fails with: any error, which
+/// stops the server as it starts. It is the HTTP runtime's.
 pub use {{ .RuntimeCrateIdent }}::BoxError;
 {{- end }}
 {{- if .HasJobs }}
@@ -357,15 +386,9 @@ impl<T> DerivedAnswer<T> {
         }
     }
 }
-{{- if .HasTableDerivers }}
 
 /// The deriver loop's answer for what a deriver's method returned: its
 /// value as JSON, or its error as a failure, which counts an attempt.
-{{- else }}
-
-/// The engine's answer for what a deriver's method returned: its value as
-/// JSON, or its error as a failure, which counts an attempt.
-{{- end }}
 pub fn derivation_answer<T: Serialize>(
     answered: Result<DerivedAnswer<T>, BoxError>,
 ) -> DerivationAnswer {

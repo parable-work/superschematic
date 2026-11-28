@@ -29,10 +29,12 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/notifications"
+	"github.com/parable-work/superschematic/internal/loader/rowfeatureops"
 	"github.com/parable-work/superschematic/internal/loader/rowrefs"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/internal/loader/search"
+	"github.com/parable-work/superschematic/internal/loader/triageops"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/loader/versiongraph"
@@ -223,7 +225,11 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	var schema *ir.Schema
 	var cfg *schemaconfig.SchemaConfig
 	var vin verify.Input
-	if runsTSFrontend(servicePath, tsFiles) {
+	ts, err := runsTSFrontend(servicePath, tsFiles)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ts {
 		// The TypeScript frontend owns its program, config read, walk, and
 		// validation; cross-service imports land in schema.Imports.
 		var tsInput *verify.Input
@@ -239,12 +245,17 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		}); err != nil {
 			return nil, nil, err
 		}
+		if err := refuseEngineOutputs(cfg); err != nil {
+			return nil, nil, err
+		}
 		vin = *tsInput
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.SearchFoldsDiacritics = searchFoldsDiacritics(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
+		vin.MCPServer = mcpServer(cfg)
 		vin.TypesLanguages = typesLanguages(cfg)
 		vin.RustOutput = rustOutput(cfg)
 
@@ -299,6 +310,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		}); err != nil {
 			return nil, nil, err
 		}
+		if err := refuseEngineOutputs(cfg); err != nil {
+			return nil, nil, err
+		}
 		schema = cfg.NewSchema()
 		vin.Dependencies = make(map[string]ir.SchemaKind, len(cfg.Dependencies))
 		for _, dep := range cfg.Dependencies {
@@ -307,8 +321,10 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.SearchFoldsDiacritics = searchFoldsDiacritics(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
+		vin.MCPServer = mcpServer(cfg)
 		vin.RustOutput = rustOutput(cfg)
 	}
 
@@ -474,6 +490,12 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 		}
 		if set.IsGraphOperations() {
 			why = "whose version graphs its @graphOperations sets serve"
+		}
+		if set.IsRowFeatureOperations() {
+			why = "whose tables' references and files its @rowFeatureOperations sets serve"
+		}
+		if set.IsTriageOperations() {
+			why = "whose inbound path's triage its @triageOperations set serves"
 		}
 	}
 	if schema.HasTableOperations() {
@@ -739,6 +761,36 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			}
 		}
 	}
+	// A table's references and files join their @rowFeatureOperations
+	// sets the same way (#723), with the types they take and return.
+	if err := verify.CheckRowFeatureOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
+		added, err := rowfeatureops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// The inbound path's triage joins its @triageOperations set the same
+	// way (#746), with the types it takes and returns.
+	if err := verify.CheckTriageOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
+		added, err := triageops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// A @behaviorWorker runs its table's behavior queues, which the
 	// database's load added (D103): it becomes an ordinary worker of those
 	// queues before the pass, once its checks hold that they are there,
@@ -801,7 +853,7 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// Search across tables (D155): the database's search index and the
 	// fields of the queues @searchable names join the schema before the
 	// pass, so it reads them as its own.
-	if added := search.Expand(schema); len(added) > 0 {
+	if added := search.Expand(schema, vin.SearchFoldsDiacritics); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}
@@ -819,6 +871,11 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	}
 	if len(refused) > 0 {
 		return nil, refused[0]
+	}
+	// After the pass, which holds each field a seed row names to the
+	// table's, the fields the expansions filled among them (#625).
+	if err := validateSeedRowValues(schema, vin.ExternalEnums); err != nil {
+		return nil, err
 	}
 	added := versiongraph.Expand(schema)
 	added = append(added, identity.Expand(schema)...)
@@ -988,17 +1045,18 @@ func HasTSFrontend(servicePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return runsTSFrontend(servicePath, tsFiles), nil
+	return runsTSFrontend(servicePath, tsFiles)
 }
 
 // runsTSFrontend is HasTSFrontend over the service's classified TypeScript
-// schema files.
-func runsTSFrontend(servicePath string, tsFiles []string) bool {
-	if len(tsFiles) > 0 {
-		return true
+// schema files. It refuses a service with more than one config form
+// (schemaconfig.Locate).
+func runsTSFrontend(servicePath string, tsFiles []string) (bool, error) {
+	_, form, _, err := schemaconfig.Locate(servicePath)
+	if err != nil {
+		return false, err
 	}
-	_, err := os.Stat(filepath.Join(servicePath, "schema.config.ts"))
-	return err == nil
+	return len(tsFiles) > 0 || form == schemaconfig.FormTS, nil
 }
 
 func classifySchemaFiles(servicePath string) (dataFiles, tsFiles []string, err error) {

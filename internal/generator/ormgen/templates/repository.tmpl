@@ -1335,6 +1335,45 @@ func (r *{{ .Name }}) requireCreatedRows(ctx context.Context, rows []*types.{{ .
 	return nil
 }
 {{- end }}
+{{- if .AnswersRows }}
+
+// keepAnsweredRow is raw, the answer of a table operation whose member
+// names a row of {{ .TypeName }} by its key in its wire form (Aliased's
+// resolve's row), with that member null when it is a row the operation's
+// caller does not see (D156), as for an answer of no row: the behaviors'
+// core reads every row, so the answer keeps to the caller here, as a read
+// does.
+func (r *{{ .Name }}) keepAnsweredRow(ctx context.Context, raw json.RawMessage, member string) (json.RawMessage, error) {
+	if !accessHeld(ctx, {{ printf "%q" .TypeName }}) {
+		return raw, nil
+	}
+	var answer map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s, %s: %w", raw, err)
+	}
+	named, ok := answer[member]
+	if !ok || string(named) == "null" {
+		return raw, nil
+	}
+	var row struct {
+		Key *string `json:"key"`
+	}
+	if err := json.Unmarshal(named, &row); err != nil || row.Key == nil {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s names a row with no key at %s: %s", member, raw)
+	}
+	key, ok := accessKey(accessTables[{{ printf "%q" .TypeName }}], *row.Key)
+	if !ok {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s names the row %q, which is no key of the table", *row.Key)
+	}
+	if err := r.requireReach(ctx, key, false); err == ErrNotFound {
+		answer[member] = json.RawMessage("null")
+		return json.Marshal(answer)
+	} else if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+{{- end }}
 
 {{- end }}
 
@@ -1543,152 +1582,12 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 	}
 	{{- end }}
 	{{- end }}
-	{{- range $i, $rel := .Relationships }}
-	{{- if $rel.IsArray }}
-	if opts != nil && opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil {
-		childFields := *opts.Fields.{{ toGoName $rel.FieldName }}Nested
-		if childFields.IsZero() {
-			childFields = {{ $rel.TargetType }}Fields{Id: true}
+	{{- if .HasArrayRelationships }}
+	if opts != nil {
+		if err := r.hydrateHasMany(ctx, []*types.{{ .TypeName }}{result}, opts.Fields); err != nil {
+			return nil, err
 		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			{{- if $rel.HasManyParentRelationField }}
-			"{{ $rel.HasManyParentRelationField }}",
-			{{- end }}
-			"{{ $.TypeName }}",
-			"{{ toGoName $rel.FieldName }}",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
-
-		// Get repository for related type
-		var repo *{{ $rel.TargetType }}Repository
-		if r.tx != nil {
-			txDB := r.txDB
-			if txDB == nil {
-				txDB = r.db
-			}
-			repo = &{{ $rel.TargetType }}Repository{tx: r.tx, txDB: txDB}
-		} else if r.db != nil {
-			repo = r.db.{{ $rel.TargetType }}
-		} else if r.txDB != nil {
-			repo = r.txDB.{{ $rel.TargetType }}
-		} else {
-			return nil, fmt.Errorf("no database connection available for {{ $rel.FieldName }} hydration")
-		}
-
-		resultID, ok := {{ lowerFirst $.TypeName }}UUIDValue(result.Id)
-		if !ok {
-			return nil, fmt.Errorf("missing id for {{ $.TypeName }}.{{ $rel.FieldName }} hydration")
-		}
-
-		childFilter := &{{ $rel.TargetType }}Filter{}
-		childFilterValue := reflect.ValueOf(childFilter).Elem()
-		filterFieldCandidates := []string{
-			{{- if $rel.HasManyParentFilterField }}
-			"{{ $rel.HasManyParentFilterField }}",
-			{{- end }}
-			"{{ $.TypeName }}ID",
-			"{{ toGoName $rel.FieldName }}ID",
-		}
-		var selectedFilterField string
-		filterSet := false
-		for _, candidate := range filterFieldCandidates {
-			field := childFilterValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() {
-				continue
-			}
-			field.Set(reflect.ValueOf(&UUIDFilter{
-				In: []{{ $.UUIDGoType }}{resultID},
-			}))
-			selectedFilterField = candidate
-			filterSet = true
-			break
-		}
-		if !filterSet {
-			return nil, fmt.Errorf("failed to locate hasMany FK filter for {{ $.TypeName }}.{{ $rel.FieldName }}")
-		}
-
-		// The other recursion point: these children hydrate their own relations.
-		// This block only runs on an explicit nested selection, so the cycle half
-		// of the guard does not apply and only the depth cap can refuse it.
-		children := []*types.{{ $rel.TargetType }}{}
-		if hydrationCtx, allowed := enterRelationHydration(ctx, "{{ $.TypeName }}", "{{ $rel.FieldName }}", "{{ $rel.TargetType }}", false); allowed {
-			fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
-				Fields: childFields,
-				Limit:  1000000,
-			})
-			if findErr != nil {
-				return nil, fmt.Errorf("failed to fetch {{ $rel.FieldName }}: %w", findErr)
-			}
-			children = fetched
-		}
-
-		parentFieldCandidates := []string{
-			{{- if $rel.HasManyParentRelationField }}
-			"{{ $rel.HasManyParentRelationField }}",
-			{{- end }}
-			strings.TrimSuffix(selectedFilterField, "ID"),
-			"{{ $.TypeName }}",
-			"{{ toGoName $rel.FieldName }}",
-		}
-		related := make([]types.{{ $rel.TargetType }}, 0, len(children))
-		for _, child := range children {
-			if child == nil {
-				continue
-			}
-			childValue := reflect.ValueOf(child)
-			if childValue.Kind() == reflect.Ptr {
-				if childValue.IsNil() {
-					continue
-				}
-				childValue = childValue.Elem()
-			}
-			if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-				continue
-			}
-
-			matchesParent := false
-			for _, candidate := range parentFieldCandidates {
-				parentField := childValue.FieldByName(candidate)
-				if !parentField.IsValid() {
-					continue
-				}
-				if parentField.Kind() == reflect.Ptr {
-					if parentField.IsNil() {
-						continue
-					}
-					parentField = parentField.Elem()
-				}
-				if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-					continue
-				}
-				idField := parentField.FieldByName("Id")
-				if !idField.IsValid() || !idField.CanInterface() {
-					continue
-				}
-				parentID, ok := {{ lowerFirst $.TypeName }}UUIDValue(idField.Interface())
-				if !ok {
-					continue
-				}
-				if parentID == resultID {
-					matchesParent = true
-					break
-				}
-			}
-			if matchesParent {
-				related = append(related, *child)
-			}
-		}
-		result.{{ toGoName $rel.FieldName }} = related
 	}
-	{{- end }}
 	{{- end }}
 	{{- if .EncryptedFields }}
 
@@ -2082,6 +1981,11 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .HasArrayRelationships }}
+	if err := r.hydrateHasMany(ctx, []*types.{{ .TypeName }}{result}, opts.Fields); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	{{- if .EncryptedFields }}
 
 	// Open each encrypted field under the row's key (D85).
@@ -2420,29 +2324,33 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .HasArrayRelationships }}
+	if err := r.hydrateHasMany(ctx, results, fields); err != nil {
+		return nil, err
+	}
+	{{- end }}
+
+	return results, nil
+}
+{{- if .HasArrayRelationships }}
+
+// hydrateHasMany loads the @hasMany relations fields selects into results:
+// for each, one read of the target's rows whose relation back to this
+// table, the one sqlutil.ToMany names (D90), points at any of results,
+// grouped by that relation's key. A result whose key no row points at gets
+// an empty list, as the TypeScript repositories' include gives it. GetOne,
+// FindOne and findRows load the relations through it.
+func (r *{{ .Name }}) hydrateHasMany(ctx context.Context, results []*types.{{ .TypeName }}, fields {{ .TypeName }}Fields) error {
 	{{- range $i, $rel := .Relationships }}
 	{{- if $rel.IsArray }}
 	if fields.{{ toGoName $rel.FieldName }}Nested != nil {
+		{{- with $rel.Back }}
 		childFields := *fields.{{ toGoName $rel.FieldName }}Nested
 		if childFields.IsZero() {
 			childFields = {{ $rel.TargetType }}Fields{Id: true}
 		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			{{- if $rel.HasManyParentRelationField }}
-			"{{ $rel.HasManyParentRelationField }}",
-			{{- end }}
-			"{{ $.TypeName }}",
-			"{{ toGoName $rel.FieldName }}",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
+		// The relation back groups the rows by their parent's key.
+		childFields.{{ .GoField }} = true
 
 		parentIDSet := make(map[{{ $.UUIDGoType }}]bool, len(results))
 		parentIDs := make([]{{ $.UUIDGoType }}, 0, len(results))
@@ -2450,15 +2358,12 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 			if result == nil {
 				continue
 			}
-			resultID, ok := {{ lowerFirst $.TypeName }}UUIDValue(result.Id)
-			if !ok {
-				continue
-			}
-			if !parentIDSet[resultID] {
+			if resultID, ok := {{ lowerFirst $.TypeName }}UUIDValue(result.Id); ok && !parentIDSet[resultID] {
 				parentIDSet[resultID] = true
 				parentIDs = append(parentIDs, resultID)
 			}
 		}
+		childrenByParentID := make(map[{{ $.UUIDGoType }}][]types.{{ $rel.TargetType }}, len(parentIDs))
 		if len(parentIDs) > 0 {
 			// Get repository for related type
 			var repo *{{ $rel.TargetType }}Repository
@@ -2473,127 +2378,51 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 			} else if r.txDB != nil {
 				repo = r.txDB.{{ $rel.TargetType }}
 			} else {
-				return nil, fmt.Errorf("no database connection available for {{ $rel.FieldName }} hydration")
-			}
-
-			childFilter := &{{ $rel.TargetType }}Filter{}
-			childFilterValue := reflect.ValueOf(childFilter).Elem()
-			filterFieldCandidates := []string{
-				{{- if $rel.HasManyParentFilterField }}
-				"{{ $rel.HasManyParentFilterField }}",
-				{{- end }}
-				"{{ $.TypeName }}ID",
-				"{{ toGoName $rel.FieldName }}ID",
-			}
-			var selectedFilterField string
-			filterSet := false
-			for _, candidate := range filterFieldCandidates {
-				field := childFilterValue.FieldByName(candidate)
-				if !field.IsValid() || !field.CanSet() {
-					continue
-				}
-				field.Set(reflect.ValueOf(&UUIDFilter{
-					In: parentIDs,
-				}))
-				selectedFilterField = candidate
-				filterSet = true
-				break
-			}
-			if !filterSet {
-				return nil, fmt.Errorf("failed to locate hasMany FK filter for {{ $.TypeName }}.{{ $rel.FieldName }}")
+				return fmt.Errorf("no database connection available for {{ $rel.FieldName }} hydration")
 			}
 
 			// The other recursion point: these children hydrate their own relations.
 			// This block only runs on an explicit nested selection, so the cycle half
 			// of the guard does not apply and only the depth cap can refuse it.
-			children := []*types.{{ $rel.TargetType }}{}
 			if hydrationCtx, allowed := enterRelationHydration(ctx, "{{ $.TypeName }}", "{{ $rel.FieldName }}", "{{ $rel.TargetType }}", false); allowed {
-				fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
+				children, err := repo.findRelated(hydrationCtx, &{{ $rel.TargetType }}Filter{ {{- .FilterField }}: &UUIDFilter{In: parentIDs}}, &{{ $rel.TargetType }}FindOptions{
 					Fields: childFields,
 					Limit:  1000000,
 				})
-				if findErr != nil {
-					return nil, fmt.Errorf("failed to batch fetch {{ $rel.FieldName }}: %w", findErr)
+				if err != nil {
+					return fmt.Errorf("failed to fetch {{ $rel.FieldName }}: %w", err)
 				}
-				children = fetched
-			}
-
-			parentFieldCandidates := []string{
-				{{- if $rel.HasManyParentRelationField }}
-				"{{ $rel.HasManyParentRelationField }}",
-				{{- end }}
-				strings.TrimSuffix(selectedFilterField, "ID"),
-				"{{ $.TypeName }}",
-				"{{ toGoName $rel.FieldName }}",
-			}
-			childrenByParentID := make(map[{{ $.UUIDGoType }}][]types.{{ $rel.TargetType }}, len(parentIDs))
-			for _, child := range children {
-				if child == nil {
-					continue
-				}
-				childValue := reflect.ValueOf(child)
-				if childValue.Kind() == reflect.Ptr {
-					if childValue.IsNil() {
+				for _, child := range children {
+					if child == nil {{- if .Pointer }} || child.{{ .GoField }} == nil{{ end }} {
 						continue
 					}
-					childValue = childValue.Elem()
-				}
-				if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-					continue
-				}
-
-				var parentID {{ $.UUIDGoType }}
-				foundParent := false
-				for _, candidate := range parentFieldCandidates {
-					parentField := childValue.FieldByName(candidate)
-					if !parentField.IsValid() {
-						continue
+					if parentID, ok := {{ lowerFirst $.TypeName }}UUIDValue(child.{{ .GoField }}.Id); ok {
+						childrenByParentID[parentID] = append(childrenByParentID[parentID], *child)
 					}
-					if parentField.Kind() == reflect.Ptr {
-						if parentField.IsNil() {
-							continue
-						}
-						parentField = parentField.Elem()
-					}
-					if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-						continue
-					}
-					idField := parentField.FieldByName("Id")
-					if !idField.IsValid() || !idField.CanInterface() {
-						continue
-					}
-					id, ok := {{ lowerFirst $.TypeName }}UUIDValue(idField.Interface())
-					if !ok {
-						continue
-					}
-					parentID = id
-					foundParent = true
-					break
 				}
-				if !foundParent {
-					continue
-				}
-
-				childrenByParentID[parentID] = append(childrenByParentID[parentID], *child)
-			}
-
-			for _, result := range results {
-				if result == nil {
-					continue
-				}
-				resultID, ok := {{ lowerFirst $.TypeName }}UUIDValue(result.Id)
-				if !ok {
-					continue
-				}
-				result.{{ toGoName $rel.FieldName }} = childrenByParentID[resultID]
 			}
 		}
+		for _, result := range results {
+			if result == nil {
+				continue
+			}
+			if resultID, ok := {{ lowerFirst $.TypeName }}UUIDValue(result.Id); ok {
+				related := childrenByParentID[resultID]
+				if related == nil {
+					related = []types.{{ $rel.TargetType }}{}
+				}
+				result.{{ toGoName $rel.FieldName }} = related
+			}
+		}
+		{{- else }}
+		return fmt.Errorf("failed to locate hasMany FK filter for {{ $.TypeName }}.{{ $rel.FieldName }}: {{ $rel.TargetType }} has no relation to {{ $.TypeName }}")
+		{{- end }}
 	}
 	{{- end }}
 	{{- end }}
-
-	return results, nil
+	return nil
 }
+{{- end }}
 
 // FindPage reads a page of the {{ .TypeName }} rows filter finds (D60, amended), in
 // opts.Sort's order, ties broken by {{ .PrimaryKeySortField.Name }} in the same direction: up to
@@ -5199,7 +5028,7 @@ type {{ .Value }} struct{ r *{{ $repo.Name }} }
 {{- range .Operations }}
 {{- if .Table }}
 
-{{ docComment "" (printf "%s runs %s's %s on the table as a whole (D104), a command without a row, in a transaction, and returns its result. It reads the table's rows and writes them only through their own operations, each held to its version, and presents no preconditions. It returns a refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name) }}
+{{ docComment "" (printf "%s runs %s's %s on the table as a whole (D104), a command without a row, in a transaction, and returns its result. It reads the table's rows and writes them only through their own operations, each held to its version, and presents no preconditions.%s It returns a refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.HeldByAccess .AnswersRow (printf " The row its answer names at %s is null when it is one the operation's caller does not see (D156)." .AnswersRow)) "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -5213,6 +5042,12 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }
 		if err != nil {
 			return out, err
 		}
+		{{- if and $repo.HeldByAccess .AnswersRow }}
+		// The core reads every row; its answer keeps to the caller (D156).
+		if raw, err = (&{{ $repo.Name }}{tx: tx, txDB: o.r.database()}).keepAnsweredRow(ctx, raw, {{ printf "%q" .AnswersRow }}); err != nil {
+			return out, err
+		}
+		{{- end }}
 		{{- if .ResultIsStruct }}
 		out = &{{ .Result }}{}
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -5228,8 +5063,14 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }
 }
 {{- else }}
 
-{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "")) }}
+{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id%s, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "") (or (and $repo.HeldByAccess (or (and .Writes ", or the row is one the operation's caller may not write (D156), as UpdateOne's is") ", or the row is one the operation's caller does not see (D156), as GetOne's is")) "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if $repo.HeldByAccess }}
+	if err := o.r.requireReach(ctx, id{{ if $repo.PrimaryKeyIsUUID }}.ToUUID(){{ end }}, {{ .Writes }}); err != nil {
+		var none {{ .ResultReturn }}
+		return none, behaviorOutOfReach(err, {{ printf "%q" $repo.TypeName }}, {{ $repo.WireKey "id" }}, id)
+	}
+	{{- end }}
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
 	if len(params) == 0 {
@@ -5318,7 +5159,7 @@ func (r *{{ $repo.Name }}) RunEvent(ctx context.Context, event types.{{ . }}, cl
 }
 {{- end }}
 
-{{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s" (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
+{{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s%s" (or (and .CoreOwnDefaults " A member left \"\" that takes its default, an enum's or an @audience table's audience or agent access (D156), is its default, as createColumns binds it.") "") (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
 func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {
 	own := map[string]any{}
 	{{- range .CoreOwn }}
@@ -5340,6 +5181,12 @@ func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {
 	}
 	{{- else if .Present "row" }}
 	if {{ .Present "row" }} {
+		own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
+	}
+	{{- else if .EnumDefault }}
+	if {{ .Value "row" }} == "" {
+		own[{{ printf "%q" .Field }}] = {{ .Column.GoType }}({{ printf "%q" .EnumDefault }})
+	} else {
 		own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
 	}
 	{{- else }}

@@ -25,13 +25,16 @@ var documentsRefusedFlags = []string{"from-ref", "from-database", "drop", "reade
 // is the one output. It takes --naming.
 var requestRefusedFlags = []string{
 	"from", "from-ref", "from-database", "drop", "rename", "reader", "dialect", "out", "format",
-	"fail-on", "allow", "print-model", "database-url", "documents",
+	"fail-on", "allow", "print-model", "database-url", "documents", "service",
 }
 
 // checkDocumentsFlags refuses, before anything loads, a flag --documents
 // does not take.
 func (f *migratePlanFlags) checkDocumentsFlags(cmd *cobra.Command) error {
 	if !f.documents {
+		if f.service != "" {
+			return fmt.Errorf("--service names the DB service development mode's General documents lower into; give --documents with it")
+		}
 		return nil
 	}
 	var given []string
@@ -62,6 +65,7 @@ func runMigratePlanDocuments(cmd *cobra.Command, a *app, flags *migratePlanFlags
 	if err != nil {
 		return err
 	}
+	env.Service = flags.service
 	schema, toModel, err := migrateplan.Documents(sources, in.dialect, env)
 	if err != nil {
 		return fmt.Errorf("migrate plan: %w", err)

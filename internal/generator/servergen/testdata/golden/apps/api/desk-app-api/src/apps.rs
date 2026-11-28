@@ -13,7 +13,6 @@
 //! and serves until it returns.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use crate::deps::Deps;
 use crate::interfaces::Implementations;
@@ -28,11 +27,6 @@ pub struct BackofficeParts {
     /// authenticator of its end users, and the service
     /// authenticator that verifies its callers.
     pub implementations: Implementations,
-    /// The engine of desk-db, the API's engine database (D58), once it
-    /// has opened and its engine document is deployed: the entrypoint waits
-    /// for it before it calls `serve`. `deps.engine` is the same engine. It
-    /// is synchronous: call it off the async threads (`spawn_blocking`).
-    pub engine: Arc<superschematic_engine::Engine>,
     /// The address the app listens on: every interface, at the port $PORT
     /// names, 8080 when it is unset.
     pub addr: SocketAddr,

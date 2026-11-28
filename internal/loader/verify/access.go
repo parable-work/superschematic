@@ -7,6 +7,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -71,7 +72,7 @@ func checkAudience(schema *ir.Schema, in Input, td *ir.TypeDef, bases map[string
 	case bases[td.Name]:
 		fail("%s is a base class, which has no table of its own; declare the audience on each table that extends it", td.Name)
 		return
-	case td.Queue != nil || td.JsonField || td.GraphMember != nil || codegen.IsEngineType(td):
+	case td.Queue != nil || td.JsonField || td.GraphMember != nil:
 		fail("%s is no table the generated repositories read with statements of their own; an audience is built for a plain table", td.Name)
 		return
 	}
@@ -112,6 +113,17 @@ func checkAudience(schema *ir.Schema, in Input, td *ir.TypeDef, bases map[string
 			fail("inheritFrom %s is no to-one relation of %s; name the relation to the row whose audience a row inherits", a.InheritFrom, td.Name)
 		case schema.Types[parent.Relation.Type] == nil || schema.Types[parent.Relation.Type].Audience == nil:
 			fail("inheritFrom %s is a relation to %s, which is no @audience table, so it has no audience to inherit; mark %s @audience", a.InheritFrom, parent.Relation.Type, parent.Relation.Type)
+		}
+	}
+	if a.Queue != "" {
+		q := schema.Types[a.Queue]
+		switch {
+		case q == nil || q.Queue == nil:
+			fail("queue names %s, which is no @queue class of %s", a.Queue, schema.Name)
+		case len(q.Fields) == 0 || q.Fields[0].Origin != ir.OriginAccess:
+			fail("queue names %s, which declares fields of its own; declare it with none, and the build fills them", a.Queue)
+		case slices.Contains(in.Dialects, registry.SQLDialectSQLite):
+			fail("queue resolves the rows that inherit from a changed parent after the commit, which Postgres alone serves so far, and %s lists the sqlite dialect; leave queue out, or build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]) (#734)", schema.Name, schema.Name)
 		}
 	}
 }

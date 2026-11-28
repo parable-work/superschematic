@@ -6,7 +6,10 @@ import { task, tasks } from "@superschematic/tasks";
 // The defaults of every task: the image a task runs from, by its digest,
 // and its platform. The plan command ships in that image. The acme section
 // (ext/tasks.go) holds what acme's forge reads and the core does not: the
-// tiers, each with its budget.
+// tiers, each with its budget. The github section holds what the core's
+// github renderer reads when it writes the workflow: when it runs, the
+// repository the image is pulled from, and that it keeps each task's pass
+// under its input key, which a job plans with this binary.
 @tasks({
   image: "sha256:6a1f0c5d2b7e4f8093a1c6d5e4b3a29187f6e5d4c3b2a1908f7e6d5c4b3a2918",
   platform: "linux/amd64",
@@ -16,6 +19,11 @@ import { task, tasks } from "@superschematic/tasks";
         { name: "pr", budgetSeconds: 180 },
         { name: "nightly", budgetSeconds: 3600 }
       ]
+    },
+    github: {
+      on: { pull_request: { branches: ["main"] }, schedule: [{ cron: "0 5 * * *" }] },
+      imageRepository: "ghcr.io/acme/ci",
+      reuse: { command: ["acme-schematic"] }
     }
   }
 })
@@ -46,12 +54,13 @@ export abstract class Shop {}
 })
 export abstract class SchemaBuild {}
 
-// Fails when the committed task file is not what this schema gives.
+// Fails when the committed task file, or the committed workflow, is not
+// what this schema gives.
 @task({
   run: ["acme-schematic", "tasks", "examples/acme-schematic/schemas/services/shop-tasks", "--check"],
   inputs: [
     { kind: "schema", spec: { service: "shop-tasks", root: "examples/acme-schematic/schemas" } },
-    "examples/acme-schematic/ci/tasks.json"
+    "examples/acme-schematic/ci"
   ],
   sections: { acme: { tier: "pr" } }
 })
@@ -84,6 +93,6 @@ export abstract class ApiBuild {}
   run: ["examples/acme-schematic/scripts/smoke.sh"],
   after: [ApiBuild, TaskFile],
   hermetic: false,
-  sections: { acme: { tier: "nightly" } }
+  sections: { acme: { tier: "nightly" }, github: { if: "github.event_name == 'schedule'", timeoutMinutes: 60 } }
 })
 export abstract class Smoke {}

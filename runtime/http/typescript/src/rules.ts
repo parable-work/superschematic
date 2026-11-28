@@ -2,6 +2,7 @@ import type { SqlDatabase, SqlValue } from './d1.js';
 import type { OrmOptions, OrmQueryable } from './orm.js';
 import { HttpProblem } from './problem.js';
 import { wakeAfterEnqueue } from './queue-wake.js';
+import { readPermissions } from './rules-permissions.js';
 import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
@@ -200,6 +201,8 @@ export type CoreAction =
   | { readonly kind: 'tableOperation'; readonly useId: string; readonly operation: string; readonly params?: unknown }
   | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
   | { readonly kind: 'change'; readonly key: string; readonly change: CoreRowChange }
+  /** A read of a row (D104's step 4): the fields each use computes through reads, by use id, as the change set's result. The adapter sends none: a row's own and owned fields it reads itself. */
+  | { readonly kind: 'read'; readonly key: string }
   /** A caller's signal about a row (D77's primitive 2): the use whose behavior declares it, its name and its data. The core holds it to the declaration and writes nothing; the change set's signals hold the one sent. */
   | { readonly kind: 'signal'; readonly key: string; readonly useId: string; readonly name: string; readonly data?: unknown }
   /** An operation of the namespace as a whole (D77's primitive 3), by its behavior and name: it runs on no type and no row, over the types that compose the behavior (CoreReadRequest composing). */
@@ -270,7 +273,9 @@ export type CoreReadRequest =
   /** The row of a key of a use's shared table, kept for the type's table as a whole (D103's step 4), with its version. */
   | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string }
   /** The live versions of the types that compose a behavior, in name order (D77's primitive 3): what an operation of the namespace runs over. The adapter answers its layout's types that compose it, since a table's API authorizes. */
-  | { readonly kind: 'composing'; readonly behavior: string };
+  | { readonly kind: 'composing'; readonly behavior: string }
+  /** The permissions each subject holds now (D200): what an Approvals requirement with recheckPermission reads of its signers. The adapter answers it from the layout's identity tables, and leaves out a subject it cannot answer for, which the core holds to none. */
+  | { readonly kind: 'permissions'; readonly subjects: readonly string[] };
 
 /** One sub-table of a use, as a read across a table names it (D104): the use's id and the sub-table's declared name (superschematic_rules::TableRef). */
 export interface CoreTableRef {
@@ -326,7 +331,9 @@ export type CoreAnswer =
   | { readonly linked: CoreLinkedRows }
   | { readonly sharedRow: CoreSharedRow | null }
   /** The types a composing read asks for (D77's primitive 3), in name order. */
-  | { readonly specs: readonly CoreTypeSpec[] };
+  | { readonly specs: readonly CoreTypeSpec[] }
+  /** The permissions a permissions read asks for, by subject (D200); a subject the host cannot answer for is absent. */
+  | { readonly permissions: Readonly<Record<string, readonly string[]>> };
 
 /** One answered request, and how many locks the host held when it made the read. */
 export interface CoreAnswered {
@@ -504,6 +511,14 @@ export interface RulesOperation {
   readonly writes: boolean;
   /** True for an operation of the table as a whole (D104), a declaration's scope schema: a repository method that takes no key, which the adapter runs as a command without a row (runTableOperation). */
   readonly table?: boolean;
+  /**
+   * Of an operation of the table as a whole, the member of its answer that
+   * names one of the table's rows, an object whose key is the row's key in
+   * its wire form, or null (Aliased's resolve: row). The core reads every
+   * row, so the repository keeps the answer to its caller (D156): null for a
+   * row the caller does not see. Absent for any other operation.
+   */
+  readonly answersRow?: string;
 }
 
 /**
@@ -687,6 +702,29 @@ export interface RulesLayout {
   readonly types: Readonly<Record<string, RulesTable>>;
   /** The declaration files of the declarative behaviors (D103's step 5) the tables' uses name, each whole, which the adapter hands its core (RulesCore.declare) before it checks the layout's specs; absent for none. */
   readonly declarations?: readonly object[];
+  /** Where the adapter answers the core's permissions read (D200): the database's identity tables; absent for a layout that names none, whose reads answer no subject. */
+  readonly permissions?: RulesPermissions;
+}
+
+/**
+ * The identity tables a permissions read reads (D200), each table and
+ * column unquoted, as behaviorlayout.Permissions writes them: the user
+ * table and its key column, the credential's disabled and pending columns,
+ * the role grants, and the roles' permissions.
+ */
+export interface RulesPermissions {
+  readonly users: string;
+  readonly user: RulesColumn;
+  readonly credentials: string;
+  readonly credentialUser: string;
+  readonly disabledAt: string;
+  readonly pendingAt: string;
+  readonly grants: string;
+  readonly grantUser: string;
+  readonly grantRole: string;
+  readonly roles: string;
+  readonly roleKey: string;
+  readonly rolePermissions: string;
 }
 
 // ---- The store ----
@@ -882,10 +920,11 @@ export interface RulesHost {
   /** The request id of a command the wrappers build, unique per command; crypto.randomUUID() unless set. */
   readonly request?: () => string;
   /**
-   * False sends no wake after a command (wakeQueues): the generated
-   * repositories on SQLite and D1 set it, where no drain worker runs and an
-   * enqueue wakes none (D145's left, D182), as the Go SQLite rules host
-   * gives no Wake. Unset, the command wakes as the module says.
+   * False sends no wake after a command (wakeQueues), for a host whose
+   * queues no worker drains. The generated repositories set none, on
+   * Postgres, SQLite and D1 alike, since a worker drains a D1 database's
+   * queues on Workers too (D151, #702). Unset, the command wakes as the
+   * module says.
    */
   readonly wakes?: boolean;
 }
@@ -1813,6 +1852,10 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
           .map(name => host.layout.types[name]!.spec)
           .filter(spec => (spec.uses ?? []).some(use => use.behavior === request.behavior)),
       };
+    case 'permissions':
+      // The permissions each subject holds now (D200), from the layout's
+      // identity tables.
+      return { permissions: await readPermissions(host.store, host.layout.permissions, request.subjects) };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
   }
@@ -2009,7 +2052,8 @@ export async function readQueuedEvents(host: RulesHost, type: string): Promise<Q
  * still absent, and a table read to have rows still has them, or still
  * none, each of a soft-deletable table's live rows. A read of a type the
  * layout lacks, of a spec, or of the types that compose a behavior, answers
- * from the layout and needs none. Answers made before the latest lock are asked for again, so a command
+ * from the layout and needs none, as a read of permissions, of no table,
+ * would. Answers made before the latest lock are asked for again, so a command
  * that takes a lock decides on reads made under it alone.
  */
 function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStatement[] {
@@ -2017,7 +2061,7 @@ function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStateme
   const dialect = host.store.dialect;
   const fences: RulesStatement[] = [];
   for (const { request, answer, held } of reads) {
-    if ((held ?? 0) === 0 || request.kind === 'spec' || request.kind === 'composing') continue;
+    if ((held ?? 0) === 0 || request.kind === 'spec' || request.kind === 'composing' || request.kind === 'permissions') continue;
     const table = host.layout.types[request.type];
     if (table === undefined) continue;
     if (request.kind === 'row' && 'row' in answer) {

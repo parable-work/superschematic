@@ -108,8 +108,29 @@ func keyByClientIP(r *http.Request) (string, error) {
 // RateLimit returns a rate limiting middleware using httprate: at most
 // requestLimit requests per client address in a sliding window of
 // windowLength. Each replica counts in process unless an option names a
-// store every replica shares (WithStore, D75).
+// store every replica shares (WithStore, D75). A route's check (D98)
+// passes it uncounted, since the limit counts the runs alone.
 func RateLimit(requestLimit int, windowLength time.Duration, getLogger LoggerGetter, opts ...RateLimitOption) func(http.Handler) http.Handler {
+	return countsRuns(rateLimit(requestLimit, windowLength, getLogger, opts...))
+}
+
+// countsRuns is limit, which a route's check (requestctx.WithRouteCheck,
+// D98) passes uncounted: a call of an MCP tool that is checked, confirmed
+// and run takes one token, as a request does.
+func countsRuns(limit func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		limited := limit(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if requestctx.IsRouteCheck(r.Context()) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			limited.ServeHTTP(w, r)
+		})
+	}
+}
+
+func rateLimit(requestLimit int, windowLength time.Duration, getLogger LoggerGetter, opts ...RateLimitOption) func(http.Handler) http.Handler {
 	var cfg rateLimitConfig
 	for _, opt := range opts {
 		if opt != nil {

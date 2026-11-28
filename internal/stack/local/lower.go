@@ -421,28 +421,8 @@ func intValue(v any) (int, bool) {
 	return 0, false
 }
 
-// kebab lowercases a deployable's name and joins its words with hyphens:
-// Orders is orders, shop-api stays shop-api.
-func kebab(name string) string {
-	var b strings.Builder
-	for i, r := range name {
-		switch {
-		case r >= 'A' && r <= 'Z':
-			if i > 0 && name[i-1] != '-' && name[i-1] != '_' {
-				b.WriteByte('-')
-			}
-			b.WriteRune(r - 'A' + 'a')
-		case r == '_':
-			b.WriteByte('-')
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 // processName names a server's process after its deployable.
-func processName(ctx registry.PlatformContext) any { return kebab(ctx.Deployable.Name) }
+func processName(ctx registry.PlatformContext) any { return ir.Kebab(ctx.Deployable.Name) }
 
 // processAddress is the server's loopback URL.
 func processAddress(ctx registry.PlatformContext) any {
@@ -451,7 +431,7 @@ func processAddress(ctx registry.PlatformContext) any {
 
 // databaseDeployableName names a database deployable after itself; its
 // databases are named after the schemas it hosts.
-func databaseDeployableName(ctx registry.PlatformContext) any { return kebab(ctx.Deployable.Name) }
+func databaseDeployableName(ctx registry.PlatformContext) any { return ir.Kebab(ctx.Deployable.Name) }
 
 // databaseAddress is the container's published address.
 func databaseAddress(ctx registry.PlatformContext) any {
@@ -560,7 +540,7 @@ func memoryStoreDeployableName(ctx registry.PlatformContext) any {
 	if len(ctx.Deployable.Services) == 1 {
 		return ctx.Deployable.Services[0].Name
 	}
-	return kebab(ctx.Deployable.Name)
+	return ir.Kebab(ctx.Deployable.Name)
 }
 
 // memoryStoreAddress is the memory store container's URL.
@@ -840,38 +820,6 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"module":    ModulePath(ctx.Environment.Stack, d.Name),
 			"language":  strings.ToLower(d.Language),
 			"kind":      "worker",
-			"readiness": ReadinessStarted,
-			"env":       env,
-		},
-	}}}, nil
-}
-
-// lowerRunner lowers an engine's runner to its process (D58): the
-// entrypoint module the build wrote at `server/<stack>/<runner>`, its
-// environment its sql edge's connection string, no port, and a readiness
-// of started. It runs the engine's runner while it holds the runner's lock
-// on the environment's Postgres; stack dev runs one, and none when the
-// environment turns it off.
-func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
-	d := ctx.Deployable
-	if d.Runner == nil {
-		return registry.Lowered{}, fmt.Errorf("runner %s has no engine database", d.Name)
-	}
-	if d.Runner.Instances == 0 {
-		return registry.Lowered{}, nil
-	}
-	env, err := processEnv(d, func(string) error { return nil })
-	if err != nil {
-		return registry.Lowered{}, err
-	}
-	return registry.Lowered{Resources: []*ir.Resource{{
-		ID:   processID(d.Name),
-		Type: TypeProcess,
-		Properties: map[string]any{
-			"name":      d.ResourceName,
-			"module":    ModulePath(ctx.Environment.Stack, d.Name),
-			"language":  strings.ToLower(d.Language),
-			"kind":      "runner",
 			"readiness": ReadinessStarted,
 			"env":       env,
 		},

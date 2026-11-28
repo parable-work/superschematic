@@ -1,0 +1,75 @@
+import { AutoGenerate, Recurrence, Relation, User, UserRole, accessGrants, audience, calendarSource, key, unique } from "@superschematic/db";
+import { Nullable } from "@superschematic/schema";
+import { Contact, Identity, Temporal } from "superscalar";
+
+// A person who signs in.
+export abstract class Account implements User<{ login: "email" }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @unique
+  email: Contact.Email;
+}
+
+// An agreement that runs to a date, on the calendar on its last day.
+@calendarSource<Agreement>({ field: "endsOn", title: "name", kind: "renewal" })
+export abstract class Agreement {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: string;
+
+  endsOn: Temporal.Date;
+}
+
+// A duty its owner does again and again: on a calendar rule, a while after
+// it was last done, or a while before its agreement ends. Each occurrence
+// opens a week before it is due and reminds two days before; a due date
+// moves to the next business day of the duty's holiday calendar. Its owner
+// alone sees a private duty, on the calendar and in its feed, and a caller
+// without duties.work sees none there.
+@calendarSource<Duty>({ occurrences: true, title: "title", kind: "duty", color: "duty", owner: "owner", permission: "duties.work" })
+@audience<Duty>({ owner: "owner" })
+export abstract class Duty implements Recurrence<Duty, { adjust: "after"; anchors: ["calendar", "afterDone", "relative"]; holidays: { calendarField: "calendar"; dateField: "date"; field: "holidayCalendar"; table: "Holiday" }; horizonDays: 400; managePermission: "duties.manage"; opensBefore: "P7D"; overdueAfter: "P1D"; permission: "duties.work"; relative: { field: "endsOn"; type: "Agreement"; via: "agreement" }; remindBefore: "P2D"; timeZone: "Europe/Paris" }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  title: string;
+
+  owner: Identity.UUID;
+
+  holidayCalendar: Nullable<string>;
+
+  agreement: Nullable<Relation<Agreement>>;
+}
+
+// The grants a feed's token is one of (D156, D152).
+@accessGrants()
+export abstract class Grant {}
+
+// A day a holiday calendar closes. The app fills these rows: which days
+// close is data, and core ships none.
+export abstract class Holiday {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  calendar: string;
+
+  date: Temporal.Date;
+
+  name: string;
+}
+
+// A named set of permissions. A calendar feed's role bounds what the feed
+// may read.
+export abstract class Role implements UserRole {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @unique
+  name: Identity.Slug;
+
+  permissions: string[];
+
+  reaches: Nullable<string[]>;
+}

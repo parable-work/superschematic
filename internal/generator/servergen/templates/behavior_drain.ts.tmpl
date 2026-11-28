@@ -48,12 +48,19 @@ import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from '
 import { {{ join .WorkersRuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers';
 import { startWorkersTelemetry } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers-telemetry';
+{{- if .PostgresDatabases }}
 import { hyperdrivePool, withHyperdrive } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hyperdrive';
+{{- end }}
+{{- if .SQLiteDatabases }}
+import type { SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
+{{- end }}
 import { runFiring, WAKE_HORIZON_MS, WAKE_IDLE_MS, workerConcurrency, workerDrainSeconds } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 {{- if .Buckets }}
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
+{{- if .PostgresDatabases }}
 import type { Pool } from 'pg';
+{{- end }}
 {{- template "ts-orm-imports" . }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
 {{- if .Worker.Behavior.Emits }}
@@ -90,8 +97,8 @@ const concurrency = workerConcurrency({{ .Worker.Concurrency }}, stackEnvOf(env)
 const drainSeconds = workerDrainSeconds({{ .DrainSeconds }}, stackEnvOf(env));
 
 // The wakes the worker's own writes send, as its QUEUE_WAKES binding names
-// them (D151): none where the platform binds none, as the cloudflare target
-// binds a drainer none, leaving what it writes to the next firing.
+// them (D151): on the cloudflare target, a binding of each other drainer's
+// wake relay (#600); none where the platform binds none.
 installQueueWakes(env);
 {{- if $api.Config }}
 {{- if $api.Secrets }}
@@ -109,9 +116,14 @@ configure({{ tsQuote $api.Service }}, () => {{ $api.Module }}.{{ $api.ConfigLoad
 export default {
   async scheduled(controller: ScheduledController, _env: unknown, ctx: ExecutionContext): Promise<void> {
     try {
+{{- if .PostgresDatabases }}
       // The firing opens its database connections through Hyperdrive and
       // ends them as it ends (D92).
       await withHyperdrive(() => drain({ cron: controller.cron }));
+{{- else }}
+      // The firing reaches its database through its D1 binding (#702).
+      await drain({ cron: controller.cron });
+{{- end }}
     } finally {
       ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
     }
@@ -135,7 +147,7 @@ export class {{ .QueueWakeClass }} extends WorkflowEntrypoint<unknown, WakeParam
     if (dueAt > Date.now()) await step.sleepUntil('until due', new Date(dueAt));
     await step.do('drain', { retries: { limit: 0, delay: 0 }, timeout: drainSeconds * 1000 + GRACE_MS + 60_000 }, async () => {
       try {
-        await withHyperdrive(() => drain({ wake: event.instanceId }));
+        await {{ if .PostgresDatabases }}withHyperdrive(() => drain({ wake: event.instanceId })){{ else }}drain({ wake: event.instanceId }){{ end }};
       } finally {
         await queueWakesSettled();
         await telemetry.flush();
@@ -156,7 +168,7 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{- if .SecretBindings }}
   // The string bindings, and the value of each Secrets Store secret the
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]);
+  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ with .OptionalSecretBindings }}, [{{ range $i, $s := . }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ end }});
 {{- else }}
   // The string bindings.
   const values = stackEnvOf(env);
@@ -179,10 +191,23 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{- end }}
 {{- end }}
 
+{{- if .PostgresDatabases }}
+
   // The API's database, over the hyperdrive binding its connection names
   // (D92), which connects within the firing alone.
 {{- range .PostgresDatabases }}
   const {{ .Var }} = hyperdriveDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+  // The API's database, over the d1 binding its connection names (#702):
+  // its queues are claimed over it, each claim in the connection's turn
+  // with the repositories' (D189), and a command's change set is one batch
+  // (D186).
+{{- range .SQLiteDatabases }}
+  const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
+{{- end }}
 {{- end }}
 {{- template "ts-workers-memory-stores" . }}
 {{- if .Worker.Behavior.Emits }}
@@ -214,8 +239,14 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .PostgresDatabases }}
 
 {{ template "ts-hyperdrive" . }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+{{ template "ts-d1-database" . }}
+{{- end }}
 {{- if or .Clients .Buckets }}
 
 /**

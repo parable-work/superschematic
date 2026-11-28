@@ -173,7 +173,9 @@ export type ReadRequest =
   /** The row of a key of a use's shared table (Answer sharedRow), a table its behavior keeps for the type's table as a whole rather than per row (D103's step 4: Numbering's counts), with its version. */
   | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string }
   /** The live versions of the types that compose a behavior and that the command's caller may read (Answer specs, D77's primitive 3), in name order: what an operation of the namespace runs over. The host asks its access policy of each type and leaves out one the caller may not read. */
-  | { readonly kind: 'composing'; readonly behavior: string };
+  | { readonly kind: 'composing'; readonly behavior: string }
+  /** The permissions each subject holds now (D200), what a rule that reads a permission again at each guard reads of the subjects who signed earlier. */
+  | { readonly kind: 'permissions'; readonly subjects: readonly string[] };
 
 /** One sub-table of a use, as a read across a table names it (superschematic_rules::TableRef, D104): the use's id and the sub-table's declared name. */
 export interface TableRef {
@@ -224,7 +226,9 @@ export type Answer =
   | { readonly linked: LinkedRows }
   | { readonly sharedRow: SharedRow | null }
   /** The types a composing read asks for (D77's primitive 3), in name order. */
-  | { readonly specs: readonly TypeSpec[] };
+  | { readonly specs: readonly TypeSpec[] }
+  /** The permissions a permissions read asks for, by subject; a subject the host cannot answer for is left out (D200). */
+  | { readonly permissions: Readonly<Record<string, readonly string[]>> };
 
 /** A key the host locks before it answers the reads a rule across rows decides on. */
 export type LockKey = string;
@@ -316,7 +320,8 @@ export interface SubRowWrite {
 /** What happens to a row of a shared table (D103's step 4), tagged by kind. Open. */
 export type SharedRowChange =
   | { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> }
-  | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> };
+  | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> }
+  | { readonly kind: 'delete'; readonly expectedVersion: number };
 
 /** One write of a row of a use's shared table (superschematic_rules::SharedRowWrite): an insert of a key the table does not hold, or an update held to the version the host read it at, each of which the host holds to one row. */
 export interface SharedRowWrite {

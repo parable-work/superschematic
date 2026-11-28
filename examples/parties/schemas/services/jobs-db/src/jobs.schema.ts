@@ -15,6 +15,7 @@ import {
   queue,
   references,
   runRequests,
+  seedRows,
   unique
 } from "@superschematic/db";
 
@@ -36,7 +37,13 @@ export abstract class Account implements User<{ login: "email" }> {
 }
 
 // A named set of permissions, and the rows a grant of it reaches from its
-// target (D156).
+// target (D156). The roles are seed rows, which the migrations write
+// (#625): a contractor reaches the job its grant names and writes reports
+// on it; the office may message parties and settle triage.
+@seedRows<Role>([
+  { name: "contractor", permissions: ["reports.write"], reaches: ["Report:job"] },
+  { name: "office", permissions: ["parties.message", "parties.triage"], reaches: null },
+])
 export abstract class Role implements UserRole {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -112,6 +119,12 @@ export abstract class Delivery {}
 @notifier("routes")
 export abstract class NoticeRoute {}
 
+// A user's reply by text may only acknowledge, since a sender id can be
+// spoofed; by email it may run what its sender may (#625).
+@seedRows<ChannelTrust>([
+  { channelKind: "sms", level: "low", permissions: [] },
+  { channelKind: "email", level: "standard", permissions: null },
+])
 @notifier("channelTrust")
 export abstract class ChannelTrust {}
 

@@ -1,0 +1,20 @@
+# fixture-references-api in Rust on the local target: its default server
+# serves the references and files of fixture-references-db's tickets and
+# notes, the operations of its @rowFeatureOperations sets (#723), which its
+# router runs through the database's Rust repositories over a pool, and
+# whose files are in its bucket, fixture-references-files.
+kind: Stack
+types:
+  References:
+    name: References
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-references-api, kind: API }
+      expose:
+        - service: { name: fixture-references-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

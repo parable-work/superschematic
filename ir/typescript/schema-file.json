@@ -169,6 +169,10 @@
         "owner": {
           "default": "",
           "type": "string"
+        },
+        "queue": {
+          "default": "",
+          "type": "string"
         }
       },
       "type": "object"
@@ -2957,13 +2961,19 @@
                   },
                   "opensBefore": {
                     "description": "How long before its due an occurrence opens, an ISO 8601 duration (P14D); with none it opens when the occurrence before it falls due, the first when it is planned.",
-                    "minLength": 2,
-                    "type": "string"
+                    "maxLength": 64,
+                    "minLength": 3,
+                    "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+                    "type": "string",
+                    "x-superschematic-scalar": "Temporal.Period"
                   },
                   "overdueAfter": {
                     "description": "How long after its due an open occurrence is missed, an ISO 8601 duration (P1D); at its due when absent.",
-                    "minLength": 2,
-                    "type": "string"
+                    "maxLength": 64,
+                    "minLength": 3,
+                    "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+                    "type": "string",
+                    "x-superschematic-scalar": "Temporal.Period"
                   },
                   "permission": {
                     "description": "The permission complete and listOccurrences need; any caller when absent.",
@@ -2999,8 +3009,11 @@
                   },
                   "remindBefore": {
                     "description": "How long before its due an occurrence reminds, an ISO 8601 duration (P3D): the deadline remind.",
-                    "minLength": 2,
-                    "type": "string"
+                    "maxLength": 64,
+                    "minLength": 3,
+                    "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+                    "type": "string",
+                    "x-superschematic-scalar": "Temporal.Period"
                   },
                   "timeZone": {
                     "description": "The IANA time zone a recurrence is read in when setRecurrence names none; UTC when absent.",
@@ -4595,6 +4608,10 @@
           "default": "",
           "type": "string"
         },
+        "permission": {
+          "default": "",
+          "type": "string"
+        },
         "title": {
           "type": "string"
         }
@@ -4695,10 +4712,6 @@
         "job": {
           "default": "",
           "type": "string"
-        },
-        "runner": {
-          "default": false,
-          "type": "boolean"
         },
         "service": {
           "$ref": "#/$defs/ServiceRef"
@@ -5833,6 +5846,43 @@
       ],
       "type": "object"
     },
+    "IdentityOAuthClients": {
+      "additionalProperties": false,
+      "properties": {
+        "metadataDocuments": {
+          "type": "boolean"
+        },
+        "registration": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "IdentityOAuthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "accessTokenTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        },
+        "clients": {
+          "$ref": "#/$defs/IdentityOAuthClients"
+        },
+        "consentPath": {
+          "default": "",
+          "type": "string"
+        },
+        "grantMaxTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        },
+        "refreshTokenTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "ImageConstraints": {
       "additionalProperties": false,
       "properties": {
@@ -6406,8 +6456,14 @@
           "default": false,
           "type": "boolean"
         },
+        "rowFeatureOperations": {
+          "$ref": "#/$defs/RowFeatureOperationsConfig"
+        },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "triageOperations": {
+          "$ref": "#/$defs/TriageOperationsConfig"
         },
         "userAdministration": {
           "$ref": "#/$defs/UserAdministrationConfig"
@@ -6478,8 +6534,14 @@
           "default": false,
           "type": "boolean"
         },
+        "rowFeatureOperations": {
+          "$ref": "#/$defs/RowFeatureOperationsConfig"
+        },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "triageOperations": {
+          "$ref": "#/$defs/TriageOperationsConfig"
         },
         "userAdministration": {
           "$ref": "#/$defs/UserAdministrationConfig"
@@ -7042,6 +7104,39 @@
       ],
       "type": "object"
     },
+    "RowFeatureOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "default": "",
+          "type": "string"
+        },
+        "operations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
     "RowReferencesDef": {
       "additionalProperties": false,
       "properties": {
@@ -7310,6 +7405,28 @@
       "required": [
         "title",
         "queue"
+      ],
+      "type": "object"
+    },
+    "SeedRows": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows"
       ],
       "type": "object"
     },
@@ -7765,6 +7882,22 @@
       ],
       "type": "object"
     },
+    "TriageOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "party": {
+          "type": "string"
+        },
+        "refersTo": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "party"
+      ],
+      "type": "object"
+    },
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
@@ -7983,6 +8116,9 @@
             "$ref": "#/$defs/RoleSeed"
           },
           "type": "array"
+        },
+        "seedRows": {
+          "$ref": "#/$defs/SeedRows"
         },
         "server": {
           "$ref": "#/$defs/ServerDecl"
@@ -8236,6 +8372,10 @@
           "default": false,
           "type": "boolean"
         },
+        "oauth": {
+          "default": false,
+          "type": "boolean"
+        },
         "path": {
           "default": "",
           "type": "string"
@@ -8268,6 +8408,9 @@
         "noLogin": {
           "default": false,
           "type": "boolean"
+        },
+        "oauth": {
+          "$ref": "#/$defs/IdentityOAuthConfig"
         },
         "path": {
           "default": "",

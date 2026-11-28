@@ -6,16 +6,16 @@
 // {{ $api.Service }} on a Cron Trigger every minute (D92). superschematic writes it beside
 // main.ts, which stack dev runs on Bun as a process that claims until it is
 // stopped, because an environment of the stack places the worker on Workers,
-// where no process runs that long; bundle.ts bundles it for workerd, with
-// Node's modules, which node-postgres needs.
+// where no process runs that long; bundle.ts bundles it for workerd{{ if $db.SQLite }}.{{ else }}, with
+// Node's modules, which node-postgres needs.{{ end }}
 //
 // When Cloudflare loads the version, drain.ts reads the API's config from
 // the Worker's string bindings, so a refused config fails the version's
 // upload, naming each variable. At each firing its scheduled handler builds
 // the API's Deps from the Worker's bindings, as a job's scheduled.ts does,
-// with its database reached through the Hyperdrive config its connection
+// with its database reached through the {{ if $db.SQLite }}D1 binding{{ else }}Hyperdrive config{{ end }} its connection
 // names; calls the implementation's createWorkers; and claims the messages
-// of the queue {{ .Worker.Queue }} of {{ $db.Service }} from Postgres, handling each with the
+// of the queue {{ .Worker.Queue }} of {{ $db.Service }} from {{ if $db.SQLite }}D1 (#702){{ else }}Postgres{{ end }}, handling each with the
 // worker's method, as main.ts does: WORKER_CONCURRENCY, which the platform
 // sets, says how many at a time, {{ .Worker.Concurrency }} unless it says otherwise. It extends each
 // message's claim while the method runs, completes the message when the
@@ -51,13 +51,21 @@ import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from '
 import { {{ join .WorkersRuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers';
 import { startWorkersTelemetry } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers-telemetry';
+{{- if .PostgresDatabases }}
 import { hyperdrivePool, withHyperdrive } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hyperdrive';
+{{- end }}
+{{- if $db.SQLite }}
+import { claimsOver, type SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
+{{- else }}
 import { postgresQueue } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+{{- end }}
 import { runFiring, WAKE_HORIZON_MS, WAKE_IDLE_MS, workerConcurrency, workerDrainSeconds } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 {{- if .Buckets }}
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
+{{- if .PostgresDatabases }}
 import type { Pool } from 'pg';
+{{- end }}
 import { {{ .Worker.Definition }} } from '{{ .Worker.Module }}';
 {{- template "ts-orm-imports" . }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
@@ -93,8 +101,8 @@ const concurrency = workerConcurrency({{ .Worker.Concurrency }}, stackEnvOf(env)
 const drainSeconds = workerDrainSeconds({{ .DrainSeconds }}, stackEnvOf(env));
 
 // The wakes the worker's own enqueues send, as its QUEUE_WAKES binding
-// names them (D151): none where the platform binds none, as the cloudflare
-// target binds a drainer none, leaving what it writes to the next firing.
+// names them (D151): on the cloudflare target, a binding of each other
+// drainer's wake relay (#600); none where the platform binds none.
 installQueueWakes(env);
 {{- if $api.Config }}
 {{- if $api.Secrets }}
@@ -112,9 +120,14 @@ configure({{ tsQuote $api.Service }}, () => {{ $api.Module }}.{{ $api.ConfigLoad
 export default {
   async scheduled(controller: ScheduledController, _env: unknown, ctx: ExecutionContext): Promise<void> {
     try {
+{{- if .PostgresDatabases }}
       // The firing opens its database connections through Hyperdrive and
       // ends them as it ends (D92).
       await withHyperdrive(() => drain({ cron: controller.cron }));
+{{- else }}
+      // The firing reaches its database through its D1 binding (#702).
+      await drain({ cron: controller.cron });
+{{- end }}
     } finally {
       ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
     }
@@ -138,7 +151,7 @@ export class {{ .QueueWakeClass }} extends WorkflowEntrypoint<unknown, WakeParam
     if (dueAt > Date.now()) await step.sleepUntil('until due', new Date(dueAt));
     await step.do('drain', { retries: { limit: 0, delay: 0 }, timeout: drainSeconds * 1000 + GRACE_MS + 60_000 }, async () => {
       try {
-        await withHyperdrive(() => drain({ wake: event.instanceId }));
+        await {{ if .PostgresDatabases }}withHyperdrive(() => drain({ wake: event.instanceId })){{ else }}drain({ wake: event.instanceId }){{ end }};
       } finally {
         await queueWakesSettled();
         await telemetry.flush();
@@ -160,7 +173,7 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{- if .SecretBindings }}
   // The string bindings, and the value of each Secrets Store secret the
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]);
+  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ with .OptionalSecretBindings }}, [{{ range $i, $s := . }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ end }});
 {{- else }}
   // The string bindings.
   const values = stackEnvOf(env);
@@ -183,22 +196,39 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{- end }}
 {{- end }}
 
+{{- if .PostgresDatabases }}
+
   // The API's database, over the hyperdrive binding its connection names
   // (D92), which connects within the firing alone.
 {{- range .PostgresDatabases }}
   const {{ .Var }} = hyperdriveDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
 {{- end }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+  // The API's database, over the d1 binding its connection names (#702):
+  // the queue's claims run over it as under stack dev over a SQLite file,
+  // each in the connection's turn with the repositories' (D189).
+{{- range .SQLiteDatabases }}
+  const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
 {{- template "ts-workers-memory-stores" . }}
 
   // {{ $api.Service }}: its workers, built from its Deps.
   {{ template "ts-deps" $api }}
-{{- if .Worker.Dispatcher }}
-  // A queue of the agent dispatcher's (D158, D183): its Deps' dispatcher
-  // takes each message as it is, and the implementation has no method for it.
+{{- if .Worker.Handler }}
+  // A queue of {{ .Worker.HandlerPiece }}: its handler takes each
+  // message as it is, and the implementation has no method for it.
 {{- else }}
   const workers = await construct({{ tsQuote $api.Service }}, 'workers', () => {{ $api.Impl }}.createWorkers({{ $api.Deps }}));
 {{- end }}
-  const queue = postgresQueue({{ $db.Var }}, {{ .Worker.Definition }});
+  const queue = {{ if $db.SQLite }}claimsOver{{ else }}postgresQueue{{ end }}({{ $db.Var }}, {{ .Worker.Definition }});
+{{- if .Worker.Upkeep }}
+  // The notifier's upkeep beside the queue's prune: every channel adapter's
+  // health on its schedule, and the deliveries past their retention.
+  const upkeep = {{ $api.Module }}.notifierUpkeepOf({{ $api.Deps }});
+{{- end }}
   logger.info('worker started', { api: {{ tsQuote $api.Service }}, class: {{ tsQuote .Worker.Name }}, queue: queue.name, concurrency, drainSeconds, ...on });
   // The window's end stops the claims, as SIGTERM stops main.ts's; a wake's
   // run stops sooner, once the queue was idle a while.
@@ -212,14 +242,16 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
             id: claim.id,
             token: claim.token,
             attempt: claim.attempt,
-            handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => {{ if .Worker.Dispatcher }}{{ $api.Module }}.dispatchAgentMessage({{ $api.Deps }}, claim.message){{ else }}workers.{{ .Worker.Method }}(claim.message, handlerSignal){{ end }}),
+            handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => {{ if .Worker.Handler }}{{ $api.Module }}.{{ .Worker.Handler }}({{ $api.Deps }}, claim.message{{ if .Worker.HandlerOptions }}, {{ $api.RuntimeOptions }}{{ end }}){{ else }}workers.{{ .Worker.Method }}(claim.message, handlerSignal){{ end }}),
           })),
         extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
         complete: (id, token) => queue.complete(id, token),
         fail: (id, token, cause) => queue.fail(id, token, cause),
         release: (id, token) => queue.release(id, token),
-        prune: {{ if .Worker.Transcripts }}async limit => (await queue.prune(limit)) + (await {{ $api.Deps }}.agents.prune(limit)){{ else }}limit => queue.prune(limit){{ end }},
+        prune: {{ if .Worker.Transcripts }}async limit => (await queue.prune(limit)) + (await {{ $api.Deps }}.agents.prune(limit)){{ else if .Worker.Upkeep }}async limit => (await queue.prune(limit)) + (await upkeep(limit)){{ else }}limit => queue.prune(limit){{ end }},
+{{- if not $db.SQLite }}
         nextDue: () => queue.nextDue(),
+{{- end }}
       },
     ],
     { windowMs: drainSeconds * 1000, concurrency, graceMs: GRACE_MS, logger, ...(on.wake === undefined ? {} : { wake: { idleMs: WAKE_IDLE_MS, horizonMs: WAKE_HORIZON_MS } }) }
@@ -230,7 +262,14 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 
 {{ template "ts-construct" . }}
 
+{{- if .PostgresDatabases }}
+
 {{ template "ts-hyperdrive" . }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+{{ template "ts-d1-database" . }}
+{{- end }}
 {{- if or .Clients .Buckets }}
 
 /**

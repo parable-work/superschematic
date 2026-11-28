@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -69,6 +70,19 @@ func IndexSearch(ctx context.Context, h Host, message SearchIndexing, options Se
 	d, ok := h.Definitions().Searchable[message.SourceTable]
 	if !ok {
 		return IndexedUnknown, nil
+	}
+	if onSQLite(h) {
+		if options.Embeddings != nil {
+			return "", fmt.Errorf("indexSearch: %w", ErrSQLiteEmbeddings)
+		}
+		written, err := indexOnSQLite(ctx, h, d, message)
+		if err != nil {
+			return "", err
+		}
+		if !written {
+			return IndexedRemoved, nil
+		}
+		return IndexedRow, nil
 	}
 	indexed, err := indexRows(ctx, h, message.SourceTable, d, []string{message.SourceKey}, options)
 	if err != nil {
@@ -354,11 +368,22 @@ func ReindexSearch(ctx context.Context, h Host, options ReindexOptions) (int, er
 	}
 	count := 0
 	defs := h.Definitions().Searchable
-	for _, table := range sortedKeys(defs) {
+	for _, table := range slices.Sorted(maps.Keys(defs)) {
 		if options.Tables != nil && !slices.Contains(options.Tables, table) {
 			continue
 		}
 		d := defs[table]
+		if onSQLite(h) {
+			if options.Embeddings != nil {
+				return count, fmt.Errorf("reindexSearch: %w", ErrSQLiteEmbeddings)
+			}
+			n, err := reindexOnSQLite(ctx, h, table, d, batch)
+			count += n
+			if err != nil {
+				return count, err
+			}
+			continue
+		}
 		after := ""
 		for {
 			sql := fmt.Sprintf("SELECT %s::text AS key FROM %s ORDER BY %s LIMIT %d", d.Key, d.Table, d.Key, batch)

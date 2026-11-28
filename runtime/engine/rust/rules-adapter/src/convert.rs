@@ -11,7 +11,7 @@
 //! each as its own storage class. A value a store read is a [`Cell`].
 
 use serde_json::{Number, Value};
-use superschematic_rules::Refusal;
+use superschematic_rules::{civil, Refusal};
 
 use crate::layout::{Column, Convert, Table};
 
@@ -32,6 +32,9 @@ pub(crate) enum Bind {
     /// A number as the core wrote it, its text kept.
     Number(Number),
     Bool(bool),
+    /// A list of UUIDs, each its hyphenated text: on Postgres a `UUID[]`'s
+    /// text, on SQLite the JSON array of the ids it holds (D156, D182).
+    Uuids(Vec<String>),
 }
 
 impl Bind {
@@ -57,6 +60,7 @@ impl Bind {
             Bind::Int(n) => Some(n.to_string()),
             Bind::Number(number) => Some(number.to_string()),
             Bind::Bool(flag) => Some(flag.to_string()),
+            Bind::Uuids(ids) => Some(format!("{{{}}}", ids.join(","))),
         }
     }
 }
@@ -131,6 +135,25 @@ pub(crate) fn to_column(value: &Value, column: &Column, table: &Table) -> Result
         })?;
         return Ok(Bind::Text(hyphenate(n)));
     }
+    if let (true, Value::Array(items)) = (is_uuid(column), value) {
+        // A list of UUIDs (an audience's ids, D156), each hyphenated; an
+        // actual list binds so even where the layout predates `list`.
+        let ids = items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .and_then(uuid_value)
+                    .map(hyphenate)
+                    .ok_or_else(|| {
+                        internal(format!(
+                            "{}.{}: {item} is no UUID, hyphenated or base62",
+                            table.type_name, column.field
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(Bind::Uuids(ids));
+    }
     Ok(Bind::of_json(value))
 }
 
@@ -156,6 +179,22 @@ pub(crate) fn from_cell(
                 Value::from(shown(&cell))
             ))
         });
+    }
+    if is_uuid(column) && column.list {
+        return uuids_of(&cell)
+            .map(|ids| {
+                Some(Value::Array(
+                    ids.into_iter().map(|n| Value::from(base62(n))).collect(),
+                ))
+            })
+            .ok_or_else(|| {
+                internal(format!(
+                    "{}.{}: {} is no list of UUIDs, hyphenated or base62",
+                    table.type_name,
+                    column.field,
+                    Value::from(shown(&cell))
+                ))
+            });
     }
     if is_uuid(column) {
         // A list of UUIDs (a uuid[] column, @audience's effectiveAudience),
@@ -284,6 +323,24 @@ fn uuid_of(cell: &Cell) -> Option<u128> {
     }
 }
 
+/// A list of UUIDs' values: Postgres's `to_jsonb` of a `UUID[]`, or the
+/// JSON text of an array SQLite holds (D182), each hyphenated or base62.
+fn uuids_of(cell: &Cell) -> Option<Vec<u128>> {
+    let parsed;
+    let items = match cell {
+        Cell::Json(Value::Array(items)) => items,
+        Cell::Text(text) => {
+            parsed = serde_json::from_str::<Value>(text).ok()?;
+            parsed.as_array()?
+        }
+        _ => return None,
+    };
+    items
+        .iter()
+        .map(|item| item.as_str().and_then(uuid_value))
+        .collect()
+}
+
 /// A value the core holds as epoch milliseconds: a number, its fraction
 /// dropped as a `Date` drops it, or the text of one.
 fn millis_of(value: &Value) -> Option<i64> {
@@ -357,27 +414,7 @@ const DAY: i64 = 86_400_000;
 /// The text `Date.prototype.toISOString` writes for an instant in epoch
 /// milliseconds: UTC, three fraction digits, a year past 9999 or before 0
 /// in six digits with its sign; `None` past the range a `Date` holds.
-pub(crate) fn iso_of_millis(millis: i64) -> Option<String> {
-    if millis.unsigned_abs() > 8_640_000_000_000_000 {
-        return None;
-    }
-    let (year, month, day) = civil_of_days(millis.div_euclid(DAY));
-    let of_day = millis.rem_euclid(DAY);
-    let year = if (0..=9999).contains(&year) {
-        format!("{year:04}")
-    } else if year < 0 {
-        format!("-{:06}", -year)
-    } else {
-        format!("+{year:06}")
-    };
-    Some(format!(
-        "{year}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        of_day / 3_600_000,
-        of_day / 60_000 % 60,
-        of_day / 1000 % 60,
-        of_day % 1000
-    ))
-}
+pub(crate) use superschematic_rules::civil::iso_of as iso_of_millis;
 
 /// Epoch milliseconds from RFC 3339 text, with `T` or a space between the
 /// date and the time, any number of fraction digits (past the third
@@ -433,7 +470,7 @@ pub(crate) fn parse_timestamp(text: &str) -> Option<i64> {
         return None;
     }
     Some(
-        days_of_civil(year, month, day) * DAY
+        civil::to_days(year, i64::from(month), i64::from(day)) * DAY
             + hour * 3_600_000
             + minute * 60_000
             + second * 1000
@@ -536,32 +573,6 @@ fn days_in_month(year: i64, month: u32) -> u32 {
         4 | 6 | 9 | 11 => 30,
         _ => 31,
     }
-}
-
-/// The civil date of a day counted from 1970-01-01 (Howard Hinnant's
-/// algorithm, proleptic Gregorian).
-fn civil_of_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, month, day)
-}
-
-/// The day counted from 1970-01-01 of a civil date.
-fn days_of_civil(year: i64, month: u32, day: u32) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let yoe = year.rem_euclid(400);
-    let month = i64::from(month);
-    let doy = (153 * if month > 2 { month - 3 } else { month + 9 } + 2) / 5 + i64::from(day) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
 }
 
 #[cfg(test)]
@@ -704,6 +715,50 @@ mod tests {
         ] {
             assert_eq!(parse_timestamp(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_list_of_uuids_reads_and_binds_element_by_element() {
+        // An audience's ids (D156): a UUID[] on Postgres, whose to_jsonb is
+        // an array of hyphenated ids, and JSON text on SQLite (D182).
+        let table = order();
+        let mut ids = Column::new("effectiveAudience", "effective_audience", "Identity.UUID");
+        ids.list = true;
+        let (key, column) = (
+            "6fe1XoZ0UJpMNNdUOSMC2X",
+            "db360f43-5530-c407-56da-9cd8e0c971dd",
+        );
+        let read = |cell: Cell| from_cell(cell, &ids, &table);
+        assert_eq!(read(Cell::Json(json!([column]))), Ok(Some(json!([key]))));
+        assert_eq!(
+            read(Cell::Text(format!("[\"{column}\"]"))),
+            Ok(Some(json!([key])))
+        );
+        assert_eq!(read(Cell::Json(json!([]))), Ok(Some(json!([]))));
+        assert_eq!(read(Cell::Null), Ok(None));
+        assert!(read(Cell::Json(json!(["no-uuid!"]))).is_err());
+        assert!(read(Cell::Text(column.to_owned())).is_err());
+        let bound = to_column(&json!([key, column]), &ids, &table);
+        assert_eq!(
+            bound,
+            Ok(Bind::Uuids(vec![column.to_owned(), column.to_owned()]))
+        );
+        assert_eq!(
+            bound.map(|bind| bind.text()),
+            Ok(Some(format!("{{{column},{column}}}")))
+        );
+        assert_eq!(
+            to_column(&json!([]), &ids, &table).map(|bind| bind.text()),
+            Ok(Some("{}".to_owned()))
+        );
+        assert!(to_column(&json!([5]), &ids, &table).is_err());
+        // A list in a UUID column binds so even where the layout predates
+        // `list`.
+        let plain = Column::new("named", "named", "Identity.UUID");
+        assert_eq!(
+            to_column(&json!([key]), &plain, &table),
+            Ok(Bind::Uuids(vec![column.to_owned()]))
+        );
     }
 
     #[test]

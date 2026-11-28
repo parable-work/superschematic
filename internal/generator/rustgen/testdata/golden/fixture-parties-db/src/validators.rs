@@ -102,6 +102,41 @@ pub mod scalars {
         }
     }
 
+    /// Validates a `File.MediaType` value.
+    pub fn validate_file_media_type(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(vec![ValidationError::new("type", "expected string value")]);
+        };
+        let mut errors = Vec::new();
+        let length = rt::code_points(text);
+        if length > 255 {
+            errors.push(ValidationError::new("maxLength", "must be at most 255 characters"));
+        }
+        // The scalar core checks the rules above again, so it runs only when
+        // they pass: one failing value, one error.
+        if errors.is_empty() {
+            return core_check("File.MediaType", value);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `File.MediaType` value that must be present.
+    pub fn validate_file_media_type_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
+            _ => validate_file_media_type(value),
+        }
+    }
+
     /// Validates a `File.SizeBytes` value.
     pub fn validate_file_size_bytes(value: Option<&Value>) -> rt::ScalarResult {
         let value = match value {
@@ -1396,10 +1431,7 @@ pub fn validate_message_attachments(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("mediaType");
-        if rt::is_absent(field) {
-            errors.push("mediaType", ValidationError::required());
-        }
-        rt::expect_string(&mut errors, "mediaType", field);
+        errors.set_result("mediaType", scalars::validate_file_media_type_required(field));
     }
     {
         let field = value.get("size");
@@ -1923,6 +1955,435 @@ pub fn parse_notice_work(value: Value, unknown_fields: rt::UnknownFields) -> Res
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
+/// The fields `OAuthClient` declares, by their wire names.
+pub const OAUTH_CLIENT_FIELDS: &[&str] = &["id", "clientId", "kind", "name", "uri", "redirectUris", "createdAt", "refreshedAt", "freshUntil", "lastUsedAt"];
+
+static OAUTH_CLIENT_CLIENT_ID_RULES: &[rt::Rule] = &[rt::Rule::MinLength(1, "must be at least 1 characters")];
+
+/// Validates a JSON value as `OAuthClient`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_oauth_client(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("clientId");
+        if rt::is_absent(field) {
+            errors.push("clientId", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "clientId", field);
+        if let Some(value) = field {
+            rt::check_value_rules(&mut errors, "clientId", value, OAUTH_CLIENT_CLIENT_ID_RULES);
+        }
+    }
+    {
+        let field = value.get("kind");
+        if rt::is_absent(field) {
+            errors.push("kind", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "kind", field);
+    }
+    {
+        let field = value.get("name");
+        if rt::is_absent(field) {
+            errors.push("name", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "name", field);
+    }
+    {
+        let field = value.get("uri");
+        rt::expect_string(&mut errors, "uri", field);
+    }
+    {
+        let field = value.get("redirectUris");
+        rt::expect_list(&mut errors, "redirectUris", field);
+        if rt::is_absent(field) {
+            errors.push("redirectUris", ValidationError::required());
+        }
+        if let Some(items) = rt::as_array(field) {
+            for (index, item) in items.iter().enumerate() {
+                rt::expect_string(&mut errors, &rt::index_path("redirectUris", index), Some(item));
+            }
+        }
+        if let Some(items) = rt::as_array(field) {
+            rt::require_elements(&mut errors, "redirectUris", items);
+        }
+    }
+    {
+        let field = value.get("createdAt");
+        errors.set_result("createdAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("refreshedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("refreshedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    {
+        let field = value.get("freshUntil");
+        if !rt::is_absent(field) {
+            errors.set_result("freshUntil", scalars::validate_temporal_date_time(field));
+        }
+    }
+    {
+        let field = value.get("lastUsedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("lastUsedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    errors
+}
+
+/// Validates a `OAuthClient` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_oauth_client_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_oauth_client)
+}
+
+/// Prepares a JSON value as `OAuthClient`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_oauth_client` decodes.
+pub fn prepare_oauth_client(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, OAUTH_CLIENT_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_oauth_client(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `OAuthClient`: `prepare_oauth_client`, then decodes it.
+pub fn parse_oauth_client(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::OAuthClient, rt::ParseError> {
+    let value = prepare_oauth_client(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
+/// The fields `OAuthCode` declares, by their wire names.
+pub const OAUTH_CODE_FIELDS: &[&str] = &["id", "client", "user", "grant", "redirectUri", "codeChallenge", "state", "scope", "resource", "nonce", "codeHash", "createdAt", "expiresAt", "usedAt"];
+
+/// Validates a JSON value as `OAuthCode`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_oauth_code(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("client");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "client".to_owned(), nested, validate_oauth_client);
+        }
+        if rt::is_absent(field) {
+            errors.push("client", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("user");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "user".to_owned(), nested, validate_account);
+        }
+    }
+    {
+        let field = value.get("grant");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "grant".to_owned(), nested, validate_oauth_grant);
+        }
+    }
+    {
+        let field = value.get("redirectUri");
+        if rt::is_absent(field) {
+            errors.push("redirectUri", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "redirectUri", field);
+    }
+    {
+        let field = value.get("codeChallenge");
+        if rt::is_absent(field) {
+            errors.push("codeChallenge", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "codeChallenge", field);
+    }
+    {
+        let field = value.get("state");
+        rt::expect_string(&mut errors, "state", field);
+    }
+    {
+        let field = value.get("scope");
+        rt::expect_string(&mut errors, "scope", field);
+    }
+    {
+        let field = value.get("resource");
+        if rt::is_absent(field) {
+            errors.push("resource", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "resource", field);
+    }
+    {
+        let field = value.get("nonce");
+        if rt::is_absent(field) {
+            errors.push("nonce", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "nonce", field);
+    }
+    {
+        let field = value.get("codeHash");
+        if !rt::is_absent(field) {
+            errors.set_result("codeHash", scalars::validate_crypto_sha256(field));
+        }
+    }
+    {
+        let field = value.get("createdAt");
+        errors.set_result("createdAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("expiresAt");
+        errors.set_result("expiresAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("usedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("usedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    errors
+}
+
+/// Validates a `OAuthCode` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_oauth_code_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_oauth_code)
+}
+
+/// Prepares a JSON value as `OAuthCode`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_oauth_code` decodes.
+pub fn prepare_oauth_code(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, OAUTH_CODE_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_oauth_code(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `OAuthCode`: `prepare_oauth_code`, then decodes it.
+pub fn parse_oauth_code(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::OAuthCode, rt::ParseError> {
+    let value = prepare_oauth_code(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
+/// The fields `OAuthGrant` declares, by their wire names.
+pub const OAUTH_GRANT_FIELDS: &[&str] = &["id", "user", "client", "permissions", "resource", "createdAt", "expiresAt", "lastUsedAt", "revokedAt"];
+
+/// Validates a JSON value as `OAuthGrant`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_oauth_grant(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("user");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "user".to_owned(), nested, validate_account);
+        }
+        if rt::is_absent(field) {
+            errors.push("user", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("client");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "client".to_owned(), nested, validate_oauth_client);
+        }
+        if rt::is_absent(field) {
+            errors.push("client", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("permissions");
+        rt::expect_list(&mut errors, "permissions", field);
+        if let Some(items) = rt::as_array(field) {
+            for (index, item) in items.iter().enumerate() {
+                rt::expect_string(&mut errors, &rt::index_path("permissions", index), Some(item));
+            }
+        }
+        if let Some(items) = rt::as_array(field) {
+            rt::require_elements(&mut errors, "permissions", items);
+        }
+    }
+    {
+        let field = value.get("resource");
+        if rt::is_absent(field) {
+            errors.push("resource", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "resource", field);
+    }
+    {
+        let field = value.get("createdAt");
+        errors.set_result("createdAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("expiresAt");
+        errors.set_result("expiresAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("lastUsedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("lastUsedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    {
+        let field = value.get("revokedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("revokedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    errors
+}
+
+/// Validates a `OAuthGrant` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_oauth_grant_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_oauth_grant)
+}
+
+/// Prepares a JSON value as `OAuthGrant`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_oauth_grant` decodes.
+pub fn prepare_oauth_grant(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, OAUTH_GRANT_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_oauth_grant(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `OAuthGrant`: `prepare_oauth_grant`, then decodes it.
+pub fn parse_oauth_grant(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::OAuthGrant, rt::ParseError> {
+    let value = prepare_oauth_grant(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
+/// The fields `OAuthToken` declares, by their wire names.
+pub const OAUTH_TOKEN_FIELDS: &[&str] = &["id", "grant", "kind", "tokenHash", "createdAt", "expiresAt", "usedAt", "revokedAt"];
+
+/// Validates a JSON value as `OAuthToken`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_oauth_token(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("grant");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "grant".to_owned(), nested, validate_oauth_grant);
+        }
+        if rt::is_absent(field) {
+            errors.push("grant", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("kind");
+        if rt::is_absent(field) {
+            errors.push("kind", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "kind", field);
+    }
+    {
+        let field = value.get("tokenHash");
+        errors.set_result("tokenHash", scalars::validate_crypto_sha256_required(field));
+    }
+    {
+        let field = value.get("createdAt");
+        errors.set_result("createdAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("expiresAt");
+        errors.set_result("expiresAt", scalars::validate_temporal_date_time_required(field));
+    }
+    {
+        let field = value.get("usedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("usedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    {
+        let field = value.get("revokedAt");
+        if !rt::is_absent(field) {
+            errors.set_result("revokedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    errors
+}
+
+/// Validates a `OAuthToken` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_oauth_token_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_oauth_token)
+}
+
+/// Prepares a JSON value as `OAuthToken`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_oauth_token` decodes.
+pub fn prepare_oauth_token(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, OAUTH_TOKEN_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_oauth_token(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `OAuthToken`: `prepare_oauth_token`, then decodes it.
+pub fn parse_oauth_token(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::OAuthToken, rt::ParseError> {
+    let value = prepare_oauth_token(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
 /// The fields `ReferenceCleared` declares, by their wire names.
 pub const REFERENCE_CLEARED_FIELDS: &[&str] = &["holderTable", "holderKey", "targetTable", "targetKey", "role"];
 
@@ -2238,10 +2699,7 @@ pub fn validate_report_attachments(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("mediaType");
-        if rt::is_absent(field) {
-            errors.push("mediaType", ValidationError::required());
-        }
-        rt::expect_string(&mut errors, "mediaType", field);
+        errors.set_result("mediaType", scalars::validate_file_media_type_required(field));
     }
     {
         let field = value.get("size");

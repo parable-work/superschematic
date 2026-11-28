@@ -26,6 +26,10 @@ type ormSearchable struct {
 	// index row's weighed words over it as searchIndexAlias.
 	Index    string `json:"index"`
 	Document string `json:"document"`
+	// Config is the text search configuration the index's words are in
+	// on Postgres, when it is not simple: search_unaccent, which folds
+	// diacritics (#740).
+	Config string `json:"config,omitempty"`
 	// FTS is the FTS5 table of the index's words on SQLite, quoted, which
 	// a search there matches and ranks in place of Document (D186).
 	FTS string `json:"fts,omitempty"`
@@ -117,7 +121,8 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 	key := table.KeyColumn()
 	out := ormSearchable{
 		Index:    index.Quoted,
-		Document: ir.SearchDocument(searchIndexAlias),
+		Document: ir.SearchDocumentIn(schema.SearchConfig(), searchIndexAlias),
+		Config:   searchConfigOf(schema),
 		Table:    table.Quoted,
 		Key:      key.Quoted,
 		KeyType:  strings.ToLower(key.Type),
@@ -187,4 +192,13 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 		return "", err
 	}
 	return string(data), nil
+}
+
+// searchConfigOf is the schema's search index's text search configuration
+// when it is not simple (#740), "" when it is.
+func searchConfigOf(schema *ir.Schema) string {
+	if config := schema.SearchConfig(); config != ir.SearchTextConfig {
+		return config
+	}
+	return ""
 }

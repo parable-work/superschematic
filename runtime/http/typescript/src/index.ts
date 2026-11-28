@@ -136,7 +136,7 @@ export type {
   RequestFilter,
   TextFilter,
 } from './filter.js';
-export { authorize, covers, hasAnyPermission } from './auth.js';
+export { authorize, covers, hasAnyPermission, requestAuthenticator } from './auth.js';
 export type { ActingFor, Assurance, Authenticator, GrantReach, PermissionMatcher, Principal, PrincipalKind } from './auth.js';
 export { authorizeService, ed25519PublicJwkFromPem, serviceAuthenticator } from './serviceauth.js';
 export type {
@@ -184,6 +184,10 @@ export {
   graphSeal,
 } from './graph-routes.js';
 export type { GraphFacade, GraphKind, GraphOperation, GraphOperationName, GraphRelation, GraphRequest, GraphSet } from './graph-routes.js';
+export { rowFeatureOperation } from './rowfeature-routes.js';
+export type { RowFeatureOperation, RowFeatureOperationName, RowFeatureRequest } from './rowfeature-routes.js';
+export { triageOperation } from './triage-routes.js';
+export type { TriageInbound, TriageOperation, TriageOperationName, TriageRequest } from './triage-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,

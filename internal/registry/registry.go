@@ -11,7 +11,6 @@
 package registry
 
 import (
-	"bytes"
 	"fmt"
 	"path"
 	"regexp"
@@ -25,6 +24,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -163,8 +163,9 @@ func New(n naming.Naming) *Registry {
 	if err := r.RegisterRuntimeFeature(notificationsFeature()); err != nil {
 		panic("registry: core runtime features: " + err.Error())
 	}
-	// Agent runs need a sandbox provider and a model provider (D158).
-	for _, feature := range agentFeatures() {
+	// Agent runs need a sandbox provider and a model provider (D158), and
+	// search over attachments' text a file processor (D154, #702).
+	for _, feature := range append(agentFeatures(), filesFeature()) {
 		if err := r.RegisterRuntimeFeature(feature); err != nil {
 			panic("registry: core runtime features: " + err.Error())
 		}
@@ -385,21 +386,9 @@ func compileSchema(schema []byte, url string) (*validator.Schema, error) {
 		result := cached.(compiledSchemaResult)
 		return result.schema, result.err
 	}
-	compiled, err := compileSchemaDocument(schema, url)
+	compiled, err := jsonschemas.Compile(url, schema)
 	compiledSchemas.Store(key, compiledSchemaResult{schema: compiled, err: err})
 	return compiled, err
-}
-
-func compileSchemaDocument(schema []byte, url string) (*validator.Schema, error) {
-	resource, err := validator.UnmarshalJSON(bytes.NewReader(schema))
-	if err != nil {
-		return nil, err
-	}
-	compiler := validator.NewCompiler()
-	if err := compiler.AddResource(url, resource); err != nil {
-		return nil, err
-	}
-	return compiler.Compile(url)
 }
 
 // RegisterDocument adds a sidecar document. Duplicate names are an error.
@@ -631,7 +620,7 @@ type PackageDir struct {
 	// Dir is the directory, in slash form.
 	Dir string
 	// Kind is the package kind the graph records, a lower-case word that
-	// is none of the core's: types, sdk, api and orm.
+	// is none of the core's: types, sdk, api, orm and provider (D159).
 	Kind string
 }
 
@@ -649,8 +638,8 @@ func (r *Registry) RegisterPackageDir(d PackageDir) error {
 	default:
 		return fmt.Errorf("registry: package directory %q: language %q is none of go, rust, python and typescript", d.Dir, d.Language)
 	}
-	if !packageKind.MatchString(d.Kind) || slices.Contains([]string{"types", "sdk", "api", "orm"}, d.Kind) {
-		return fmt.Errorf("registry: package directory %q: kind %q must be a lower-case word other than types, sdk, api and orm", d.Dir, d.Kind)
+	if !packageKind.MatchString(d.Kind) || slices.Contains([]string{"types", "sdk", "api", "orm", "provider"}, d.Kind) {
+		return fmt.Errorf("registry: package directory %q: kind %q must be a lower-case word other than types, sdk, api, orm and provider", d.Dir, d.Kind)
 	}
 	if d.Dir == "" || path.IsAbs(d.Dir) || path.Clean(d.Dir) != d.Dir || strings.HasPrefix(d.Dir, "..") {
 		return fmt.Errorf("registry: package directory %q must be a clean relative path in slash form", d.Dir)

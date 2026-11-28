@@ -18,49 +18,9 @@ pub fn instant_of(value: &Value) -> Option<i64> {
 }
 
 /// The ISO 8601 text of a time in epoch milliseconds, as JavaScript's
-/// `toISOString` writes it (`2026-02-01T00:00:00.000Z`, a year past 9999 or
-/// before 0 as a signed six-digit one): the form a row holds a date-time
-/// in and a table's API gives one in; `None` past 8.64e15 ms either side of
-/// the epoch, where `toISOString` throws.
-pub fn iso_of(ms: i64) -> Option<String> {
-    if ms.unsigned_abs() > 8_640_000_000_000_000 {
-        return None;
-    }
-    let (year, month, day) = civil_from_days(ms.div_euclid(86_400_000));
-    let of_day = ms.rem_euclid(86_400_000);
-    let year = match year {
-        0..=9999 => format!("{year:04}"),
-        _ if year < 0 => format!("-{:06}", -year),
-        _ => format!("+{year:06}"),
-    };
-    Some(format!(
-        "{year}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        of_day / 3_600_000,
-        of_day / 60_000 % 60,
-        of_day / 1000 % 60,
-        of_day % 1000
-    ))
-}
-
-// civil_from_days is the year, month and day of the proleptic Gregorian
-// calendar a count of days from the epoch falls on (Howard Hinnant's
-// algorithm).
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let days = days + 719_468;
-    let era = days.div_euclid(146_097);
-    let of_era = days - era * 146_097;
-    let year_of_era = (of_era - of_era / 1460 + of_era / 36_524 - of_era / 146_096) / 365;
-    let of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted = (5 * of_year + 2) / 153;
-    let day = of_year - (153 * shifted + 2) / 5 + 1;
-    let month = if shifted < 10 {
-        shifted + 3
-    } else {
-        shifted - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    (year, month, day)
-}
+/// `toISOString` writes it: the form a row holds a date-time in and a
+/// table's API gives one in ([`superschematic_rules::civil::iso_of`]).
+pub use superschematic_rules::civil::iso_of;
 
 const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 

@@ -69,8 +69,11 @@ import { hyperdrivePool, withHyperdrive } from '{{ .Naming.HTTPRuntimeNpmPackage
 import { ping as pingPool } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
 {{- end }}
+{{- if .AccessImports }}
+import { {{ join .AccessImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}{{ .AccessEntry }}';
+{{- end }}
 {{- if .Identity }}
-import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
+import { {{ if .RoutesIdentity }}identityAuthenticator, {{ end }}parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
 {{- end }}
 {{- template "ts-orm-imports" . }}
 {{- range .APIs }}
@@ -137,7 +140,7 @@ async function build(): Promise<Handle> {
 {{- if .SecretBindings }}
   // The string bindings, and the value of each Secrets Store secret a
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]);
+  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ with .OptionalSecretBindings }}, [{{ range $i, $s := . }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ end }});
 {{- else }}
   // The string bindings.
   const values = stackEnvOf(env);
@@ -230,7 +233,12 @@ async function build(): Promise<Handle> {
   {{ template "ts-deps" . }}
   const {{ .Implementations }} = await construct({{ tsQuote .Service }}, 'implementation', () => {{ .Impl }}.create({{ .Deps }}));
 {{- if .Authenticate }}
-  const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', () => {{ .Impl }}.authenticate({{ .Deps }}));
+{{- if .Grants }}
+  // A grant's token runs as its holder (D156), and the implementation's
+  // authenticator establishes every other caller, a run's token among
+  // them where it is the dispatcher's (D194).
+{{- end }}
+  const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', {{ .AuthenticatorFactory }});
 {{- end }}
 {{- if .Identity }}
   // The identity runtime authenticates its callers and serves its user
@@ -244,17 +252,7 @@ async function build(): Promise<Handle> {
   // router mounts behind each one's auth gate (D51).
   const {{ .ManualRoutes }} = await construct({{ tsQuote .Service }}, 'manual routes', () => {{ .Impl }}.createManualRoutes({{ .Deps }}));
 {{- end }}
-{{- if .AgentRoutes }}
-  // The agent routes a run's sandbox instance calls (D158, D183): its
-  // turns, its MCP endpoint, its credential reports and its finish, under
-  // the dispatcher's endpoint, which a run's token alone reaches.
-  const {{ .AgentRoutes }} = {{ .Deps }}.agents.routes();
-  app.use('*', async (c, next) => {
-    const answered = await {{ .AgentRoutes }}(c.req.raw);
-    if (answered) return answered;
-    await next();
-  });
-{{- end }}
+{{- template "ts-runtime-routes" . }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
 {{- end }}
   app.notFound(notFoundHandler());
@@ -335,8 +333,14 @@ export default {
     try {
       return await handle(request);
     } finally {
+{{- if .WakesQueues }}
+      // The wakes the request sent and the spans it ended go out after its
+      // response.
+      ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
+{{- else }}
       // The spans the request ended go out after its response.
       ctx.waitUntil(telemetry.flush());
+{{- end }}
     }
   },
 };
@@ -370,19 +374,7 @@ function identityConfig(field: string, values: StackEnv): IdentityConfig | undef
 {{- end }}
 {{- if .SQLiteDatabases }}
 
-/**
- * The D1 database of the database field named field: the d1 binding its
- * value names, which the Worker's platform writes beside the field's
- * variables (D64). A connection string or a Cloud SQL configuration is
- * refused: a Worker reaches its database through a D1 binding alone.
- */
-function d1Database(field: string, db: DatabaseConnection): SqlDatabase {
-  if (!('d1' in db)) {
-    const what = 'url' in db ? 'a connection string' : 'a Cloud SQL connector configuration';
-    throw new Error(`${field} is ${what}, and a Worker reaches its database through a D1 binding alone: set ${field}_D1_BINDING and ${field}_D1_DATABASE`);
-  }
-  return binding(env, db.d1.binding, 'd1');
-}
+{{ template "ts-d1-database" . }}
 {{- end }}
 {{- if or .BindsServices .Buckets }}
 
