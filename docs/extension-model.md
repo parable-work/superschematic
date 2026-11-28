@@ -808,8 +808,9 @@ does not include the augmentation fails the load at the key.
 ### 3.16 BehaviorSpec
 
 A behavior is code that adds fields, operations, checks and storage to a
-type when the behaviors' core runs the schema: a state machine, dependency edges
-between instances, a rating. A type composes several. D16 is
+type when the behaviors' core runs the schema: a state machine,
+dependency edges between instances, a rating. A type composes several.
+D16 is
 the design; this section is what the compiler does
 with them. It declares, carries and checks behaviors; it runs none.
 
@@ -900,8 +901,9 @@ namespace that composes it, with no instance and no schema, which
 development mode calls by the behavior's name, at `POST
 /namespaces/{ns}/behaviors/{behavior}/operations/{op}` and as a tool of
 the behavior's (D77). A namespace operation sets neither `beside`
-nor `log`. `RegisterBehavior` refuses any other value. On a table the behaviors' core runs an operation whose scope is
-`schema` as the table's command without a row (D104: Lease's
+nor `log`. `RegisterBehavior` refuses any other value. On a table the
+behaviors' core runs an operation whose scope is `schema` as the table's
+command without a row (D104: Lease's
 `expireHolder`, Pool's `pick`), which reads the table's rows and writes a
 row only by calling an operation of that row's; `@behaviorOperations`
 serves it at `POST <table>/<member>/<operation>`, with no key, and the
