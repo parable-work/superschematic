@@ -498,8 +498,7 @@ queues, the notifier's, the run requests', the dispatcher's and a
 `@searchable` table's, through the generated wiring, as on Postgres. A
 queue on SQLite has no drain slots and no next due time (D145): a worker
 in drain mode stops once its queues are idle. The build refuses a worker
-whose queue's message the SQLite queue client cannot hold, and an engine
-database on SQLite.
+whose queue's message the SQLite queue client cannot hold.
 
 ## Consume a generated SDK
 

@@ -1931,8 +1931,9 @@ one of two places (D47, amended):
   archives the release of superschematic that wrote the Dockerfile ships:
   `superschematic-archives_<version>_<platform>.tar.gz` beside the CLI on
   the release page, its archives built with one Rust release under `lib/`
-  (superscalar's, the version graph's and, since D58, the engine's, with
-  its C ABI's header under `include/`). The release builds them before the CLIs and links each CLI with
+  (superscalar's, the version graph's and the behaviors' core's, with
+  its C ABI's header under `include/`; the engine's went with the engine,
+  D103, #587). The release builds them before the CLIs and links each CLI with
   every platform's digest (`internal/release`), so the Dockerfile pins the
   digest for `linux/amd64` and `linux/arm64`. The Go stage downloads the
   tarball for its platform from `SUPERSCHEMATIC_RELEASE`, a build argument
@@ -2132,7 +2133,8 @@ Ctrl-C reaches `stack dev` first, which sends each server SIGTERM,
 callers first, and SIGKILL ten seconds later.
 
 A Go server, job or worker links superscalar's static archive, and the
-version graph's and the engine's when it reaches them, through cgo. With
+version graph's and the behaviors' core's when it reaches them, through
+cgo. With
 `[paths] scalar_go` naming a checkout, cgo finds each archive beside its
 binding, where `make setup` builds it. Without it, the Go modules come
 from the module proxy, which carries no archive, so a release of

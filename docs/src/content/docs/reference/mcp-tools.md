@@ -140,7 +140,7 @@ documents leave it out (D37):
 | --- | --- |
 | Handle | `order_status_transition`: the table, the field and the operation in snake case, at most 48 characters, or the build refuses it |
 | `@docs` | title `Order status: transition`, capability `order.status.transition`, the behavior's description of the operation, replay mode `read_only` for an operation that does not write |
-| Invocation policy | the behavior's declaration's for the operation, as the engine's tools carry it, else the default |
+| Invocation policy | the behavior's declaration's for the operation, else the default |
 | Tool name, `methodName` | `order.status.transition`, `status.transition`: the TypeScript SDK's method path |
 | Parameters | the row's key (`id`) and the operation's parameters (`to`, an enum of the config's states), each required as the operation takes it |
 
@@ -581,7 +581,7 @@ outputs: {
 The API package then has `mcp.ts`, the tool table, and `buildRouter`
 serves it at `POST /api/mcp`. The table is built from the tool documents
 above, whether or not the config enables an SDK: one tool per operation
-whose `@mcp` is visible, as the engine lists its tools.
+whose `@mcp` is visible.
 
 | `tools/list` member | From |
 | --- | --- |
@@ -607,15 +607,15 @@ warning: LineItems.importStatement: the visible @mcp tool import_statement uploa
 A build that routes an operation at `/api/mcp` with `mcp` on is refused,
 naming the operation.
 
-The endpoint speaks the engine's transport, MCP's streamable HTTP,
-statelessly (`runtime/http/typescript/src/mcp.ts`, a copy of the engine's
-`api/mcp.rs`): on the 2025 revisions `initialize`, `ping`, `tools/list` and
+The endpoint speaks MCP's streamable HTTP transport, statelessly
+(`runtime/http/typescript/src/mcp.ts`, copied from the engine's endpoint,
+which went with the engine, D103, #587): on the 2025 revisions `initialize`, `ping`, `tools/list` and
 `tools/call`, alone or in a batch, each request answered as one `message`
 event of a `text/event-stream` body and a notification with 202; on
 2026-07-28, `server/discover`, `ping`, `tools/list` and `tools/call`, each
 answered as one JSON body; `GET` and `DELETE` answer 405. The runtime's
-tests replay the engine's MCP corpus (`runtime/engine/testdata/http/mcp.json`)
-through it.
+tests replay the MCP corpus the engine recorded
+(`runtime/engine/testdata/http/mcp.json`) through it.
 
 The endpoint authenticates as the API's other routes do: the identity
 service of the user model, or the router's `authenticate`, from a
@@ -676,8 +676,8 @@ timeout apply to the call as to a request:
   it is, whose 400 at `filter[field]` is the tool error.
 
 A tool whose `@mcp` says `invocationPolicy: "ask"` reads
-`"invocationPolicy": "ask"` in its `_meta`, as on the engine's endpoint,
-and the endpoint runs it only once the person confirms the call (below).
+`"invocationPolicy": "ask"` in its `_meta`, and the endpoint runs it
+only once the person confirms the call (below).
 
 `initialize` names the server after the API, at the version its OpenAPI
 document states (`openAPIVersion`, `1.0.0` unless set). The router's
@@ -740,7 +740,7 @@ before that second call too.
 A 2025 client gets the token even when it declared elicitation at
 `initialize`. A 2025 server asks a client mid-call by sending it a
 request on the call's event stream, and the client posts its answer as a
-new request. The endpoint is stateless, as the engine's is: it keeps no
+new request. The endpoint is stateless: it keeps no
 session, so it neither remembers the capabilities `initialize` declared
 nor finds the call that waits for an answer, which may be on another
 replica or Worker isolate. 2026-07-28 carries the request and the answer

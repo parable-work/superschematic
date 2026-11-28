@@ -434,9 +434,8 @@ a SQLite file, and on Cloudflare Workers over a D1 binding
 a TypeScript SDK client of each API it `calls` (`shopApi`
 for `shop-api`), a `Bucket` for each bucket it lists (a `ContentBucket`
 for one that names its objects by their content), a `MemoryStore` for
-each memory store it lists, `engine` for an engine database, and a
-`logger`, the HTTP runtime's JSON-lines logger. Over a database whose DB
-service lists `sqlite` first, `db` is a `SqlDatabase`, D1's interface,
+each memory store it lists, and a `logger`, the HTTP runtime's JSON-lines
+logger. Over a database whose DB service lists `sqlite` first, `db` is a `SqlDatabase`, D1's interface,
 which a D1 binding gives a Worker and a SQLite file gives `stack dev`.
 `Constructor`, `(deps: Deps) => Implementations | Promise<Implementations>`,
 is the type of the implementation's `create`, and an API with a route
