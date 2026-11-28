@@ -1467,7 +1467,7 @@ Go's binding and adapter:
 ```
 make rules-archive
 cd runtime/rules/go && go vet ./... && go test -race -count=1 ./...
-scripts/engine-link-check.sh
+scripts/link-check.sh
 ```
 
 The first stages the archive (`scripts/rules-archive.sh`, cargo's release
@@ -1475,9 +1475,9 @@ build of `../rules-wasm` as a staticlib). The second runs the binding from
 many goroutines at once, the adapter's and the stores' tests and the
 transcript's replay on SQLite, and on Postgres as well when
 `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` names one, each in a schema it
-creates and drops. The third links the four archives a Go server links,
-superscalar's, the version graph's, the engine's and this one, into one
-binary, after checking that each defines its own C functions alone. The
+creates and drops. The third links the three archives a Go server links,
+superscalar's, the version graph's and this one, into one binary, after
+checking that each defines its own C functions alone. The
 generated Go ORM is held to the adapter by
 `go test ./internal/generator/ormgen -run TestWorkflowTablesOnPostgres`:
 it generates `fixture-workflow-db`'s Go types, ORM and DDL, and builds and

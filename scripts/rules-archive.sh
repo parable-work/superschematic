@@ -20,9 +20,8 @@
 #   scripts/rules-archive.sh --crate <rules crate> --out <dir>
 #                                     # stage a project's core (D103's step 5)
 #
-# Put the -L flag in CGO_LDFLAGS beside scripts/superscalar-dep.sh --print,
-# scripts/versiongraph-archive.sh --print and scripts/engine-archive.sh
-# --print. Inside this checkout the binding finds the staged archive without
+# Put the -L flag in CGO_LDFLAGS beside scripts/superscalar-dep.sh --print
+# and scripts/versiongraph-archive.sh --print. Inside this checkout the binding finds the staged archive without
 # it (its cgo_ldflags_<goos>_<goarch>.go name lib/<goos>_<goarch>).
 set -euo pipefail
 
@@ -68,16 +67,15 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-# Go binaries link this archive beside superscalar's, the version graph's
-# and the engine's, so all four are built with tools.env's RUST_VERSION
+# Go binaries link this archive beside superscalar's and the version
+# graph's, so all three are built with tools.env's RUST_VERSION
 # (scripts/superscalar-dep.sh says why).
 RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
 export RUSTUP_TOOLCHAIN
 
-# The crate is a member of the engine's workspace, which cargo loads whole:
-# the engine reads schemas through runtime/schema/rust-ir, which depends on
-# superscalar's core by path, so the checkout must be there, nothing of it
-# built (as scripts/engine-archive.sh has it).
+# The crate is a member of the runtime/engine/rust workspace, which cargo
+# loads whole, and a member may reach superscalar's core by path, so the
+# checkout must be there, nothing of it built.
 if [ ! -f "$ROOT/third_party/superscalar/crates/core/Cargo.toml" ]; then
   "$ROOT/scripts/superscalar-dep.sh" --checkout
 fi

@@ -11,15 +11,13 @@ name: ci
 # declarations drift, CLI smoke over the fixture corpus with the core alone,
 # the migrations example), the acme example extension (smoke plus the
 # no-core-edits check), the
-# TypeScript authoring packages, schema runtime, http runtime, the engine
-# (the Rust engine's Node-API addon, D58) and its suite on the test addon,
-# the engine's work-queue
-# package and the engine examples, the
+# TypeScript authoring packages, schema runtime, http runtime, the rules
+# and rules-handler runtimes and the engine examples on development mode, the
 # Python schema runtime, the Rust http runtime, the Rust engine's workspace
 # (with the behaviors' core's crates and the Rust adapter, D103), the
-# engine's C ABI and Go binding (its corpus replay, and a link check of the
-# four archives a Go server links), the behaviors' core's Go binding and
-# adapter (its transcript replay on SQLite and Postgres), the version graph
+# behaviors' core's Go binding and adapter (its transcript replay on SQLite
+# and Postgres, and a link check of the three archives a Go server links),
+# the version graph
 # (the core crate, its Go binding, the TypeScript package over its wasm
 # build and the
 # Python package over its PyO3 build, and the Go, TypeScript, Rust and
@@ -69,9 +67,9 @@ name: ci
 # (scripts/engine_rust_shards.py). Each script says what its shards run and
 # gives what no shard names to the last, rest, so the shards together run
 # what the one job ran; scripts/test_engine_rust_shards.py holds the
-# matrices below to the scripts' shards. rust and typescript run in two
-# parts each, their steps divided between them in this file, and the
-# engine workspace's lints in engine-rust-lint.
+# matrices below to the scripts' shards. rust runs in two parts, its
+# steps divided between them in this file, and the engine workspace's
+# lints in engine-rust-lint.
 #
 # A pull request reads the caches main's runs saved, a merge's and the
 # release candidate's, and saves none of the large ones (the Rust builds,
@@ -863,27 +861,12 @@ jobs:
         run: examples/acme-shop/scripts/check.sh
 
   typescript:
-    # The engine's suite and the work queue's run on the Rust engine (D58)
-    # through the test addon (scripts/engine-napi.sh --js-behaviors), whose
-    # bridge runs the behaviors the tests write in TypeScript, under Node.js
-    # and Bun. A test that loops over test/helpers.ts's backends runs on
-    # Postgres too, through openEngineAsync (ENGINE_TEST_PG_URL), as a
-    # TypeScript server opens the engine there. The addon as it ships is
-    # built first and checked to lack the bridge.
-    #
-    # Two parts, a job each: runtimes has the authoring packages, the
-    # schema, rules, rules-handler and http runtimes, and the engine
-    # examples on development mode; engine the addon, the engine and the
-    # packages over it. The engine's package links the http runtime's built
-    # copy, so engine builds that first, without its tests. Both set up the
-    # same tools and services.
-    name: typescript (${{ matrix.part }})
+    # The authoring packages, the schema, rules, rules-handler and http
+    # runtimes, and the engine examples on development mode (D117), under
+    # Node.js and Bun.
+    name: typescript
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        part: [runtimes, engine]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -919,20 +902,21 @@ jobs:
           key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
-        # Builds the engine's Node-API addon, the Rust engine (D58). The
-        # wasm32 target builds superscalar's browser and workerd builds
-        # (D64), and the behaviors' core the rules package ships (D103).
+        # The wasm32 target builds superscalar's browser and workerd builds
+        # (D64), the behaviors' core the rules package ships, and the
+        # handler the rules-handler package ships (D103, D117).
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
-      - name: Cache the engine's Rust build
+      - name: Cache the rules crates' Rust build
+        # The rules and rules-handler packages build their wasm32 modules
+        # from the crates of runtime/engine/rust.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
-          # Outside a pull request alone (engine-rust says why), from the
-          # part that builds the addon.
-          save-if: ${{ github.event_name != 'pull_request' && matrix.part == 'engine' }}
+          # Outside a pull request alone (engine-rust says why).
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Cache wasm-pack
         id: wasm-pack
@@ -952,9 +936,9 @@ jobs:
         run: scripts/superscalar-dep.sh
 
       - name: Start Postgres
-        # The backends' Postgres pass of the engine's suite, each engine in
-        # a schema of its own. A role with a password: the runner's Postgres
-        # refuses a passwordless one off its loopback.
+        # The Postgres pass of the http runtime's behaviors' adapter tests,
+        # each in a schema of its own. A role with a password: the runner's
+        # Postgres refuses a passwordless one off its loopback.
         run: |
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
@@ -983,7 +967,6 @@ jobs:
           exit 1
 
       - name: packages/ typecheck + test
-        if: matrix.part == 'runtimes'
         working-directory: packages
         run: |
           bun install --frozen-lockfile
@@ -991,7 +974,6 @@ jobs:
           bun test
 
       - name: runtime/schema/typescript typecheck + build + test
-        if: matrix.part == 'runtimes'
         working-directory: runtime/schema/typescript
         run: |
           bun install --frozen-lockfile
@@ -1000,7 +982,6 @@ jobs:
           bun run test
 
       - name: runtime/rules/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
-        if: matrix.part == 'runtimes'
         # The behaviors' core built for wasm32 (D103), which the http
         # runtime's adapter tests below load from its dist/.
         working-directory: runtime/rules/typescript
@@ -1010,7 +991,6 @@ jobs:
           bun run test
 
       - name: runtime/rules-handler/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
-        if: matrix.part == 'runtimes'
         # Development mode's handler built for wasm32 (D117): every rules
         # transcript and rules-dev's store session replayed over bun:sqlite,
         # the routes and the event stream, and SQLite files read across this
@@ -1022,7 +1002,6 @@ jobs:
           bun run test
 
       - name: runtime/http/typescript typecheck + build + test
-        if: matrix.part == 'runtimes'
         working-directory: runtime/http/typescript
         env:
           # src/redis.test.ts's tests against a real server, on the Valkey
@@ -1039,71 +1018,15 @@ jobs:
           bun run build
           bun run test
 
-      - name: Build the http runtime (the engine's package links its built copy)
-        if: matrix.part == 'engine'
-        working-directory: runtime/http/typescript
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-
-      - name: Build the engine's Node-API addon, as it ships and the test addon
-        if: matrix.part == 'engine'
-        # The addon as it ships first, which must not have the bridge to
-        # behaviors written in TypeScript, then the test addon, which the
-        # suites run on: their tests define behaviors with defineBehavior.
-        working-directory: runtime/engine/typescript
-        run: |
-          bun install --frozen-lockfile
-          ../../../scripts/engine-napi.sh
-          node -e "const a = require('./native/' + require('node:fs').readdirSync('native').find((f) => f.endsWith('.node'))); if (typeof a.bridgeCall !== 'undefined') { console.error('the shipped addon has the test bridge'); process.exit(1); }"
-          ../../../scripts/engine-napi.sh --js-behaviors
-
-      - name: runtime/engine/typescript typecheck + build + test (Node.js and Bun, SQLite and Postgres)
-        if: matrix.part == 'engine'
-        # Runs after the http runtime's build, whose dist/ the engine's
-        # scripts/link-local-deps.mjs copies into node_modules, and on the
-        # test addon. Its corpus check records the curated files again and
-        # holds runtime/engine/testdata to them.
-        working-directory: runtime/engine/typescript
-        env:
-          ENGINE_TEST_PG_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
-        run: |
-          bun run typecheck
-          bun run build
-          bun run test
-
-      - name: runtime/engine-workqueue/typescript typecheck + build + test (Node.js and Bun)
-        if: matrix.part == 'engine'
-        # Runs after the engine's build, which its scripts/link-local-deps.mjs
-        # links into node_modules, on the test addon, whose work-queue
-        # behaviors are the Rust ones.
-        working-directory: runtime/engine-workqueue/typescript
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run test
-
-      - name: runtime/engine-commerce/typescript typecheck + build + test (Node.js and Bun)
-        if: matrix.part == 'engine'
-        # Runs after the engine's build, which its scripts/link-local-deps.mjs
-        # links into node_modules, on the test addon, whose commerce
-        # behaviors are the Rust ones (D70). Its corpus check holds
-        # runtime/engine/testdata/scenarios/commerce-*.json to the recorder.
-        working-directory: runtime/engine-commerce/typescript
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run test
-
       - name: examples/engine-notes type-check + end to end (Node.js and Bun)
         # The guide's notes server on development mode (D117): the http
         # runtime and the rules handler rebuilt from the installs above,
         # linked into the example, its test run against a listening server
         # under each runtime, and superschematic-dev's smoke over the file
-        # it wrote. A step of the runtimes part rather than a job of its
-        # own: it needs only what that part installs, and takes seconds.
-        # End to end, so the full tier.
-        if: inputs.tier == 'full' && matrix.part == 'runtimes'
+        # it wrote. A step of this job rather than a job of its own: it
+        # needs only what this job installs, and takes seconds. End to
+        # end, so the full tier.
+        if: inputs.tier == 'full'
         run: examples/engine-notes/scripts/check.sh
 
       - name: examples/engine-jobs type-check + end to end (Node.js and Bun)
@@ -1111,7 +1034,7 @@ jobs:
         # rules handler rebuilt from the installs above, linked into the
         # example, and its test run through the handler's routes under each
         # runtime. End to end, so the full tier, as engine-notes is.
-        if: inputs.tier == 'full' && matrix.part == 'runtimes'
+        if: inputs.tier == 'full'
         run: examples/engine-jobs/scripts/check.sh
 
   python:
@@ -1579,8 +1502,8 @@ jobs:
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres,superschematic-engine/axum,superschematic-engine-testkit/axum -- -D warnings
 
-  engine-go:
-    name: engine-go (the engine's C ABI, Go binding, corpus replay and link check)
+  rules-go:
+    name: rules-go (the behaviors' core's archive, Go binding, adapter, transcript replay and link check)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -1591,8 +1514,9 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
-        # The four archives a Go server links are built with this one
-        # toolchain (tools.env says why).
+        # The archive is built with the toolchain every archive a Go binary
+        # links is built with (tools.env says why), and so are the link
+        # check's three.
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal
           rustup default "$RUST_VERSION"
@@ -1602,7 +1526,6 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
-            runtime/engine/go/go.sum
             runtime/rules/go/go.sum
             runtime/engine/testdata/linkcheck/go.sum
 
@@ -1612,108 +1535,6 @@ jobs:
           workspaces: |
             runtime/engine/rust
             runtime/versiongraph/rust
-          # Outside a pull request alone (engine-rust says why).
-          save-if: ${{ github.event_name != 'pull_request' }}
-
-      - name: Restore the superscalar checkout
-        # Restored and never saved from here (the rust job says why).
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            third_party/superscalar
-            !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
-
-      - name: Start Postgres
-        # The corpus replay runs on SQLite, and on this Postgres too through
-        # SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each engine in a schema
-        # of its own.
-        run: |
-          docker run --detach --name superschematic-pg \
-            --env POSTGRES_PASSWORD=superschematic \
-            --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine" \
-            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
-          for _ in $(seq 1 60); do
-            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
-            sleep 1
-          done
-          docker logs superschematic-pg
-          exit 1
-
-      - name: Link check (one binary over superscalar's, the version graph's, the engine's and the rules' archives)
-        # Builds the four archives, checks each defines its own C
-        # functions alone (the version graph's vg_* is off in the engine's
-        # build), then builds runtime/engine/testdata/linkcheck, which
-        # imports all four bindings, and runs it.
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-          CGO_ENABLED: "1"
-        run: scripts/engine-link-check.sh
-
-      - name: Go binding (build / vet / test over the core's archive)
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-          CGO_ENABLED: "1"
-        run: |
-          CGO_LDFLAGS="$(scripts/engine-archive.sh --print)"
-          export CGO_LDFLAGS
-          cd runtime/engine/go
-          go build ./... && go vet ./... && go test -count=1 ./...
-
-      - name: Corpus replay through enginehttp and Engine.Do (the test kit's archive, on SQLite and Postgres)
-        # The HTTP corpus, and the engine's own scenario files through the
-        # binding's calls, need the test kit's behaviors and the recorded
-        # policies, which the test kit's archive holds; ENGINE_REPLAY_ARCHIVE
-        # makes the replay fail rather than skip without it.
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-          CGO_ENABLED: "1"
-          ENGINE_REPLAY_ARCHIVE: "1"
-          SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
-        run: |
-          replay="$RUNNER_TEMP/engine-replay"
-          scripts/engine-archive.sh --crate runtime/engine/rust/testkit-ffi --out "$replay" >/dev/null
-          export CGO_LDFLAGS="-L$replay"
-          cd runtime/engine/go
-          go test -count=1 -run Replay -v ./enginehttp/
-
-      - name: golangci-lint (runtime/engine/go)
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-        with:
-          version: v${{ env.GOLANGCI_LINT_VERSION }}
-          working-directory: runtime/engine/go
-
-  rules-go:
-    name: rules-go (the behaviors' core's archive, Go binding, adapter and transcript replay)
-    if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Load pinned tool versions
-        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
-
-      - name: Install Rust toolchain
-        # The archive is built with the toolchain every archive a Go binary
-        # links is built with (tools.env says why).
-        run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
-          rustup default "$RUST_VERSION"
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: runtime/rules/go/go.sum
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: runtime/engine/rust
           # Outside a pull request alone (engine-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
 
@@ -1775,6 +1596,15 @@ jobs:
           export CGO_LDFLAGS="$(scripts/rules-archive.sh --print)"
           cd runtime/rules/go
           go build ./... && go vet ./... && go test -race -count=1 ./...
+
+      - name: Link check (one binary over superscalar's, the version graph's and the rules' archives)
+        # Builds the three archives, checks each defines its own C
+        # functions alone, then builds runtime/engine/testdata/linkcheck,
+        # which imports all three bindings, and runs it.
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+        run: scripts/link-check.sh
 
       - name: golangci-lint (runtime/rules/go)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -1994,7 +1824,6 @@ jobs:
       - rust
       - engine-rust
       - engine-rust-lint
-      - engine-go
       - rules-go
       - versiongraph
       - docs

@@ -47,9 +47,9 @@ directory in `CGO_LDFLAGS`:
 CGO_LDFLAGS="$(scripts/rules-archive.sh --print)" go test ./...
 ```
 
-A Go server links it beside superscalar's, the version graph's and the
-engine's archives; `scripts/engine-link-check.sh` proves the four link into
-one binary, each defining its own C functions alone. No prebuilt archive
+A Go server links it beside superscalar's and the version graph's
+archives; `scripts/link-check.sh` proves the three link into one binary,
+each defining its own C functions alone. No prebuilt archive
 is published yet (D82), so the build needs cargo.
 
 ## The core
