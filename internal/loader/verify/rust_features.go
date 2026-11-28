@@ -27,22 +27,21 @@ import (
 // carry a table's calendar sources and search index, and the runtime's
 // orm::calendar and orm::search_tables read them, on SQLite through their
 // sqlite modules, the search over the FTS5 table beside the index (D186).
-// Events and notifications (D153) are served on Postgres (D191): the
-// Postgres definition carries each table's events and what it is to the
-// notifier, and the runtime's notify module raises, routes, delivers and
-// reads replies over them. On SQLite the notifier runs in TypeScript alone
-// (D189), and rustgen refuses it for a crate that lists sqlite.
+// Events and notifications (D153) are served on Postgres (D191) and on
+// SQLite (#618): each dialect's definition carries each table's events and
+// what it is to the notifier, and the runtime's notify module raises,
+// routes, delivers and reads replies over them, through orm::store on
+// either dialect, as the TypeScript (D189) and the Go (#719) runtimes do.
 // Parties, inbound messages and conversations (D157) and the agent
-// orchestration (D158) are served on Postgres (D193): the Postgres
-// definition carries each table's party, conversations and agents part,
-// the runtime's parties, inbound and agents modules read them, and a Rust
-// server's MCP endpoint holds an agent run's calls to an operation's
-// @autonomy. They stay refused for a Rust service that lists sqlite, whose
-// queues the dispatcher and the inbound path do not claim.
+// orchestration (D158) are served on Postgres (D193) and on SQLite (#618):
+// the definitions carry each table's party, conversations and agents part,
+// the runtime's parties, inbound and agents modules read them, their
+// queues' workers claim on either dialect, and a Rust server's MCP
+// endpoint holds an agent run's calls to an operation's @autonomy. A Rust
+// server over a database whose first dialect is sqlite is still refused
+// them by rustrestgen: its wiring of the parts is Postgres's (#707).
 //
-// A Rust server is refused a listed provider with no Rust crate; a DB
-// service's Rust types that list sqlite the table features of D157 and
-// D158.
+// A Rust server is refused a listed provider with no Rust crate.
 
 // RustFeature is one feature a schema declares that the Rust outputs do
 // not serve yet (D181): the type it is on and what it is.
@@ -55,35 +54,14 @@ type RustFeature struct {
 }
 
 // RustTableFeatures are the features of schema's tables a Rust types crate
-// does not carry (D181), sorted by type: on a database that lists the
-// sqlite dialect (sqlite), @party, @conversations and @runRequests (D157)
-// and @agents (D158), which the Rust runtime serves on Postgres alone
-// (D193); none on Postgres. A Rust server is refused the same table
-// features of its database.
+// does not carry (D181), sorted by type, on a database that lists the
+// sqlite dialect when sqlite: none since #618, which serves @party,
+// @conversations and @runRequests (D157) and @agents (D158) on SQLite as on
+// Postgres (D193). A Rust server is refused the same table features of its
+// database.
 func RustTableFeatures(schema *ir.Schema, sqlite bool) []RustFeature {
-	if schema == nil || !sqlite {
-		return nil
-	}
-	var out []RustFeature
-	for _, name := range sortedTypes(schema) {
-		td := schema.Types[name]
-		add := func(feature string) {
-			out = append(out, RustFeature{Owner: td.Owner, Type: td.Name, Feature: feature})
-		}
-		if td.Party != nil {
-			add("@party (D157) on SQLite")
-		}
-		if td.Conversations != nil {
-			add("@conversations (D157) on SQLite")
-		}
-		if td.RunRequests != nil {
-			add("@runRequests (D157) on SQLite")
-		}
-		if td.Agents != nil {
-			add("@agents (D158) on SQLite")
-		}
-	}
-	return out
+	_, _ = schema, sqlite
+	return nil
 }
 
 // RustServerFeatures are the features of an API's schema a Rust server

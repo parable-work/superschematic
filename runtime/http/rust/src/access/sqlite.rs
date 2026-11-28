@@ -121,14 +121,25 @@ pub fn authenticate_grant(
     token: &str,
     now: SystemTime,
 ) -> Result<Principal, ApiError> {
+    authenticate_grant_of(connection, definition, token, now, false)
+}
+
+/// [`authenticate_grant`], taking an agent run's token too when `runs`:
+/// the agent dispatcher's (D158, #618), which narrows the run's
+/// permissions and paths and holds its calls to its autonomy.
+pub(crate) fn authenticate_grant_of(
+    connection: &Connection,
+    definition: &Definition,
+    token: &str,
+    now: SystemTime,
+    runs: bool,
+) -> Result<Principal, ApiError> {
     let system = Repositories::new(connection, definition)?.as_system();
     let grant = system
         .table(grants_of(definition)?)?
         .find_one(Some(&token_filter(token)), &FindOptions::default())?
         .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
-    // Agent runs are Postgres's alone so far (D193): no run's token is
-    // admitted on SQLite.
-    let target_type = admit_grant(&grant, false)?;
+    let target_type = admit_grant(&grant, runs)?;
     if let Some(ended) = grant_ended(connection, definition, &grant, now)? {
         return Err(ended_refusal(ended));
     }
@@ -151,6 +162,7 @@ pub struct GrantAuthenticator {
     tables: Tables,
     inner: Option<Arc<dyn Authenticator>>,
     now: Option<Arc<dyn Fn() -> SystemTime + Send + Sync>>,
+    runs: bool,
 }
 
 impl GrantAuthenticator {
@@ -169,7 +181,15 @@ impl GrantAuthenticator {
             tables,
             inner: None,
             now: None,
+            runs: false,
         })
+    }
+
+    /// The authenticator taking an agent run's token too, as its run: the
+    /// agent dispatcher's alone (D158, #618).
+    pub(crate) fn admitting_runs(mut self) -> Self {
+        self.runs = true;
+        self
     }
 
     /// The authenticator establishing every caller that presents no
@@ -191,9 +211,12 @@ impl GrantAuthenticator {
         let definition = self.tables.definition()?;
         let now = self.now.as_ref().map_or_else(SystemTime::now, |now| now());
         let token = token.to_owned();
+        let runs = self.runs;
         self.tables
             .database()
-            .read_async(move |connection| authenticate_grant(connection, definition, &token, now))
+            .read_async(move |connection| {
+                authenticate_grant_of(connection, definition, &token, now, runs)
+            })
             .await
     }
 }

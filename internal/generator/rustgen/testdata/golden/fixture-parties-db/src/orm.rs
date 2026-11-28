@@ -15,6 +15,10 @@
 //! `with_keys` seals and opens with: a server's keys are the
 //! [`FieldKeyring`] of the DB service's key secret.
 //!
+//! With the crate's `sqlite` feature, `sqlite::Repositories::new` opens them
+//! over a `rusqlite::Connection` its caller holds, synchronously: a write in
+//! a transaction the caller opened with `TransactionBehavior::Immediate`.
+//!
 //! With its `postgres` feature, `postgres::Repositories::new` opens them
 //! over a tokio-postgres client, asynchronously.
 
@@ -6749,6 +6753,4497 @@ pub mod postgres {
 
         /// The repository of `UserRoleGrant`.
         pub fn user_role_grant(&self) -> Result<UserRoleGrantRepository<'_, C>, orm::Error> {
+            self.0.typed("UserRoleGrant")
+        }
+    }
+}
+
+/// The tables of `fixture-parties-db` and the clauses their statements are written
+/// with, on SQLite.
+#[cfg(feature = "sqlite")]
+pub const SQLITE: &str = r#"{
+  "dialect": "sqlite",
+  "clauses": {
+    "eq": "%s = ?%d",
+    "ne": "%s IS DISTINCT FROM ?%d",
+    "gt": "%s > ?%d",
+    "gte": "%s >= ?%d",
+    "lt": "%s < ?%d",
+    "lte": "%s <= ?%d",
+    "ilike": "%s LIKE ?%d ESCAPE '\\'",
+    "in": "%s IN (%s)",
+    "noneOf": "(%s IN (%s)) IS NOT TRUE",
+    "isNull": "%s IS NULL",
+    "isNotNull": "%s IS NOT NULL",
+    "search": "%s LIKE ?%d ESCAPE '\\'",
+    "exists": "EXISTS (%s)",
+    "notExists": "NOT EXISTS (%s)",
+    "set": "%s = ?%d",
+    "setNull": "%s = NULL",
+    "pageKey": "page_key.%s",
+    "placeholder": "?%d",
+    "default": "",
+    "or": " OR ",
+    "group": "(%s)",
+    "where": " WHERE ",
+    "and": " AND ",
+    "orderBy": " ORDER BY ",
+    "orderTerm": "%s %s",
+    "limit": " LIMIT %d",
+    "offset": " OFFSET %d",
+    "changed": "(%s) IS DISTINCT FROM (%s)",
+    "never": "FALSE",
+    "null": "NULL",
+    "setExcluded": "%s = EXCLUDED.%s",
+    "excluded": "EXCLUDED.%s"
+  },
+  "jsonClauses": {
+    "eq": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    "ne": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    "in": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
+    "noneOf": "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
+    "value": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))"
+  },
+  "defaultLimit": 100,
+  "maxParameters": 32766,
+  "tables": [
+    {
+      "name": "Account",
+      "table": "account",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "account.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "email",
+          "column": "email",
+          "field": "email",
+          "qualified": "account.email",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"email\"",
+        "qualifiedColumns": "\"account\".\"id\", \"account\".\"email\"",
+        "getOne": "SELECT \"id\", \"email\" FROM account WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM account%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM account%s%s%s",
+        "count": "SELECT COUNT(*) FROM account%s",
+        "page": "SELECT %s FROM account%s%s LIMIT %d",
+        "pageAfterKey": "account.id %s %s",
+        "pageAfter": "(%s, account.id) %s ((SELECT %s FROM account AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM account AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", account.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM account WHERE account.id = ?1)",
+        "insert": "INSERT INTO account (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO account (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE account SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"email\"",
+        "updateMany": "UPDATE account SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO account (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"email\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM account WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM account WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM account WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "email": {
+          "conflict": "(email)",
+          "keep": "email = account.email",
+          "rows": "SELECT \"id\", \"email\" FROM account WHERE (email) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = account.id",
+          "rows": "SELECT \"id\", \"email\" FROM account WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedBySessionUser",
+          "probe": "SELECT 1 FROM \"session\" WHERE \"session\".user_id = account.id"
+        },
+        {
+          "filter": "referencedByUserApiKeyUser",
+          "probe": "SELECT 1 FROM user_api_key WHERE user_api_key.user_id = account.id"
+        },
+        {
+          "filter": "referencedByUserCredentialUser",
+          "probe": "SELECT 1 FROM user_credential WHERE user_credential.user_id = account.id"
+        },
+        {
+          "filter": "referencedByUserRoleGrantUser",
+          "probe": "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = account.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "sessions",
+          "target": "Session",
+          "column": "userId"
+        },
+        {
+          "name": "userApiKeys",
+          "target": "UserApiKey",
+          "column": "userId"
+        },
+        {
+          "name": "userCredentials",
+          "target": "UserCredential",
+          "column": "userId"
+        },
+        {
+          "name": "userRoleGrants",
+          "target": "UserRoleGrant",
+          "column": "userId"
+        }
+      ]
+    },
+    {
+      "name": "ChannelIdentity",
+      "table": "channel_identity",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "channel_identity.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "kind",
+          "column": "kind",
+          "field": "kind",
+          "qualified": "channel_identity.kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "address",
+          "column": "address",
+          "field": "address",
+          "qualified": "channel_identity.address",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "principalKind",
+          "column": "principal_kind",
+          "field": "principalKind",
+          "qualified": "channel_identity.principal_kind",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "principalTable",
+          "column": "principal_table",
+          "field": "principalTable",
+          "qualified": "channel_identity.principal_table",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "principal",
+          "column": "principal",
+          "field": "principal",
+          "qualified": "channel_identity.principal",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "trust",
+          "column": "trust",
+          "field": "trust",
+          "qualified": "channel_identity.trust",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "verifiedAt",
+          "column": "verified_at",
+          "field": "verifiedAt",
+          "qualified": "channel_identity.verified_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeHash",
+          "column": "code_hash",
+          "field": "codeHash",
+          "qualified": "channel_identity.code_hash",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codePurpose",
+          "column": "code_purpose",
+          "field": "codePurpose",
+          "qualified": "channel_identity.code_purpose",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeExpiresAt",
+          "column": "code_expires_at",
+          "field": "codeExpiresAt",
+          "qualified": "channel_identity.code_expires_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeAttempts",
+          "column": "code_attempts",
+          "field": "codeAttempts",
+          "qualified": "channel_identity.code_attempts",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "channel_identity.created_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "channel_identity.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "optedOutAt",
+          "column": "opted_out_at",
+          "field": "optedOutAt",
+          "qualified": "channel_identity.opted_out_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"kind\", \"address\", \"principal_kind\", \"principal_table\", \"principal\", \"trust\", \"verified_at\", \"code_hash\", \"code_purpose\", \"code_expires_at\", \"code_attempts\", \"created_at\", \"revoked_at\", \"opted_out_at\"",
+        "qualifiedColumns": "\"channel_identity\".\"id\", \"channel_identity\".\"kind\", \"channel_identity\".\"address\", \"channel_identity\".\"principal_kind\", \"channel_identity\".\"principal_table\", \"channel_identity\".\"principal\", \"channel_identity\".\"trust\", \"channel_identity\".\"verified_at\", \"channel_identity\".\"code_hash\", \"channel_identity\".\"code_purpose\", \"channel_identity\".\"code_expires_at\", \"channel_identity\".\"code_attempts\", \"channel_identity\".\"created_at\", \"channel_identity\".\"revoked_at\", \"channel_identity\".\"opted_out_at\"",
+        "getOne": "SELECT \"id\", \"kind\", \"address\", \"principal_kind\", \"principal_table\", \"principal\", \"trust\", \"verified_at\", \"code_hash\", \"code_purpose\", \"code_expires_at\", \"code_attempts\", \"created_at\", \"revoked_at\", \"opted_out_at\" FROM channel_identity WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM channel_identity%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM channel_identity%s%s%s",
+        "count": "SELECT COUNT(*) FROM channel_identity%s",
+        "page": "SELECT %s FROM channel_identity%s%s LIMIT %d",
+        "pageAfterKey": "channel_identity.id %s %s",
+        "pageAfter": "(%s, channel_identity.id) %s ((SELECT %s FROM channel_identity AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM channel_identity AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", channel_identity.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM channel_identity WHERE channel_identity.id = ?1)",
+        "insert": "INSERT INTO channel_identity (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO channel_identity (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE channel_identity SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"kind\", \"address\", \"principal_kind\", \"principal_table\", \"principal\", \"trust\", \"verified_at\", \"code_hash\", \"code_purpose\", \"code_expires_at\", \"code_attempts\", \"created_at\", \"revoked_at\", \"opted_out_at\"",
+        "updateMany": "UPDATE channel_identity SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO channel_identity (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"kind\", \"address\", \"principal_kind\", \"principal_table\", \"principal\", \"trust\", \"verified_at\", \"code_hash\", \"code_purpose\", \"code_expires_at\", \"code_attempts\", \"created_at\", \"revoked_at\", \"opted_out_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM channel_identity WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM channel_identity WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM channel_identity WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = channel_identity.id",
+          "rows": "SELECT \"id\", \"kind\", \"address\", \"principal_kind\", \"principal_table\", \"principal\", \"trust\", \"verified_at\", \"code_hash\", \"code_purpose\", \"code_expires_at\", \"code_attempts\", \"created_at\", \"revoked_at\", \"opted_out_at\" FROM channel_identity WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "notifier": "channelIdentities"
+    },
+    {
+      "name": "ChannelTrust",
+      "table": "channel_trust",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "channel_trust.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "channelKind",
+          "column": "channel_kind",
+          "field": "channelKind",
+          "qualified": "channel_trust.channel_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "level",
+          "column": "level",
+          "field": "level",
+          "qualified": "channel_trust.level",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "channel_trust.permissions",
+          "list": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"channel_kind\", \"level\", \"permissions\"",
+        "qualifiedColumns": "\"channel_trust\".\"id\", \"channel_trust\".\"channel_kind\", \"channel_trust\".\"level\", \"channel_trust\".\"permissions\"",
+        "getOne": "SELECT \"id\", \"channel_kind\", \"level\", \"permissions\" FROM channel_trust WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM channel_trust%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM channel_trust%s%s%s",
+        "count": "SELECT COUNT(*) FROM channel_trust%s",
+        "page": "SELECT %s FROM channel_trust%s%s LIMIT %d",
+        "pageAfterKey": "channel_trust.id %s %s",
+        "pageAfter": "(%s, channel_trust.id) %s ((SELECT %s FROM channel_trust AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM channel_trust AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", channel_trust.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM channel_trust WHERE channel_trust.id = ?1)",
+        "insert": "INSERT INTO channel_trust (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO channel_trust (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE channel_trust SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"channel_kind\", \"level\", \"permissions\"",
+        "updateMany": "UPDATE channel_trust SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO channel_trust (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"channel_kind\", \"level\", \"permissions\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM channel_trust WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM channel_trust WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM channel_trust WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "channelKind": {
+          "conflict": "(channel_kind)",
+          "keep": "channel_kind = channel_trust.channel_kind",
+          "rows": "SELECT \"id\", \"channel_kind\", \"level\", \"permissions\" FROM channel_trust WHERE (channel_kind) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = channel_trust.id",
+          "rows": "SELECT \"id\", \"channel_kind\", \"level\", \"permissions\" FROM channel_trust WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "notifier": "channelTrust"
+    },
+    {
+      "name": "Contact",
+      "table": "contact",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "contact.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "contact.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"name\"",
+        "qualifiedColumns": "\"contact\".\"id\", \"contact\".\"name\"",
+        "getOne": "SELECT \"id\", \"name\" FROM contact WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM contact%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM contact%s%s%s",
+        "count": "SELECT COUNT(*) FROM contact%s",
+        "page": "SELECT %s FROM contact%s%s LIMIT %d",
+        "pageAfterKey": "contact.id %s %s",
+        "pageAfter": "(%s, contact.id) %s ((SELECT %s FROM contact AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM contact AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", contact.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM contact WHERE contact.id = ?1)",
+        "insert": "INSERT INTO contact (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO contact (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE contact SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"name\"",
+        "updateMany": "UPDATE contact SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO contact (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM contact WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM contact WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM contact WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = contact.id",
+          "rows": "SELECT \"id\", \"name\" FROM contact WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "party": {
+        "title": "name"
+      }
+    },
+    {
+      "name": "Conversation",
+      "table": "conversation",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "conversation.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "channelKind",
+          "column": "channel_kind",
+          "field": "channelKind",
+          "qualified": "conversation.channel_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "address",
+          "column": "address",
+          "field": "address",
+          "qualified": "conversation.address",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "partyTable",
+          "column": "party_table",
+          "field": "partyTable",
+          "qualified": "conversation.party_table",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "party",
+          "column": "party",
+          "field": "party",
+          "qualified": "conversation.party",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "subject",
+          "column": "subject",
+          "field": "subject",
+          "qualified": "conversation.subject",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "conversation.created_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastMessageAt",
+          "column": "last_message_at",
+          "field": "lastMessageAt",
+          "qualified": "conversation.last_message_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"channel_kind\", \"address\", \"party_table\", \"party\", \"subject\", \"created_at\", \"last_message_at\"",
+        "qualifiedColumns": "\"conversation\".\"id\", \"conversation\".\"channel_kind\", \"conversation\".\"address\", \"conversation\".\"party_table\", \"conversation\".\"party\", \"conversation\".\"subject\", \"conversation\".\"created_at\", \"conversation\".\"last_message_at\"",
+        "getOne": "SELECT \"id\", \"channel_kind\", \"address\", \"party_table\", \"party\", \"subject\", \"created_at\", \"last_message_at\" FROM conversation WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM conversation%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM conversation%s%s%s",
+        "count": "SELECT COUNT(*) FROM conversation%s",
+        "page": "SELECT %s FROM conversation%s%s LIMIT %d",
+        "pageAfterKey": "conversation.id %s %s",
+        "pageAfter": "(%s, conversation.id) %s ((SELECT %s FROM conversation AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM conversation AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", conversation.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM conversation WHERE conversation.id = ?1)",
+        "insert": "INSERT INTO conversation (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO conversation (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE conversation SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"channel_kind\", \"address\", \"party_table\", \"party\", \"subject\", \"created_at\", \"last_message_at\"",
+        "updateMany": "UPDATE conversation SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO conversation (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"channel_kind\", \"address\", \"party_table\", \"party\", \"subject\", \"created_at\", \"last_message_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM conversation WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM conversation WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM conversation WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = conversation.id",
+          "rows": "SELECT \"id\", \"channel_kind\", \"address\", \"party_table\", \"party\", \"subject\", \"created_at\", \"last_message_at\" FROM conversation WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "conversations": "conversations"
+    },
+    {
+      "name": "Delivery",
+      "table": "delivery",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "delivery.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "notice",
+          "column": "notice",
+          "field": "notice",
+          "qualified": "delivery.notice",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "purpose",
+          "column": "purpose",
+          "field": "purpose",
+          "qualified": "delivery.purpose",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "recipient",
+          "column": "recipient",
+          "field": "recipient",
+          "qualified": "delivery.recipient",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "channelKind",
+          "column": "channel_kind",
+          "field": "channelKind",
+          "qualified": "delivery.channel_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "slot",
+          "column": "slot",
+          "field": "slot",
+          "qualified": "delivery.slot",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "address",
+          "column": "address",
+          "field": "address",
+          "qualified": "delivery.address",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "attempt",
+          "column": "attempt",
+          "field": "attempt",
+          "qualified": "delivery.attempt",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "state",
+          "column": "state",
+          "field": "state",
+          "qualified": "delivery.state",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "providerMessageId",
+          "column": "provider_message_id",
+          "field": "providerMessageId",
+          "qualified": "delivery.provider_message_id",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "detail",
+          "column": "detail",
+          "field": "detail",
+          "qualified": "delivery.detail",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "queuedAt",
+          "column": "queued_at",
+          "field": "queuedAt",
+          "qualified": "delivery.queued_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "dueAt",
+          "column": "due_at",
+          "field": "dueAt",
+          "qualified": "delivery.due_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "sentAt",
+          "column": "sent_at",
+          "field": "sentAt",
+          "qualified": "delivery.sent_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "deliveredAt",
+          "column": "delivered_at",
+          "field": "deliveredAt",
+          "qualified": "delivery.delivered_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "readAt",
+          "column": "read_at",
+          "field": "readAt",
+          "qualified": "delivery.read_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "failedAt",
+          "column": "failed_at",
+          "field": "failedAt",
+          "qualified": "delivery.failed_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "acknowledgedAt",
+          "column": "acknowledged_at",
+          "field": "acknowledgedAt",
+          "qualified": "delivery.acknowledged_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "endedAt",
+          "column": "ended_at",
+          "field": "endedAt",
+          "qualified": "delivery.ended_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"notice\", \"purpose\", \"recipient\", \"channel_kind\", \"slot\", \"address\", \"attempt\", \"state\", \"provider_message_id\", \"detail\", \"queued_at\", \"due_at\", \"sent_at\", \"delivered_at\", \"read_at\", \"failed_at\", \"acknowledged_at\", \"ended_at\"",
+        "qualifiedColumns": "\"delivery\".\"id\", \"delivery\".\"notice\", \"delivery\".\"purpose\", \"delivery\".\"recipient\", \"delivery\".\"channel_kind\", \"delivery\".\"slot\", \"delivery\".\"address\", \"delivery\".\"attempt\", \"delivery\".\"state\", \"delivery\".\"provider_message_id\", \"delivery\".\"detail\", \"delivery\".\"queued_at\", \"delivery\".\"due_at\", \"delivery\".\"sent_at\", \"delivery\".\"delivered_at\", \"delivery\".\"read_at\", \"delivery\".\"failed_at\", \"delivery\".\"acknowledged_at\", \"delivery\".\"ended_at\"",
+        "getOne": "SELECT \"id\", \"notice\", \"purpose\", \"recipient\", \"channel_kind\", \"slot\", \"address\", \"attempt\", \"state\", \"provider_message_id\", \"detail\", \"queued_at\", \"due_at\", \"sent_at\", \"delivered_at\", \"read_at\", \"failed_at\", \"acknowledged_at\", \"ended_at\" FROM delivery WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM delivery%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM delivery%s%s%s",
+        "count": "SELECT COUNT(*) FROM delivery%s",
+        "page": "SELECT %s FROM delivery%s%s LIMIT %d",
+        "pageAfterKey": "delivery.id %s %s",
+        "pageAfter": "(%s, delivery.id) %s ((SELECT %s FROM delivery AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM delivery AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", delivery.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM delivery WHERE delivery.id = ?1)",
+        "insert": "INSERT INTO delivery (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO delivery (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE delivery SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"notice\", \"purpose\", \"recipient\", \"channel_kind\", \"slot\", \"address\", \"attempt\", \"state\", \"provider_message_id\", \"detail\", \"queued_at\", \"due_at\", \"sent_at\", \"delivered_at\", \"read_at\", \"failed_at\", \"acknowledged_at\", \"ended_at\"",
+        "updateMany": "UPDATE delivery SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO delivery (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"notice\", \"purpose\", \"recipient\", \"channel_kind\", \"slot\", \"address\", \"attempt\", \"state\", \"provider_message_id\", \"detail\", \"queued_at\", \"due_at\", \"sent_at\", \"delivered_at\", \"read_at\", \"failed_at\", \"acknowledged_at\", \"ended_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM delivery WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM delivery WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM delivery WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = delivery.id",
+          "rows": "SELECT \"id\", \"notice\", \"purpose\", \"recipient\", \"channel_kind\", \"slot\", \"address\", \"attempt\", \"state\", \"provider_message_id\", \"detail\", \"queued_at\", \"due_at\", \"sent_at\", \"delivered_at\", \"read_at\", \"failed_at\", \"acknowledged_at\", \"ended_at\" FROM delivery WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "notifier": "deliveries"
+    },
+    {
+      "name": "Grant",
+      "table": "\"grant\"",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "\"grant\".id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "holder",
+          "column": "holder",
+          "field": "holder",
+          "qualified": "\"grant\".holder",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "holderKind",
+          "column": "holder_kind",
+          "field": "holderKind",
+          "qualified": "\"grant\".holder_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "role",
+          "column": "role",
+          "field": "role",
+          "qualified": "\"grant\".role",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "targetType",
+          "column": "target_type",
+          "field": "targetType",
+          "qualified": "\"grant\".target_type",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "targetId",
+          "column": "target_id",
+          "field": "targetId",
+          "qualified": "\"grant\".target_id",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "startsAt",
+          "column": "starts_at",
+          "field": "startsAt",
+          "qualified": "\"grant\".starts_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "endsAt",
+          "column": "ends_at",
+          "field": "endsAt",
+          "qualified": "\"grant\".ends_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "endsWhenField",
+          "column": "ends_when_field",
+          "field": "endsWhenField",
+          "qualified": "\"grant\".ends_when_field",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "endsWhenState",
+          "column": "ends_when_state",
+          "field": "endsWhenState",
+          "qualified": "\"grant\".ends_when_state",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "\"grant\".revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "\"grant\".token_hash",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "\"grant\".created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdBy",
+          "column": "created_by",
+          "field": "createdBy",
+          "qualified": "\"grant\".created_by",
+          "uuid": true,
+          "audit": "createdBy",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\"",
+        "qualifiedColumns": "\"grant\".\"id\", \"grant\".\"holder\", \"grant\".\"holder_kind\", \"grant\".\"role\", \"grant\".\"target_type\", \"grant\".\"target_id\", \"grant\".\"starts_at\", \"grant\".\"ends_at\", \"grant\".\"ends_when_field\", \"grant\".\"ends_when_state\", \"grant\".\"revoked_at\", \"grant\".\"token_hash\", \"grant\".\"created_at\", \"grant\".\"created_by\"",
+        "getOne": "SELECT \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\" FROM \"grant\" WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM \"grant\"%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM \"grant\"%s%s%s",
+        "count": "SELECT COUNT(*) FROM \"grant\"%s",
+        "page": "SELECT %s FROM \"grant\"%s%s LIMIT %d",
+        "pageAfterKey": "\"grant\".id %s %s",
+        "pageAfter": "(%s, \"grant\".id) %s ((SELECT %s FROM \"grant\" AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM \"grant\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", \"grant\".id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM \"grant\" WHERE \"grant\".id = ?1)",
+        "insert": "INSERT INTO \"grant\" (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO \"grant\" (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE \"grant\" SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\"",
+        "updateMany": "UPDATE \"grant\" SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO \"grant\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM \"grant\" WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM \"grant\" WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM \"grant\" WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = \"grant\".id",
+          "rows": "SELECT \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\" FROM \"grant\" WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = \"grant\".token_hash",
+          "rows": "SELECT \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\" FROM \"grant\" WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "access": "grants"
+    },
+    {
+      "name": "Job",
+      "table": "job",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "job.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "title",
+          "column": "title",
+          "field": "title",
+          "qualified": "job.title",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "status",
+          "column": "status",
+          "field": "status",
+          "qualified": "job.status",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"title\", \"status\"",
+        "qualifiedColumns": "\"job\".\"id\", \"job\".\"title\", \"job\".\"status\"",
+        "getOne": "SELECT \"id\", \"title\", \"status\" FROM job WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM job%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM job%s%s%s",
+        "count": "SELECT COUNT(*) FROM job%s",
+        "page": "SELECT %s FROM job%s%s LIMIT %d",
+        "pageAfterKey": "job.id %s %s",
+        "pageAfter": "(%s, job.id) %s ((SELECT %s FROM job AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM job AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", job.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM job WHERE job.id = ?1)",
+        "insert": "INSERT INTO job (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO job (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE job SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"title\", \"status\"",
+        "updateMany": "UPDATE job SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO job (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"title\", \"status\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM job WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM job WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM job WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = job.id",
+          "rows": "SELECT \"id\", \"title\", \"status\" FROM job WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByReportJob",
+          "probe": "SELECT 1 FROM report WHERE report.job_id = job.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "reports",
+          "target": "Report",
+          "column": "jobId"
+        }
+      ]
+    },
+    {
+      "name": "Message",
+      "table": "message",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "message.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "conversation",
+          "column": "conversation",
+          "field": "conversation",
+          "qualified": "message.conversation",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "direction",
+          "column": "direction",
+          "field": "direction",
+          "qualified": "message.direction",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "via",
+          "column": "via",
+          "field": "via",
+          "qualified": "message.via",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "slot",
+          "column": "slot",
+          "field": "slot",
+          "qualified": "message.slot",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "fromAddress",
+          "column": "from_address",
+          "field": "fromAddress",
+          "qualified": "message.from_address",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "toAddress",
+          "column": "to_address",
+          "field": "toAddress",
+          "qualified": "message.to_address",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "subject",
+          "column": "subject",
+          "field": "subject",
+          "qualified": "message.subject",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "body",
+          "column": "body",
+          "field": "body",
+          "qualified": "message.body",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "messageId",
+          "column": "message_id",
+          "field": "messageId",
+          "qualified": "message.message_id",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "inReplyTo",
+          "column": "in_reply_to",
+          "field": "inReplyTo",
+          "qualified": "message.in_reply_to",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "threadRefs",
+          "column": "thread_refs",
+          "field": "threadRefs",
+          "qualified": "message.thread_refs",
+          "list": true
+        },
+        {
+          "name": "providerMessageId",
+          "column": "provider_message_id",
+          "field": "providerMessageId",
+          "qualified": "message.provider_message_id",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "authentication",
+          "column": "authentication",
+          "field": "authentication",
+          "qualified": "message.authentication",
+          "json": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "identity",
+          "column": "identity",
+          "field": "identity",
+          "qualified": "message.identity",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "trust",
+          "column": "trust",
+          "field": "trust",
+          "qualified": "message.trust",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "partyTable",
+          "column": "party_table",
+          "field": "partyTable",
+          "qualified": "message.party_table",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "party",
+          "column": "party",
+          "field": "party",
+          "qualified": "message.party",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "author",
+          "column": "author",
+          "field": "author",
+          "qualified": "message.author",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "authorKind",
+          "column": "author_kind",
+          "field": "authorKind",
+          "qualified": "message.author_kind",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "forSubject",
+          "column": "for_subject",
+          "field": "forSubject",
+          "qualified": "message.for_subject",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "disposition",
+          "column": "disposition",
+          "field": "disposition",
+          "qualified": "message.disposition",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "state",
+          "column": "state",
+          "field": "state",
+          "qualified": "message.state",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "triage",
+          "column": "triage",
+          "field": "triage",
+          "qualified": "message.triage",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "triageClosedBy",
+          "column": "triage_closed_by",
+          "field": "triageClosedBy",
+          "qualified": "message.triage_closed_by",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "triageClosedAt",
+          "column": "triage_closed_at",
+          "field": "triageClosedAt",
+          "qualified": "message.triage_closed_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "grant",
+          "column": "\"grant\"",
+          "field": "grant",
+          "qualified": "message.\"grant\"",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "detail",
+          "column": "detail",
+          "field": "detail",
+          "qualified": "message.detail",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "at",
+          "column": "at",
+          "field": "at",
+          "qualified": "message.at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "message.created_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"conversation\", \"direction\", \"via\", \"slot\", \"from_address\", \"to_address\", \"subject\", \"body\", \"message_id\", \"in_reply_to\", \"thread_refs\", \"provider_message_id\", \"authentication\", \"identity\", \"trust\", \"party_table\", \"party\", \"author\", \"author_kind\", \"for_subject\", \"disposition\", \"state\", \"triage\", \"triage_closed_by\", \"triage_closed_at\", \"grant\", \"detail\", \"at\", \"created_at\"",
+        "qualifiedColumns": "\"message\".\"id\", \"message\".\"conversation\", \"message\".\"direction\", \"message\".\"via\", \"message\".\"slot\", \"message\".\"from_address\", \"message\".\"to_address\", \"message\".\"subject\", \"message\".\"body\", \"message\".\"message_id\", \"message\".\"in_reply_to\", \"message\".\"thread_refs\", \"message\".\"provider_message_id\", \"message\".\"authentication\", \"message\".\"identity\", \"message\".\"trust\", \"message\".\"party_table\", \"message\".\"party\", \"message\".\"author\", \"message\".\"author_kind\", \"message\".\"for_subject\", \"message\".\"disposition\", \"message\".\"state\", \"message\".\"triage\", \"message\".\"triage_closed_by\", \"message\".\"triage_closed_at\", \"message\".\"grant\", \"message\".\"detail\", \"message\".\"at\", \"message\".\"created_at\"",
+        "getOne": "SELECT \"id\", \"conversation\", \"direction\", \"via\", \"slot\", \"from_address\", \"to_address\", \"subject\", \"body\", \"message_id\", \"in_reply_to\", \"thread_refs\", \"provider_message_id\", \"authentication\", \"identity\", \"trust\", \"party_table\", \"party\", \"author\", \"author_kind\", \"for_subject\", \"disposition\", \"state\", \"triage\", \"triage_closed_by\", \"triage_closed_at\", \"grant\", \"detail\", \"at\", \"created_at\" FROM message WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM message%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM message%s%s%s",
+        "count": "SELECT COUNT(*) FROM message%s",
+        "page": "SELECT %s FROM message%s%s LIMIT %d",
+        "pageAfterKey": "message.id %s %s",
+        "pageAfter": "(%s, message.id) %s ((SELECT %s FROM message AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM message AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", message.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM message WHERE message.id = ?1)",
+        "insert": "INSERT INTO message (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO message (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE message SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"conversation\", \"direction\", \"via\", \"slot\", \"from_address\", \"to_address\", \"subject\", \"body\", \"message_id\", \"in_reply_to\", \"thread_refs\", \"provider_message_id\", \"authentication\", \"identity\", \"trust\", \"party_table\", \"party\", \"author\", \"author_kind\", \"for_subject\", \"disposition\", \"state\", \"triage\", \"triage_closed_by\", \"triage_closed_at\", \"grant\", \"detail\", \"at\", \"created_at\"",
+        "updateMany": "UPDATE message SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO message (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"conversation\", \"direction\", \"via\", \"slot\", \"from_address\", \"to_address\", \"subject\", \"body\", \"message_id\", \"in_reply_to\", \"thread_refs\", \"provider_message_id\", \"authentication\", \"identity\", \"trust\", \"party_table\", \"party\", \"author\", \"author_kind\", \"for_subject\", \"disposition\", \"state\", \"triage\", \"triage_closed_by\", \"triage_closed_at\", \"grant\", \"detail\", \"at\", \"created_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM message WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM message WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM message WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = message.id",
+          "rows": "SELECT \"id\", \"conversation\", \"direction\", \"via\", \"slot\", \"from_address\", \"to_address\", \"subject\", \"body\", \"message_id\", \"in_reply_to\", \"thread_refs\", \"provider_message_id\", \"authentication\", \"identity\", \"trust\", \"party_table\", \"party\", \"author\", \"author_kind\", \"for_subject\", \"disposition\", \"state\", \"triage\", \"triage_closed_by\", \"triage_closed_at\", \"grant\", \"detail\", \"at\", \"created_at\" FROM message WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "conversations": "messages"
+    },
+    {
+      "name": "Notice",
+      "table": "notice",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "notice.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "recipient",
+          "column": "recipient",
+          "field": "recipient",
+          "qualified": "notice.recipient",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "recipientKind",
+          "column": "recipient_kind",
+          "field": "recipientKind",
+          "qualified": "notice.recipient_kind",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "reference",
+          "column": "reference",
+          "field": "reference",
+          "qualified": "notice.reference",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "eventId",
+          "column": "event_id",
+          "field": "eventId",
+          "qualified": "notice.event_id",
+          "uuid": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "eventKind",
+          "column": "event_kind",
+          "field": "eventKind",
+          "qualified": "notice.event_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "urgency",
+          "column": "urgency",
+          "field": "urgency",
+          "qualified": "notice.urgency",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "subjectTable",
+          "column": "subject_table",
+          "field": "subjectTable",
+          "qualified": "notice.subject_table",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "subjectKey",
+          "column": "subject_key",
+          "field": "subjectKey",
+          "qualified": "notice.subject_key",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "title",
+          "column": "title",
+          "field": "title",
+          "qualified": "notice.title",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "body",
+          "column": "body",
+          "field": "body",
+          "qualified": "notice.body",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "payload",
+          "column": "payload",
+          "field": "payload",
+          "qualified": "notice.payload",
+          "json": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "route",
+          "column": "route",
+          "field": "route",
+          "qualified": "notice.route",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "state",
+          "column": "state",
+          "field": "state",
+          "qualified": "notice.state",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "escalation",
+          "column": "escalation",
+          "field": "escalation",
+          "qualified": "notice.escalation",
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "notice.created_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "readAt",
+          "column": "read_at",
+          "field": "readAt",
+          "qualified": "notice.read_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "acknowledgedAt",
+          "column": "acknowledged_at",
+          "field": "acknowledgedAt",
+          "qualified": "notice.acknowledged_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "acknowledgedVia",
+          "column": "acknowledged_via",
+          "field": "acknowledgedVia",
+          "qualified": "notice.acknowledged_via",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "digestedAt",
+          "column": "digested_at",
+          "field": "digestedAt",
+          "qualified": "notice.digested_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\"",
+        "qualifiedColumns": "\"notice\".\"id\", \"notice\".\"recipient\", \"notice\".\"recipient_kind\", \"notice\".\"reference\", \"notice\".\"event_id\", \"notice\".\"event_kind\", \"notice\".\"urgency\", \"notice\".\"subject_table\", \"notice\".\"subject_key\", \"notice\".\"title\", \"notice\".\"body\", \"notice\".\"payload\", \"notice\".\"route\", \"notice\".\"state\", \"notice\".\"escalation\", \"notice\".\"created_at\", \"notice\".\"read_at\", \"notice\".\"acknowledged_at\", \"notice\".\"acknowledged_via\", \"notice\".\"digested_at\"",
+        "getOne": "SELECT \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\" FROM notice WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM notice%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM notice%s%s%s",
+        "count": "SELECT COUNT(*) FROM notice%s",
+        "page": "SELECT %s FROM notice%s%s LIMIT %d",
+        "pageAfterKey": "notice.id %s %s",
+        "pageAfter": "(%s, notice.id) %s ((SELECT %s FROM notice AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM notice AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", notice.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM notice WHERE notice.id = ?1)",
+        "insert": "INSERT INTO notice (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO notice (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE notice SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\"",
+        "updateMany": "UPDATE notice SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO notice (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM notice WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM notice WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM notice WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "eventId,recipient": {
+          "conflict": "(event_id, recipient)",
+          "keep": "event_id = notice.event_id",
+          "rows": "SELECT \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\" FROM notice WHERE (event_id, recipient) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = notice.id",
+          "rows": "SELECT \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\" FROM notice WHERE (id) IN (VALUES %s)"
+        },
+        "recipient,reference": {
+          "conflict": "(recipient, reference)",
+          "keep": "recipient = notice.recipient",
+          "rows": "SELECT \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\" FROM notice WHERE (recipient, reference) IN (VALUES %s)"
+        }
+      },
+      "notifier": "inbox"
+    },
+    {
+      "name": "NoticeRoute",
+      "table": "notice_route",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "notice_route.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "notice_route.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "eventKind",
+          "column": "event_kind",
+          "field": "eventKind",
+          "qualified": "notice_route.event_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "subjectTable",
+          "column": "subject_table",
+          "field": "subjectTable",
+          "qualified": "notice_route.subject_table",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "filter",
+          "column": "filter",
+          "field": "filter",
+          "qualified": "notice_route.filter",
+          "json": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "recipients",
+          "column": "recipients",
+          "field": "recipients",
+          "qualified": "notice_route.recipients",
+          "json": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "urgency",
+          "column": "urgency",
+          "field": "urgency",
+          "qualified": "notice_route.urgency",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "escalation",
+          "column": "escalation",
+          "field": "escalation",
+          "qualified": "notice_route.escalation",
+          "json": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "enabled",
+          "column": "enabled",
+          "field": "enabled",
+          "qualified": "notice_route.enabled",
+          "boolean": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "notice_route.created_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdBy",
+          "column": "created_by",
+          "field": "createdBy",
+          "qualified": "notice_route.created_by",
+          "uuid": true,
+          "audit": "createdBy",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"name\", \"event_kind\", \"subject_table\", \"filter\", \"recipients\", \"urgency\", \"escalation\", \"enabled\", \"created_at\", \"created_by\"",
+        "qualifiedColumns": "\"notice_route\".\"id\", \"notice_route\".\"name\", \"notice_route\".\"event_kind\", \"notice_route\".\"subject_table\", \"notice_route\".\"filter\", \"notice_route\".\"recipients\", \"notice_route\".\"urgency\", \"notice_route\".\"escalation\", \"notice_route\".\"enabled\", \"notice_route\".\"created_at\", \"notice_route\".\"created_by\"",
+        "getOne": "SELECT \"id\", \"name\", \"event_kind\", \"subject_table\", \"filter\", \"recipients\", \"urgency\", \"escalation\", \"enabled\", \"created_at\", \"created_by\" FROM notice_route WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM notice_route%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM notice_route%s%s%s",
+        "count": "SELECT COUNT(*) FROM notice_route%s",
+        "page": "SELECT %s FROM notice_route%s%s LIMIT %d",
+        "pageAfterKey": "notice_route.id %s %s",
+        "pageAfter": "(%s, notice_route.id) %s ((SELECT %s FROM notice_route AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM notice_route AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", notice_route.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM notice_route WHERE notice_route.id = ?1)",
+        "insert": "INSERT INTO notice_route (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO notice_route (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE notice_route SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"name\", \"event_kind\", \"subject_table\", \"filter\", \"recipients\", \"urgency\", \"escalation\", \"enabled\", \"created_at\", \"created_by\"",
+        "updateMany": "UPDATE notice_route SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO notice_route (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"event_kind\", \"subject_table\", \"filter\", \"recipients\", \"urgency\", \"escalation\", \"enabled\", \"created_at\", \"created_by\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM notice_route WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM notice_route WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM notice_route WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = notice_route.id",
+          "rows": "SELECT \"id\", \"name\", \"event_kind\", \"subject_table\", \"filter\", \"recipients\", \"urgency\", \"escalation\", \"enabled\", \"created_at\", \"created_by\" FROM notice_route WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "notifier": "routes"
+    },
+    {
+      "name": "Reply",
+      "table": "reply",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "reply.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "receivedAt",
+          "column": "received_at",
+          "field": "receivedAt",
+          "qualified": "reply.received_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "channelKind",
+          "column": "channel_kind",
+          "field": "channelKind",
+          "qualified": "reply.channel_kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "slot",
+          "column": "slot",
+          "field": "slot",
+          "qualified": "reply.slot",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "address",
+          "column": "address",
+          "field": "address",
+          "qualified": "reply.address",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "providerMessageId",
+          "column": "provider_message_id",
+          "field": "providerMessageId",
+          "qualified": "reply.provider_message_id",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "identity",
+          "column": "identity",
+          "field": "identity",
+          "qualified": "reply.identity",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "principal",
+          "column": "principal",
+          "field": "principal",
+          "qualified": "reply.principal",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "body",
+          "column": "body",
+          "field": "body",
+          "qualified": "reply.body",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "interpreter",
+          "column": "interpreter",
+          "field": "interpreter",
+          "qualified": "reply.interpreter",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "verb",
+          "column": "verb",
+          "field": "verb",
+          "qualified": "reply.verb",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "notice",
+          "column": "notice",
+          "field": "notice",
+          "qualified": "reply.notice",
+          "uuid": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "reference",
+          "column": "reference",
+          "field": "reference",
+          "qualified": "reply.reference",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "outcome",
+          "column": "outcome",
+          "field": "outcome",
+          "qualified": "reply.outcome",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "detail",
+          "column": "detail",
+          "field": "detail",
+          "qualified": "reply.detail",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "undo",
+          "column": "undo",
+          "field": "undo",
+          "qualified": "reply.undo",
+          "json": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "undoneAt",
+          "column": "undone_at",
+          "field": "undoneAt",
+          "qualified": "reply.undone_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"received_at\", \"channel_kind\", \"slot\", \"address\", \"provider_message_id\", \"identity\", \"principal\", \"body\", \"interpreter\", \"verb\", \"notice\", \"reference\", \"outcome\", \"detail\", \"undo\", \"undone_at\"",
+        "qualifiedColumns": "\"reply\".\"id\", \"reply\".\"received_at\", \"reply\".\"channel_kind\", \"reply\".\"slot\", \"reply\".\"address\", \"reply\".\"provider_message_id\", \"reply\".\"identity\", \"reply\".\"principal\", \"reply\".\"body\", \"reply\".\"interpreter\", \"reply\".\"verb\", \"reply\".\"notice\", \"reply\".\"reference\", \"reply\".\"outcome\", \"reply\".\"detail\", \"reply\".\"undo\", \"reply\".\"undone_at\"",
+        "getOne": "SELECT \"id\", \"received_at\", \"channel_kind\", \"slot\", \"address\", \"provider_message_id\", \"identity\", \"principal\", \"body\", \"interpreter\", \"verb\", \"notice\", \"reference\", \"outcome\", \"detail\", \"undo\", \"undone_at\" FROM reply WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM reply%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM reply%s%s%s",
+        "count": "SELECT COUNT(*) FROM reply%s",
+        "page": "SELECT %s FROM reply%s%s LIMIT %d",
+        "pageAfterKey": "reply.id %s %s",
+        "pageAfter": "(%s, reply.id) %s ((SELECT %s FROM reply AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM reply AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", reply.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM reply WHERE reply.id = ?1)",
+        "insert": "INSERT INTO reply (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO reply (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE reply SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"received_at\", \"channel_kind\", \"slot\", \"address\", \"provider_message_id\", \"identity\", \"principal\", \"body\", \"interpreter\", \"verb\", \"notice\", \"reference\", \"outcome\", \"detail\", \"undo\", \"undone_at\"",
+        "updateMany": "UPDATE reply SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO reply (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"received_at\", \"channel_kind\", \"slot\", \"address\", \"provider_message_id\", \"identity\", \"principal\", \"body\", \"interpreter\", \"verb\", \"notice\", \"reference\", \"outcome\", \"detail\", \"undo\", \"undone_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM reply WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM reply WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM reply WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = reply.id",
+          "rows": "SELECT \"id\", \"received_at\", \"channel_kind\", \"slot\", \"address\", \"provider_message_id\", \"identity\", \"principal\", \"body\", \"interpreter\", \"verb\", \"notice\", \"reference\", \"outcome\", \"detail\", \"undo\", \"undone_at\" FROM reply WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "notifier": "replies"
+    },
+    {
+      "name": "Report",
+      "table": "report",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "report.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "jobId",
+          "column": "job_id",
+          "field": "job",
+          "qualified": "report.job_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Job",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "body",
+          "column": "body",
+          "field": "body",
+          "qualified": "report.body",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "report.created_at",
+          "timestamp": true,
+          "auto": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"job_id\", \"body\", \"created_at\"",
+        "qualifiedColumns": "\"report\".\"id\", \"report\".\"job_id\", \"report\".\"body\", \"report\".\"created_at\"",
+        "getOne": "SELECT \"id\", \"job_id\", \"body\", \"created_at\" FROM report WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM report%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM report%s%s%s",
+        "count": "SELECT COUNT(*) FROM report%s",
+        "page": "SELECT %s FROM report%s%s LIMIT %d",
+        "pageAfterKey": "report.id %s %s",
+        "pageAfter": "(%s, report.id) %s ((SELECT %s FROM report AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM report AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", report.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM report WHERE report.id = ?1)",
+        "insert": "INSERT INTO report (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO report (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE report SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"job_id\", \"body\", \"created_at\"",
+        "updateMany": "UPDATE report SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO report (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"job_id\", \"body\", \"created_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM report WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM report WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM report WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = report.id",
+          "rows": "SELECT \"id\", \"job_id\", \"body\", \"created_at\" FROM report WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "job",
+          "target": "Job",
+          "probe": "report.job_id IN (SELECT job.id FROM job%s)"
+        }
+      ]
+    },
+    {
+      "name": "Role",
+      "table": "role",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "role.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "role.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "role.permissions",
+          "list": true,
+          "required": true
+        },
+        {
+          "name": "reaches",
+          "column": "reaches",
+          "field": "reaches",
+          "qualified": "role.reaches",
+          "list": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"name\", \"permissions\", \"reaches\"",
+        "qualifiedColumns": "\"role\".\"id\", \"role\".\"name\", \"role\".\"permissions\", \"role\".\"reaches\"",
+        "getOne": "SELECT \"id\", \"name\", \"permissions\", \"reaches\" FROM role WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM role%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM role%s%s%s",
+        "count": "SELECT COUNT(*) FROM role%s",
+        "page": "SELECT %s FROM role%s%s LIMIT %d",
+        "pageAfterKey": "role.id %s %s",
+        "pageAfter": "(%s, role.id) %s ((SELECT %s FROM role AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM role AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", role.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM role WHERE role.id = ?1)",
+        "insert": "INSERT INTO role (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO role (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE role SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"name\", \"permissions\", \"reaches\"",
+        "updateMany": "UPDATE role SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO role (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"permissions\", \"reaches\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM role WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM role WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM role WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = role.id",
+          "rows": "SELECT \"id\", \"name\", \"permissions\", \"reaches\" FROM role WHERE (id) IN (VALUES %s)"
+        },
+        "name": {
+          "conflict": "(\"name\")",
+          "keep": "\"name\" = role.\"name\"",
+          "rows": "SELECT \"id\", \"name\", \"permissions\", \"reaches\" FROM role WHERE (\"name\") IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByUserRoleGrantRole",
+          "probe": "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "userRoleGrants",
+          "target": "UserRoleGrant",
+          "column": "roleId"
+        }
+      ],
+      "access": "roles"
+    },
+    {
+      "name": "Session",
+      "table": "\"session\"",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "\"session\".id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "\"session\".user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "\"session\".token_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "\"session\".created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "\"session\".expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastSeenAt",
+          "column": "last_seen_at",
+          "field": "lastSeenAt",
+          "qualified": "\"session\".last_seen_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "\"session\".revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"session\".\"id\", \"session\".\"user_id\", \"session\".\"token_hash\", \"session\".\"created_at\", \"session\".\"expires_at\", \"session\".\"last_seen_at\", \"session\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM \"session\"%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM \"session\"%s%s%s",
+        "count": "SELECT COUNT(*) FROM \"session\"%s",
+        "page": "SELECT %s FROM \"session\"%s%s LIMIT %d",
+        "pageAfterKey": "\"session\".id %s %s",
+        "pageAfter": "(%s, \"session\".id) %s ((SELECT %s FROM \"session\" AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM \"session\" AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", \"session\".id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM \"session\" WHERE \"session\".id = ?1)",
+        "insert": "INSERT INTO \"session\" (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO \"session\" (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE \"session\" SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+        "updateMany": "UPDATE \"session\" SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO \"session\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM \"session\" WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM \"session\" WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM \"session\" WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = \"session\".id",
+          "rows": "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = \"session\".token_hash",
+          "rows": "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "\"session\".user_id IN (SELECT account.id FROM account%s)"
+        }
+      ]
+    },
+    {
+      "name": "UserApiKey",
+      "table": "user_api_key",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "user_api_key.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "user_api_key.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "user_api_key.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "user_api_key.token_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "user_api_key.permissions",
+          "list": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "user_api_key.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "user_api_key.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "user_api_key.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "user_api_key.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"user_api_key\".\"id\", \"user_api_key\".\"user_id\", \"user_api_key\".\"name\", \"user_api_key\".\"token_hash\", \"user_api_key\".\"permissions\", \"user_api_key\".\"created_at\", \"user_api_key\".\"expires_at\", \"user_api_key\".\"last_used_at\", \"user_api_key\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM user_api_key%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM user_api_key%s%s%s",
+        "count": "SELECT COUNT(*) FROM user_api_key%s",
+        "page": "SELECT %s FROM user_api_key%s%s LIMIT %d",
+        "pageAfterKey": "user_api_key.id %s %s",
+        "pageAfter": "(%s, user_api_key.id) %s ((SELECT %s FROM user_api_key AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM user_api_key AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", user_api_key.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM user_api_key WHERE user_api_key.id = ?1)",
+        "insert": "INSERT INTO user_api_key (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO user_api_key (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE user_api_key SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE user_api_key SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO user_api_key (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM user_api_key WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM user_api_key WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM user_api_key WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = user_api_key.id",
+          "rows": "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = user_api_key.token_hash",
+          "rows": "SELECT \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM user_api_key WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "user_api_key.user_id IN (SELECT account.id FROM account%s)"
+        }
+      ]
+    },
+    {
+      "name": "UserCredential",
+      "table": "user_credential",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "user_credential.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "user_credential.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "passwordHash",
+          "column": "password_hash",
+          "field": "passwordHash",
+          "qualified": "user_credential.password_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ]
+        },
+        {
+          "name": "passwordChangedAt",
+          "column": "password_changed_at",
+          "field": "passwordChangedAt",
+          "qualified": "user_credential.password_changed_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "disabledAt",
+          "column": "disabled_at",
+          "field": "disabledAt",
+          "qualified": "user_credential.disabled_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "pendingAt",
+          "column": "pending_at",
+          "field": "pendingAt",
+          "qualified": "user_credential.pending_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+        "qualifiedColumns": "\"user_credential\".\"id\", \"user_credential\".\"user_id\", \"user_credential\".\"password_hash\", \"user_credential\".\"password_changed_at\", \"user_credential\".\"disabled_at\", \"user_credential\".\"pending_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM user_credential%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM user_credential%s%s%s",
+        "count": "SELECT COUNT(*) FROM user_credential%s",
+        "page": "SELECT %s FROM user_credential%s%s LIMIT %d",
+        "pageAfterKey": "user_credential.id %s %s",
+        "pageAfter": "(%s, user_credential.id) %s ((SELECT %s FROM user_credential AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM user_credential AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", user_credential.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM user_credential WHERE user_credential.id = ?1)",
+        "insert": "INSERT INTO user_credential (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO user_credential (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE user_credential SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+        "updateMany": "UPDATE user_credential SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO user_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM user_credential WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM user_credential WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM user_credential WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = user_credential.id",
+          "rows": "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (VALUES %s)"
+        },
+        "user": {
+          "conflict": "(user_id)",
+          "keep": "user_id = user_credential.user_id",
+          "rows": "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "user_credential.user_id IN (SELECT account.id FROM account%s)"
+        }
+      ]
+    },
+    {
+      "name": "UserRoleGrant",
+      "table": "user_role_grant",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "user_role_grant.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "user_role_grant.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "roleId",
+          "column": "role_id",
+          "field": "role",
+          "qualified": "user_role_grant.role_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Role",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "grantedAt",
+          "column": "granted_at",
+          "field": "grantedAt",
+          "qualified": "user_role_grant.granted_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"role_id\", \"granted_at\"",
+        "qualifiedColumns": "\"user_role_grant\".\"id\", \"user_role_grant\".\"user_id\", \"user_role_grant\".\"role_id\", \"user_role_grant\".\"granted_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM user_role_grant%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM user_role_grant%s%s%s",
+        "count": "SELECT COUNT(*) FROM user_role_grant%s",
+        "page": "SELECT %s FROM user_role_grant%s%s LIMIT %d",
+        "pageAfterKey": "user_role_grant.id %s %s",
+        "pageAfter": "(%s, user_role_grant.id) %s ((SELECT %s FROM user_role_grant AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM user_role_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", user_role_grant.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM user_role_grant WHERE user_role_grant.id = ?1)",
+        "insert": "INSERT INTO user_role_grant (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO user_role_grant (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE user_role_grant SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\"",
+        "updateMany": "UPDATE user_role_grant SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO user_role_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM user_role_grant WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM user_role_grant WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM user_role_grant WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = user_role_grant.id",
+          "rows": "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (VALUES %s)"
+        },
+        "user,role": {
+          "conflict": "(user_id, role_id)",
+          "keep": "user_id = user_role_grant.user_id",
+          "rows": "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "user_role_grant.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "role",
+          "target": "Role",
+          "probe": "user_role_grant.role_id IN (SELECT role.id FROM role%s)"
+        }
+      ]
+    }
+  ],
+  "references": {
+    "holders": {
+      "Message": {
+        "table": "message_references",
+        "row": "message_id",
+        "uuid": true,
+        "maxPerRow": 1000
+      }
+    },
+    "targets": {
+      "Account": {
+        "table": "account",
+        "key": "id",
+        "uuid": true
+      },
+      "ChannelIdentity": {
+        "table": "channel_identity",
+        "key": "id",
+        "uuid": true
+      },
+      "ChannelTrust": {
+        "table": "channel_trust",
+        "key": "id",
+        "uuid": true
+      },
+      "Contact": {
+        "table": "contact",
+        "key": "id",
+        "uuid": true
+      },
+      "Conversation": {
+        "table": "conversation",
+        "key": "id",
+        "uuid": true
+      },
+      "Delivery": {
+        "table": "delivery",
+        "key": "id",
+        "uuid": true
+      },
+      "Grant": {
+        "table": "\"grant\"",
+        "key": "id",
+        "uuid": true
+      },
+      "Job": {
+        "table": "job",
+        "key": "id",
+        "uuid": true
+      },
+      "Message": {
+        "table": "message",
+        "key": "id",
+        "uuid": true
+      },
+      "Notice": {
+        "table": "notice",
+        "key": "id",
+        "uuid": true
+      },
+      "NoticeRoute": {
+        "table": "notice_route",
+        "key": "id",
+        "uuid": true
+      },
+      "Reply": {
+        "table": "reply",
+        "key": "id",
+        "uuid": true
+      },
+      "Report": {
+        "table": "report",
+        "key": "id",
+        "uuid": true
+      },
+      "Role": {
+        "table": "role",
+        "key": "id",
+        "uuid": true
+      },
+      "Session": {
+        "table": "\"session\"",
+        "key": "id",
+        "uuid": true
+      },
+      "UserApiKey": {
+        "table": "user_api_key",
+        "key": "id",
+        "uuid": true
+      },
+      "UserCredential": {
+        "table": "user_credential",
+        "key": "id",
+        "uuid": true
+      },
+      "UserRoleGrant": {
+        "table": "user_role_grant",
+        "key": "id",
+        "uuid": true
+      }
+    }
+  },
+  "attachments": {
+    "holders": {
+      "Message": {
+        "table": "message_attachments",
+        "row": "message_id",
+        "uuid": true,
+        "maxFileBytes": 104857600,
+        "maxRowBytes": 1073741824,
+        "maxFiles": 100,
+        "released": "attachment_released_queue"
+      },
+      "Report": {
+        "table": "report_attachments",
+        "row": "report_id",
+        "uuid": true,
+        "maxFileBytes": 104857600,
+        "maxRowBytes": 1073741824,
+        "maxFiles": 100,
+        "released": "attachment_released_queue"
+      }
+    }
+  }
+}"#;
+
+/// The definition [`SQLITE`] holds, read once.
+#[cfg(feature = "sqlite")]
+pub fn sqlite_definition() -> Result<&'static orm::Definition, orm::Error> {
+    static DEFINITION: std::sync::OnceLock<Result<orm::Definition, String>> =
+        std::sync::OnceLock::new();
+    DEFINITION
+        .get_or_init(|| orm::Definition::parse(SQLITE).map_err(|err| err.to_string()))
+        .as_ref()
+        .map_err(|err| orm::Error::Definition(err.clone()))
+}
+
+/// The repositories on a SQLite file.
+#[cfg(feature = "sqlite")]
+pub mod sqlite {
+    use super::*;
+
+    pub use orm::sqlite::rusqlite;
+    // What the references and attachments of the database's rows read and
+    // answer (D154, #611).
+    pub use orm::rowfeatures;
+
+    /// The repository of `Account` on a SQLite connection.
+    pub type AccountRepository<'a> =
+        orm::sqlite::Typed<'a, AccountRow, AccountCreate, AccountUpdate, AccountFilter, IdentityUUID>;
+
+    /// The repository of `ChannelIdentity` on a SQLite connection.
+    pub type ChannelIdentityRepository<'a> =
+        orm::sqlite::Typed<'a, ChannelIdentityRow, ChannelIdentityCreate, ChannelIdentityUpdate, ChannelIdentityFilter, IdentityUUID>;
+
+    /// The repository of `ChannelTrust` on a SQLite connection.
+    pub type ChannelTrustRepository<'a> =
+        orm::sqlite::Typed<'a, ChannelTrustRow, ChannelTrustCreate, ChannelTrustUpdate, ChannelTrustFilter, IdentityUUID>;
+
+    /// The repository of `Contact` on a SQLite connection.
+    pub type ContactRepository<'a> =
+        orm::sqlite::Typed<'a, ContactRow, ContactCreate, ContactUpdate, ContactFilter, IdentityUUID>;
+
+    /// The repository of `Conversation` on a SQLite connection.
+    pub type ConversationRepository<'a> =
+        orm::sqlite::Typed<'a, ConversationRow, ConversationCreate, ConversationUpdate, ConversationFilter, IdentityUUID>;
+
+    /// The repository of `Delivery` on a SQLite connection.
+    pub type DeliveryRepository<'a> =
+        orm::sqlite::Typed<'a, DeliveryRow, DeliveryCreate, DeliveryUpdate, DeliveryFilter, IdentityUUID>;
+
+    /// The repository of `Grant` on a SQLite connection.
+    pub type GrantRepository<'a> =
+        orm::sqlite::Typed<'a, GrantRow, GrantCreate, GrantUpdate, GrantFilter, IdentityUUID>;
+
+    /// The repository of `Job` on a SQLite connection.
+    pub type JobRepository<'a> =
+        orm::sqlite::Typed<'a, JobRow, JobCreate, JobUpdate, JobFilter, IdentityUUID>;
+
+    /// The repository of `Message` on a SQLite connection.
+    pub type MessageRepository<'a> =
+        orm::sqlite::Typed<'a, MessageRow, MessageCreate, MessageUpdate, MessageFilter, IdentityUUID>;
+
+    /// The repository of `Notice` on a SQLite connection.
+    pub type NoticeRepository<'a> =
+        orm::sqlite::Typed<'a, NoticeRow, NoticeCreate, NoticeUpdate, NoticeFilter, IdentityUUID>;
+
+    /// The repository of `NoticeRoute` on a SQLite connection.
+    pub type NoticeRouteRepository<'a> =
+        orm::sqlite::Typed<'a, NoticeRouteRow, NoticeRouteCreate, NoticeRouteUpdate, NoticeRouteFilter, IdentityUUID>;
+
+    /// The repository of `Reply` on a SQLite connection.
+    pub type ReplyRepository<'a> =
+        orm::sqlite::Typed<'a, ReplyRow, ReplyCreate, ReplyUpdate, ReplyFilter, IdentityUUID>;
+
+    /// The repository of `Report` on a SQLite connection.
+    pub type ReportRepository<'a> =
+        orm::sqlite::Typed<'a, ReportRow, ReportCreate, ReportUpdate, ReportFilter, IdentityUUID>;
+
+    /// The repository of `Role` on a SQLite connection.
+    pub type RoleRepository<'a> =
+        orm::sqlite::Typed<'a, RoleRow, RoleCreate, RoleUpdate, RoleFilter, IdentityUUID>;
+
+    /// The repository of `Session` on a SQLite connection.
+    pub type SessionRepository<'a> =
+        orm::sqlite::Typed<'a, SessionRow, SessionCreate, SessionUpdate, SessionFilter, IdentityUUID>;
+
+    /// The repository of `UserApiKey` on a SQLite connection.
+    pub type UserApiKeyRepository<'a> =
+        orm::sqlite::Typed<'a, UserApiKeyRow, UserApiKeyCreate, UserApiKeyUpdate, UserApiKeyFilter, IdentityUUID>;
+
+    /// The repository of `UserCredential` on a SQLite connection.
+    pub type UserCredentialRepository<'a> =
+        orm::sqlite::Typed<'a, UserCredentialRow, UserCredentialCreate, UserCredentialUpdate, UserCredentialFilter, IdentityUUID>;
+
+    /// The repository of `UserRoleGrant` on a SQLite connection.
+    pub type UserRoleGrantRepository<'a> =
+        orm::sqlite::Typed<'a, UserRoleGrantRow, UserRoleGrantCreate, UserRoleGrantUpdate, UserRoleGrantFilter, IdentityUUID>;
+
+    /// The tables of `fixture-parties-db` in the file `database` holds, as a
+    /// generated router serves its table operations from them (D106).
+    pub fn tables(database: std::sync::Arc<orm::sqlite::Database>) -> orm::sqlite::Tables {
+        orm::sqlite::Tables::new(database, sqlite_definition)
+    }
+
+    /// The repositories of `fixture-parties-db` on a SQLite connection, acting as
+    /// a user or as no one.
+    pub struct Repositories<'a>(orm::sqlite::Repositories<'a>);
+
+    impl<'a> Repositories<'a> {
+        /// The repositories over `connection`, the caller's: a
+        /// `rusqlite::Transaction` it opened, for a write. They act as no
+        /// one until `acting` names a user.
+        pub fn new(connection: &'a rusqlite::Connection) -> Result<Self, orm::Error> {
+            orm::sqlite::Repositories::new(connection, sqlite_definition()?).map(Self)
+        }
+
+        /// The repositories acting as `user` (D87); `None` acts as no one.
+        #[must_use]
+        pub fn acting(self, user: Option<String>) -> Self {
+            Self(self.0.acting(user))
+        }
+
+        /// The repositories acting as the database's system actor (D87).
+        #[must_use]
+        pub fn as_system(self) -> Self {
+            Self(self.0.as_system())
+        }
+
+        /// The repositories with the keys of the database's `Encrypted<T>`
+        /// fields (D85).
+        #[must_use]
+        pub fn with_keys(self, keys: &'a dyn orm::FieldKeys) -> Self {
+            Self(self.0.with_keys(keys))
+        }
+
+        /// The repositories with what runs the behaviors of the tables that
+        /// compose them (D103).
+        #[must_use]
+        pub fn with_rules(self, rules: &'a dyn orm::sqlite::Rules) -> Self {
+            Self(self.0.with_rules(rules))
+        }
+
+        /// The repositories running each behavior's command as `caller`,
+        /// whose permissions the core's guards read (D103); the acting
+        /// user, holding none, unless set.
+        #[must_use]
+        pub fn with_caller(self, caller: orm::Caller) -> Self {
+            Self(self.0.with_caller(caller))
+        }
+
+        /// The repositories keeping every read and write to what `caller`
+        /// sees (D156): `orm::AccessCaller::of(ctx.principal.as_ref())` in an
+        /// implementation of an operation.
+        #[must_use]
+        pub fn with_access(self, caller: orm::AccessCaller) -> Self {
+            Self(self.0.with_access(caller))
+        }
+
+        /// The repositories telling `trace` each statement's text as it
+        /// runs.
+        #[must_use]
+        pub fn with_trace(self, trace: &'a (dyn Fn(&str) + Sync)) -> Self {
+            Self(self.0.with_trace(trace))
+        }
+
+        /// The runtime's repositories these are, over JSON objects.
+        pub fn untyped(&self) -> &orm::sqlite::Repositories<'a> {
+            &self.0
+        }
+
+        /// The references of the database's rows, and the rows that point at a
+        /// row, each held to what the repositories' caller reads (D154, #611):
+        /// `add`, `remove`, `of` and `referenced_by`. `add` runs in a
+        /// transaction.
+        pub fn references(&self) -> Result<rowfeatures::sqlite::References<'_, 'a>, orm::Error> {
+            self.0.references()
+        }
+
+        /// The files of the database's rows (D154, #611): a direct upload
+        /// `begin` signs and `complete` checks, `list`, `get`, `download`,
+        /// `caption`, `detach`, `file` onto another row, `release`, and a file
+        /// processor's `pending` and `processed`. `begin`, `file` and `release`
+        /// run in a transaction; those that reach the bucket are async.
+        pub fn attachments(&self) -> Result<rowfeatures::sqlite::Attachments<'_, 'a>, orm::Error> {
+            self.0.attachments()
+        }
+
+        /// The repository of `Account`.
+        pub fn account(&self) -> Result<AccountRepository<'_>, orm::Error> {
+            self.0.typed("Account")
+        }
+
+        /// The repository of `ChannelIdentity`.
+        pub fn channel_identity(&self) -> Result<ChannelIdentityRepository<'_>, orm::Error> {
+            self.0.typed("ChannelIdentity")
+        }
+
+        /// The repository of `ChannelTrust`.
+        pub fn channel_trust(&self) -> Result<ChannelTrustRepository<'_>, orm::Error> {
+            self.0.typed("ChannelTrust")
+        }
+
+        /// The repository of `Contact`.
+        pub fn contact(&self) -> Result<ContactRepository<'_>, orm::Error> {
+            self.0.typed("Contact")
+        }
+
+        /// The repository of `Conversation`.
+        pub fn conversation(&self) -> Result<ConversationRepository<'_>, orm::Error> {
+            self.0.typed("Conversation")
+        }
+
+        /// The repository of `Delivery`.
+        pub fn delivery(&self) -> Result<DeliveryRepository<'_>, orm::Error> {
+            self.0.typed("Delivery")
+        }
+
+        /// The repository of `Grant`.
+        pub fn grant(&self) -> Result<GrantRepository<'_>, orm::Error> {
+            self.0.typed("Grant")
+        }
+
+        /// The repository of `Job`.
+        pub fn job(&self) -> Result<JobRepository<'_>, orm::Error> {
+            self.0.typed("Job")
+        }
+
+        /// The repository of `Message`.
+        pub fn message(&self) -> Result<MessageRepository<'_>, orm::Error> {
+            self.0.typed("Message")
+        }
+
+        /// The repository of `Notice`.
+        pub fn notice(&self) -> Result<NoticeRepository<'_>, orm::Error> {
+            self.0.typed("Notice")
+        }
+
+        /// The repository of `NoticeRoute`.
+        pub fn notice_route(&self) -> Result<NoticeRouteRepository<'_>, orm::Error> {
+            self.0.typed("NoticeRoute")
+        }
+
+        /// The repository of `Reply`.
+        pub fn reply(&self) -> Result<ReplyRepository<'_>, orm::Error> {
+            self.0.typed("Reply")
+        }
+
+        /// The repository of `Report`.
+        pub fn report(&self) -> Result<ReportRepository<'_>, orm::Error> {
+            self.0.typed("Report")
+        }
+
+        /// The repository of `Role`.
+        pub fn role(&self) -> Result<RoleRepository<'_>, orm::Error> {
+            self.0.typed("Role")
+        }
+
+        /// The repository of `Session`.
+        pub fn session(&self) -> Result<SessionRepository<'_>, orm::Error> {
+            self.0.typed("Session")
+        }
+
+        /// The repository of `UserApiKey`.
+        pub fn user_api_key(&self) -> Result<UserApiKeyRepository<'_>, orm::Error> {
+            self.0.typed("UserApiKey")
+        }
+
+        /// The repository of `UserCredential`.
+        pub fn user_credential(&self) -> Result<UserCredentialRepository<'_>, orm::Error> {
+            self.0.typed("UserCredential")
+        }
+
+        /// The repository of `UserRoleGrant`.
+        pub fn user_role_grant(&self) -> Result<UserRoleGrantRepository<'_>, orm::Error> {
             self.0.typed("UserRoleGrant")
         }
     }

@@ -1,5 +1,5 @@
-//! The agent dispatcher over a database's Postgres repositories (D158,
-//! D183, D193), the TypeScript runtime's `createAgents`: run requests,
+//! The agent dispatcher over a database's repositories on either dialect
+//! (D158, D183, D193, #618), the TypeScript runtime's `createAgents`: run requests,
 //! runs, their tokens and principals, autonomy and approvals, budgets,
 //! stop switches, transcripts and administration.
 
@@ -9,7 +9,6 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use deadpool_postgres::GenericClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -18,9 +17,14 @@ use super::super::inbound::{
 };
 use super::super::notify::{Notifier, NotifierError, RaiseInput, ReplyAction, ReplyContext};
 use super::super::parties::{party_principal, role_named, PartyRef};
-use super::super::postgres::{deadpool_postgres, Repositories, Tables};
+#[cfg(feature = "postgres")]
+use super::super::postgres::deadpool_postgres;
 use super::super::rowfeatures::RowRef;
 use super::super::search_tables::SearchOptions;
+use super::super::store::{
+    Db, PartQueue, PgClient, PoolClient, PoolTransaction, Store, StoreGrants, StoreRepositories,
+    TxRepositories,
+};
 use super::super::{
     rfc3339_millis, AccessCaller, Caller, Definition, Error, FindOptions, OrderBy, Values,
     WriteOptions, ACCESS_ROLES,
@@ -30,10 +34,7 @@ use super::{
     narrow_reaches, params_hash, permissions, redact_text, trust_of, Autonomy, OperationClass,
     PolicyRow, RunTrust, DEFAULT_TRANSCRIPT_RETENTION_DAYS,
 };
-use crate::access::{
-    active_grants, issue_grant, reaches_of, revoke_grant, ActiveGrantsFilter, GrantAuthenticator,
-    IssueGrant, GRANT_TOKEN_PREFIX,
-};
+use crate::access::{reaches_of, ActiveGrantsFilter, IssueGrant, GRANT_TOKEN_PREFIX};
 use crate::auth::{covers, ActingFor, Authenticator, GrantReach, Principal, PrincipalKind};
 use crate::civil::parse_rfc3339;
 use crate::mcp::canonical_json;
@@ -42,7 +43,7 @@ use crate::providers::{
     ModelUsage, Providers, RuntimeInterface, SandboxCost, SandboxLimits, SandboxProvider,
     SandboxSpec, SandboxState, SecretValue,
 };
-use crate::queue::{enqueue_in, PostgresQueue, QueueDefinition, QueueError};
+use crate::queue::{QueueDefinition, QueueError};
 use crate::uuid62::parse_uuid;
 use crate::BoxError;
 
@@ -129,12 +130,14 @@ impl From<BoxError> for AgentsError {
     }
 }
 
+#[cfg(feature = "postgres")]
 impl From<deadpool_postgres::tokio_postgres::Error> for AgentsError {
     fn from(err: deadpool_postgres::tokio_postgres::Error) -> Self {
         Self::failed(crate::error::chain(&err))
     }
 }
 
+#[cfg(feature = "postgres")]
 impl From<deadpool_postgres::PoolError> for AgentsError {
     fn from(err: deadpool_postgres::PoolError) -> Self {
         Self::failed(format!("the database is unreachable: {err}"))
@@ -296,7 +299,7 @@ pub trait TranscriptStore: Send + Sync {
 /// and whose behaviors' commands run with its permissions, the principal,
 /// the run's row and the arguments.
 pub struct AgentToolContext<'a, 't> {
-    pub repositories: &'a Repositories<'a, deadpool_postgres::Transaction<'t>>,
+    pub repositories: &'a TxRepositories<'a, 't>,
     pub principal: &'a Principal,
     pub run: &'a Values,
     pub args: &'a Map<String, Value>,
@@ -367,7 +370,7 @@ pub trait AskThread: Send + Sync {
     /// answers the message's id.
     async fn post(
         &self,
-        repositories: &Repositories<'_, deadpool_postgres::Transaction<'_>>,
+        repositories: &TxRepositories<'_, '_>,
         row: &RowRef,
         question: &str,
         principal: Option<&str>,
@@ -375,7 +378,7 @@ pub trait AskThread: Send + Sync {
     /// Whether someone other than the run answered the message.
     async fn answered(
         &self,
-        repositories: &Repositories<'_, deadpool_postgres::Transaction<'_>>,
+        repositories: &TxRepositories<'_, '_>,
         row: &RowRef,
         message: &str,
         run: &str,
@@ -387,7 +390,7 @@ pub trait AskThread: Send + Sync {
 pub trait FollowUp: Send + Sync {
     async fn follow_up(
         &self,
-        repositories: &Repositories<'_, deadpool_postgres::Transaction<'_>>,
+        repositories: &TxRepositories<'_, '_>,
         run: &Values,
         row: &RowRef,
         question: &str,
@@ -400,7 +403,7 @@ pub trait FollowUp: Send + Sync {
 pub trait OnReturn: Send + Sync {
     async fn on_return(
         &self,
-        repositories: &Repositories<'_, deadpool_postgres::Transaction<'_>>,
+        repositories: &TxRepositories<'_, '_>,
         run: &Values,
         row: &RowRef,
     ) -> Result<(), BoxError>;
@@ -471,7 +474,8 @@ pub(super) struct Parts {
 }
 
 pub(super) struct Inner {
-    pub tables: Tables,
+    pub tables: Store,
+    pub queue: PartQueue<AgentRunRequest>,
     pub definition: &'static Definition,
     pub requests: QueueDefinition,
     pub endpoint: String,
@@ -630,8 +634,14 @@ impl Agents {
     /// `endpoint`, the URL the sandbox reaches the agent routes at. It
     /// refuses a database without every part, and an endpoint that is no
     /// URL.
-    pub fn new(tables: Tables, requests: QueueDefinition, endpoint: &str) -> Result<Self> {
+    pub fn new(
+        tables: impl Into<Store>,
+        requests: QueueDefinition,
+        endpoint: &str,
+    ) -> Result<Self> {
+        let tables: Store = tables.into();
         let definition = tables.definition()?;
+        let queue = PartQueue::of(&tables, requests.clone())?;
         let part = |name: &str| {
             definition
                 .tables
@@ -675,6 +685,7 @@ impl Agents {
         Ok(Self {
             inner: Arc::new(Inner {
                 tables,
+                queue,
                 definition,
                 requests,
                 endpoint,
@@ -906,11 +917,11 @@ impl Agents {
             .map_or_else(SystemTime::now, |now| now())
     }
 
-    pub(super) fn pool(&self) -> &deadpool_postgres::Pool {
-        self.inner.tables.pool()
+    pub(super) fn store(&self) -> &Store {
+        &self.inner.tables
     }
 
-    pub(super) fn tables(&self) -> &Tables {
+    pub(super) fn tables(&self) -> &Store {
         &self.inner.tables
     }
 
@@ -930,11 +941,12 @@ impl Agents {
 
     /// The repositories over `client` as the dispatcher: the system, whose
     /// behaviors' commands run as the dispatcher's caller.
-    pub(super) fn sys<'c, C: GenericClient + Sync>(
+    pub(super) fn sys<'c, C: PgClient>(
         &'c self,
-        client: &'c C,
-    ) -> Result<Repositories<'c, C>> {
-        let mut repositories = Repositories::new(client, self.inner.definition)?
+        client: Db<'c, C>,
+    ) -> Result<StoreRepositories<'c, C>> {
+        let mut repositories = client
+            .repositories(self.inner.definition)?
             .as_system()
             .with_caller(self.inner.dispatcher.clone());
         if let Some(keys) = self.inner.tables.keys() {
@@ -947,18 +959,17 @@ impl Agents {
     /// run as `caller` (the dispatcher's unless given), through the core.
     pub(super) fn sys_tx<'c, 't>(
         &'c self,
-        tx: &'c deadpool_postgres::Transaction<'t>,
+        tx: Db<'c, PoolTransaction<'t>>,
         caller: Option<Caller>,
-    ) -> Result<Repositories<'c, deadpool_postgres::Transaction<'t>>> {
-        let mut repositories = Repositories::new(tx, self.inner.definition)?
+    ) -> Result<StoreRepositories<'c, PoolTransaction<'t>>> {
+        let mut repositories = tx
+            .repositories(self.inner.definition)?
             .as_system()
             .with_caller(caller.unwrap_or_else(|| self.inner.dispatcher.clone()));
         if let Some(keys) = self.inner.tables.keys() {
             repositories = repositories.with_keys(keys.as_ref());
         }
-        if let Some(rules) = self.inner.tables.rules() {
-            repositories = repositories.with_rules(rules.as_ref());
-        }
+        repositories = repositories.with_rules_of(&self.inner.tables);
         Ok(repositories)
     }
 
@@ -967,26 +978,25 @@ impl Agents {
     /// permissions.
     pub(super) fn as_principal<'c, 't>(
         &'c self,
-        tx: &'c deadpool_postgres::Transaction<'t>,
+        tx: Db<'c, PoolTransaction<'t>>,
         principal: &Principal,
-    ) -> Result<Repositories<'c, deadpool_postgres::Transaction<'t>>> {
-        let mut repositories = Repositories::new(tx, self.inner.definition)?
+    ) -> Result<StoreRepositories<'c, PoolTransaction<'t>>> {
+        let mut repositories = tx
+            .repositories(self.inner.definition)?
             .acting(acting(Some(principal)))
             .with_access(AccessCaller::of(Some(principal)))
             .with_caller(Caller::of(Some(principal)));
         if let Some(keys) = self.inner.tables.keys() {
             repositories = repositories.with_keys(keys.as_ref());
         }
-        if let Some(rules) = self.inner.tables.rules() {
-            repositories = repositories.with_rules(rules.as_ref());
-        }
+        repositories = repositories.with_rules_of(&self.inner.tables);
         Ok(repositories)
     }
 
     pub(super) async fn find_one(&self, table: &str, filter: Value) -> Result<Option<Values>> {
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(table)?
             .find_one(Some(&obj(filter)), &FindOptions::default())
             .await?)
@@ -998,9 +1008,9 @@ impl Agents {
         filter: Value,
         options: &FindOptions,
     ) -> Result<Vec<Values>> {
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(table)?
             .find_many(Some(&obj(filter)), options)
             .await?
@@ -1008,10 +1018,10 @@ impl Agents {
     }
 
     pub(super) async fn create(&self, table: &str, values: Value) -> Result<Values> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         let row = self
-            .sys_tx(&tx, None)?
+            .sys_tx(tx.db(), None)?
             .table(table)?
             .create_one(&obj(values))
             .await?;
@@ -1030,10 +1040,10 @@ impl Agents {
         values: Value,
         caller: Option<Caller>,
     ) -> Result<Values> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         let row = self
-            .sys_tx(&tx, caller)?
+            .sys_tx(tx.db(), caller)?
             .table(table)?
             .update_one(&key(id), &obj(values), &WriteOptions::default())
             .await?;
@@ -1052,10 +1062,10 @@ impl Agents {
         params: Value,
         options: WriteOptions,
     ) -> Result<Value> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         let answer = self
-            .sys_tx(&tx, None)?
+            .sys_tx(tx.db(), None)?
             .table(table)?
             .operation(member, operation, &key(id), &params, &options)
             .await?;
@@ -1117,10 +1127,10 @@ impl Agents {
     /// written but a completion's `providerState`, which the turns after it
     /// pass back as it was.
     pub(super) async fn append(&self, run: &str, entries: Vec<Value>) -> Result<()> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         {
-            let repositories = self.sys_tx(&tx, None)?;
+            let repositories = self.sys_tx(tx.db(), None)?;
             let runs = repositories.table(&self.inner.parts.runs)?;
             let mut by_id = Values::new();
             by_id.insert("id".to_owned(), eq(run));
@@ -1262,9 +1272,9 @@ impl Agents {
         })
     }
 
-    pub(super) async fn raise_in<C: GenericClient + Sync>(
+    pub(super) async fn raise_in<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         table: &str,
         key: &str,
         kind: &str,
@@ -1285,14 +1295,15 @@ impl Agents {
         let mut input = RaiseInput::of(table, key, kind);
         input.payload = obj(payload);
         input.urgency = urgency.map(str::to_owned);
-        notifier.raise(client, input).await?;
+        notifier.raise_in(client, input, false).await?;
         Ok(())
     }
 
     async fn raise(&self, table: &str, key: &str, kind: &str, payload: Value) -> Result<()> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        self.raise_in(&tx, table, key, kind, payload, None).await?;
+        self.raise_in(tx.db(), table, key, kind, payload, None)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1559,25 +1570,23 @@ impl Agents {
     }
 
     async fn revoke_grants_of(&self, run: &str) -> Result<()> {
-        let client = self.pool().get().await?;
-        for grant in active_grants(
-            &client,
-            self.inner.definition,
-            &ActiveGrantsFilter {
-                holder: Some(run.to_owned()),
-                now: Some(self.now()),
-                ..ActiveGrantsFilter::default()
-            },
-        )
-        .await?
-        {
-            revoke_grant(
-                &client,
+        let client = self.store().client().await?;
+        for grant in client
+            .db()
+            .active_grants(
                 self.inner.definition,
-                &string(&grant, "id"),
-                self.now(),
+                &ActiveGrantsFilter {
+                    holder: Some(run.to_owned()),
+                    now: Some(self.now()),
+                    ..ActiveGrantsFilter::default()
+                },
             )
-            .await?;
+            .await?
+        {
+            client
+                .db()
+                .revoke_grant(self.inner.definition, &string(&grant, "id"), self.now())
+                .await?;
         }
         Ok(())
     }
@@ -1586,10 +1595,10 @@ impl Agents {
         let Some(on_return) = &self.inner.on_return else {
             return Ok(());
         };
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         {
-            let repositories = self.sys_tx(&tx, None)?;
+            let repositories = self.sys_tx(tx.db(), None)?;
             on_return.on_return(&repositories, run, row).await?;
         }
         tx.commit().await?;
@@ -1723,17 +1732,18 @@ impl Agents {
                     "an inbound message names its party and the party's grant".to_owned(),
                 ));
             };
-            let client = self.pool().get().await?;
-            let grants = active_grants(
-                &client,
-                self.inner.definition,
-                &ActiveGrantsFilter {
-                    holder: Some(party.key.clone()),
-                    now: Some(self.now()),
-                    ..ActiveGrantsFilter::default()
-                },
-            )
-            .await?;
+            let client = self.store().client().await?;
+            let grants = client
+                .db()
+                .active_grants(
+                    self.inner.definition,
+                    &ActiveGrantsFilter {
+                        holder: Some(party.key.clone()),
+                        now: Some(self.now()),
+                        ..ActiveGrantsFilter::default()
+                    },
+                )
+                .await?;
             drop(client);
             let Some(grant) = grants
                 .iter()
@@ -1799,9 +1809,11 @@ impl Agents {
     }
 
     async fn enqueue(&self, request: &AgentRunRequest, delay: Duration) -> Result<()> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        enqueue_in(&tx, &self.inner.requests, request, delay).await?;
+        tx.db()
+            .enqueue(&self.inner.requests, request, delay)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1959,12 +1971,11 @@ impl Agents {
     ) -> Result<(String, Vec<String>)> {
         let mut token = String::new();
         let mut grants: Vec<String> = Vec::new();
-        let client = self.pool().get().await?;
-        let system = self.sys(&client)?;
+        let client = self.store().client().await?;
+        let system = self.sys(client.db())?;
         for target in targets {
-            let issued = issue_grant(
-                &system,
-                &IssueGrant {
+            let issued = system
+                .issue_grant(&IssueGrant {
                     holder: run_id.to_owned(),
                     holder_kind: PrincipalKind::Agent,
                     role: role.to_owned(),
@@ -1973,9 +1984,8 @@ impl Agents {
                     starts_at: None,
                     ends_at: Some(ends_at),
                     ends_when: None,
-                },
-            )
-            .await?;
+                })
+                .await?;
             grants.push(string(&issued.grant, "id"));
             if token.is_empty() {
                 token = issued.token;
@@ -2109,9 +2119,12 @@ impl Agents {
             }
             Err(detail) => {
                 tracing::warn!(run = %run_id, detail = %detail, "a sandbox instance did not start");
-                let client = self.pool().get().await?;
+                let client = self.store().client().await?;
                 for id in &grants {
-                    revoke_grant(&client, self.inner.definition, id, self.now()).await?;
+                    client
+                        .db()
+                        .revoke_grant(self.inner.definition, id, self.now())
+                        .await?;
                 }
                 drop(client);
                 self.update(
@@ -2209,9 +2222,9 @@ impl Agents {
             return;
         }
         let added: std::result::Result<(), BoxError> = async {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
-            self.sys_tx(&tx, None)?
+            self.sys_tx(tx.db(), None)?
                 .references()?
                 .add(
                     &RowRef::new(self.inner.parts.runs.clone(), run),
@@ -2336,10 +2349,10 @@ impl Agents {
         };
         let row = RowRef::new(ask.table.clone(), ask.key.clone());
         let answered = {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             let answered = {
-                let repositories = self.sys_tx(&tx, None)?;
+                let repositories = self.sys_tx(tx.db(), None)?;
                 self.thread()
                     .answered(&repositories, &row, &ask.message, &string(&run, "id"))
                     .await?
@@ -2351,10 +2364,10 @@ impl Agents {
             return Ok(());
         }
         if let Some(follow_up) = &self.inner.follow_up {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             {
-                let repositories = self.sys_tx(&tx, None)?;
+                let repositories = self.sys_tx(tx.db(), None)?;
                 follow_up
                     .follow_up(&repositories, &run, &row, &ask.question)
                     .await?;
@@ -2381,20 +2394,46 @@ impl Agents {
 
     /// The request queue over the tables' pool, as a worker claims it. A
     /// worker's prune of it is [`Agents::prune`]'s too.
-    pub fn worker_queue(&self) -> PostgresQueue<AgentRunRequest> {
-        PostgresQueue::new(self.pool().clone(), self.inner.requests.clone())
+    pub fn worker_queue(&self) -> PartQueue<AgentRunRequest> {
+        self.inner.queue.clone()
     }
 
     /// Puts a run request on the dispatcher's queue in the caller's
     /// transaction, due after `delay`; a principal of kind agent may not
     /// request a run, and an inbound message's request names its party and
     /// its grant.
-    pub async fn request<C: GenericClient + Sync>(
+    pub async fn request<'c>(
         &self,
-        client: &C,
+        client: impl super::super::store::IntoDb<'c>,
         input: AgentRunRequest,
         delay: Duration,
     ) -> Result<()> {
+        let input = self.requested(input)?;
+        client
+            .into_db()
+            .enqueue(&self.inner.requests, &input, delay)
+            .await?;
+        Ok(())
+    }
+
+    /// [`Agents::request`] in the caller's own transaction on a SQLite
+    /// file (#618): `connection` is its rusqlite transaction, which the
+    /// request commits with.
+    #[cfg(feature = "sqlite")]
+    pub fn request_sqlite(
+        &self,
+        connection: &super::super::sqlite::rusqlite::Connection,
+        input: AgentRunRequest,
+        delay: Duration,
+    ) -> Result<()> {
+        let input = self.requested(input)?;
+        crate::queue::sqlite::enqueue_sqlite_in(connection, &self.inner.requests, &input, delay)?;
+        Ok(())
+    }
+
+    /// A run request as the queue takes it: one an agent run made, and an
+    /// inbound message's that names no party and grant, are refused.
+    fn requested(&self, input: AgentRunRequest) -> Result<AgentRunRequest> {
         if input
             .requested_by
             .as_ref()
@@ -2417,8 +2456,7 @@ impl Agents {
         }
         let mut input = input;
         input.step = Some("start".to_owned());
-        enqueue_in(client, &self.inner.requests, &input, delay).await?;
-        Ok(())
+        Ok(input)
     }
 
     // ---- the run's principal ----
@@ -2448,13 +2486,13 @@ impl Agents {
                 }
             }
         };
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         if kind == "user" {
             let Ok(grants) = definition.table("UserRoleGrant") else {
                 return Ok(Vec::new());
             };
             let rows = self
-                .sys(&client)?
+                .sys(client.db())?
                 .table(&grants.name)?
                 .find_many(
                     Some(&obj(json!({ "userId": { "eq": subject } }))),
@@ -2464,7 +2502,7 @@ impl Agents {
                 .rows;
             for grant in rows {
                 let role = self
-                    .sys(&client)?
+                    .sys(client.db())?
                     .table(&roles.name)?
                     .find_one(
                         Some(&obj(json!({ "id": { "eq": grant.get("roleId").cloned().unwrap_or(Value::Null) } }))),
@@ -2477,7 +2515,7 @@ impl Agents {
             // A party is what D157's party principal says it is: its active
             // grants' roles, or the one grant the run is under.
             return Ok(party_principal(
-                &client,
+                client.db(),
                 definition,
                 &PartyRef::new(table, subject),
                 grant,
@@ -2486,26 +2524,27 @@ impl Agents {
             .await?
             .permissions);
         } else {
-            for grant in active_grants(
-                &client,
-                definition,
-                &ActiveGrantsFilter {
-                    holder: Some(subject.to_owned()),
-                    now: Some(self.now()),
-                    ..ActiveGrantsFilter::default()
-                },
-            )
-            .await?
+            for grant in client
+                .db()
+                .active_grants(
+                    definition,
+                    &ActiveGrantsFilter {
+                        holder: Some(subject.to_owned()),
+                        now: Some(self.now()),
+                        ..ActiveGrantsFilter::default()
+                    },
+                )
+                .await?
             {
-                add(role_named(&client, definition, &string(&grant, "role")).await?);
+                add(role_named(client.db(), definition, &string(&grant, "role")).await?);
             }
         }
         Ok(out)
     }
 
     async fn role_reaches(&self, name: &str) -> Result<BTreeMap<String, Vec<String>>> {
-        let client = self.pool().get().await?;
-        let role = role_named(&client, self.inner.definition, name).await?;
+        let client = self.store().client().await?;
+        let role = role_named(client.db(), self.inner.definition, name).await?;
         let entries: Vec<String> = role
             .and_then(|r| r.get("reaches").cloned())
             .and_then(|r| r.as_array().cloned())
@@ -2528,8 +2567,7 @@ impl Agents {
         if !token.starts_with(GRANT_TOKEN_PREFIX) {
             return Ok(None);
         }
-        let mut authenticator =
-            GrantAuthenticator::new(self.inner.tables.clone())?.admitting_runs();
+        let mut authenticator = StoreGrants::new(self.inner.tables.clone())?.admitting_runs();
         if let Some(now) = self.inner.now.clone() {
             authenticator = authenticator.with_clock(now);
         }
@@ -2571,17 +2609,18 @@ impl Agents {
         let mut party_grants: Option<Vec<PartyReach>> = None;
         if let Some((kind, subject)) = &acting_for {
             if kind == "party" {
-                let client = self.pool().get().await?;
-                let grants = active_grants(
-                    &client,
-                    self.inner.definition,
-                    &ActiveGrantsFilter {
-                        holder: Some(subject.clone()),
-                        now: Some(self.now()),
-                        ..ActiveGrantsFilter::default()
-                    },
-                )
-                .await?;
+                let client = self.store().client().await?;
+                let grants = client
+                    .db()
+                    .active_grants(
+                        self.inner.definition,
+                        &ActiveGrantsFilter {
+                            holder: Some(subject.clone()),
+                            now: Some(self.now()),
+                            ..ActiveGrantsFilter::default()
+                        },
+                    )
+                    .await?;
                 drop(client);
                 let mut held = Vec::new();
                 for grant in grants {
@@ -2600,17 +2639,18 @@ impl Agents {
             }
         }
         let own_grants = {
-            let client = self.pool().get().await?;
-            active_grants(
-                &client,
-                self.inner.definition,
-                &ActiveGrantsFilter {
-                    holder: Some(base.subject.clone()),
-                    now: Some(self.now()),
-                    ..ActiveGrantsFilter::default()
-                },
-            )
-            .await?
+            let client = self.store().client().await?;
+            client
+                .db()
+                .active_grants(
+                    self.inner.definition,
+                    &ActiveGrantsFilter {
+                        holder: Some(base.subject.clone()),
+                        now: Some(self.now()),
+                        ..ActiveGrantsFilter::default()
+                    },
+                )
+                .await?
         };
         let mut reaches = Vec::new();
         for grant in own_grants {
@@ -2687,7 +2727,7 @@ impl Agents {
     /// a running run's token is its principal; any other grant's token is
     /// the grant authenticator's; every other caller is `inner`'s.
     pub fn authenticator(&self, inner: Option<Arc<dyn Authenticator>>) -> Result<RunAuthenticator> {
-        let mut grants = GrantAuthenticator::new(self.inner.tables.clone())?;
+        let mut grants = StoreGrants::new(self.inner.tables.clone())?;
         if let Some(now) = self.inner.now.clone() {
             grants = grants.with_clock(now);
         }
@@ -2751,10 +2791,10 @@ impl Agents {
         let approvals = &self.inner.parts.approvals;
         let hash = params_hash(operation, params);
         let expires = self.now() + Duration::from_secs(self.inner.approval_ttl_seconds);
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         let created = {
-            let repositories = self.sys_tx(&tx, None)?;
+            let repositories = self.sys_tx(tx.db(), None)?;
             let created = repositories
                 .table(approvals)?
                 .create_one(&obj(json!({
@@ -2771,7 +2811,7 @@ impl Agents {
                 })))
                 .await?;
             self.raise_in(
-                &tx,
+                tx.db(),
                 approvals,
                 &string(&created, "id"),
                 "approval.requested",
@@ -2941,9 +2981,9 @@ impl Agents {
         })
     }
 
-    async fn decide_with<C: GenericClient + Sync>(
+    async fn decide_with<C: PgClient>(
         &self,
-        client: Option<&C>,
+        client: Option<Db<'_, C>>,
         principal: &Principal,
         id: &str,
         state: &str,
@@ -3040,7 +3080,9 @@ impl Agents {
                 };
                 match client {
                     Some(client) => {
-                        enqueue_in(client, &self.inner.requests, &request, Duration::ZERO).await?
+                        client
+                            .enqueue(&self.inner.requests, &request, Duration::ZERO)
+                            .await?
                     }
                     None => self.enqueue(&request, Duration::ZERO).await?,
                 }
@@ -3060,26 +3102,14 @@ impl Agents {
     /// Approves an approval as `principal`, which holds its permission and
     /// is no agent run, on `via` (`api` unless given).
     pub async fn approve(&self, principal: &Principal, id: &str, via: Option<&str>) -> Result<()> {
-        self.decide_with::<deadpool_postgres::Client>(
-            None,
-            principal,
-            id,
-            "approved",
-            via.unwrap_or("api"),
-        )
-        .await
+        self.decide_with::<PoolClient>(None, principal, id, "approved", via.unwrap_or("api"))
+            .await
     }
 
     /// Denies an approval as `principal`.
     pub async fn deny(&self, principal: &Principal, id: &str, via: Option<&str>) -> Result<()> {
-        self.decide_with::<deadpool_postgres::Client>(
-            None,
-            principal,
-            id,
-            "denied",
-            via.unwrap_or("api"),
-        )
-        .await
+        self.decide_with::<PoolClient>(None, principal, id, "denied", via.unwrap_or("api"))
+            .await
     }
 
     /// The reply actions `approve` and `deny` of `approval.requested`, for
@@ -3462,7 +3492,7 @@ pub(super) struct Standing {
 /// The authenticator of a run's token ([`Agents::authenticator`]).
 pub struct RunAuthenticator {
     agents: Agents,
-    grants: GrantAuthenticator,
+    grants: StoreGrants,
     inner: Option<Arc<dyn Authenticator>>,
 }
 
@@ -3536,7 +3566,7 @@ impl ReplyAction for Decide {
             .to_owned();
         agents
             .decide_with(
-                Some(ctx.repositories.client()),
+                Some(ctx.repositories.db()),
                 ctx.principal,
                 &id,
                 self.state,
@@ -3581,7 +3611,7 @@ struct CommentsThread {
 impl AskThread for CommentsThread {
     async fn post(
         &self,
-        repositories: &Repositories<'_, deadpool_postgres::Transaction<'_>>,
+        repositories: &TxRepositories<'_, '_>,
         row: &RowRef,
         question: &str,
         principal: Option<&str>,
@@ -3622,7 +3652,7 @@ impl AskThread for CommentsThread {
 
     async fn answered(
         &self,
-        repositories: &Repositories<'_, deadpool_postgres::Transaction<'_>>,
+        repositories: &TxRepositories<'_, '_>,
         row: &RowRef,
         message: &str,
         run: &str,

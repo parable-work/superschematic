@@ -163,3 +163,63 @@ async fn work_runs_off_the_async_threads_on_tokio() {
     let read = database.read_async(count).await.expect("a read");
     assert_eq!(read, 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_held_write_spans_awaits_and_holds_the_writer_until_it_ends() {
+    let (_dir, database) = file();
+    let held = database.begin_async().await.expect("begin");
+    held.with(|connection| insert(connection, "held"))
+        .expect("insert");
+    // Another task's write waits for the held one, and runs once it ends.
+    let other = {
+        let database = Arc::clone(&database);
+        tokio::spawn(async move {
+            let held = database.begin_async().await.expect("begin after");
+            held.with(|connection| insert(connection, "after"))
+                .expect("insert after");
+            held.commit().expect("commit after");
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!other.is_finished(), "a second write ran beside the held one");
+    // Another task's read does not see the held write's row; the task that
+    // holds it reads it, and its nested writes join it, one that fails
+    // rolled back to its savepoint.
+    assert_eq!(count_elsewhere(&database).await, 0);
+    assert_eq!(database.read(count).expect("read in the held write"), 1);
+    database
+        .write(|connection| insert(connection, "nested"))
+        .expect("a nested write");
+    let failed: Result<(), Error> = database.write(|connection| {
+        insert(connection, "rolled back")?;
+        Err(Error::Invalid("no".to_owned()))
+    });
+    assert!(failed.is_err());
+    held.commit().expect("commit");
+    other.await.expect("the other write");
+    assert_eq!(database.read(count).expect("read"), 3);
+}
+
+#[tokio::test]
+async fn a_held_write_that_drops_rolls_back() {
+    let (_dir, database) = file();
+    {
+        let held = database.begin_async().await.expect("begin");
+        held.with(|connection| insert(connection, "dropped"))
+            .expect("insert");
+    }
+    assert_eq!(database.read(count).expect("read"), 0);
+    database
+        .write(|connection| insert(connection, "kept"))
+        .expect("a write after");
+    assert_eq!(database.read(count).expect("read"), 1);
+}
+
+/// The rows a reading connection sees, read on another thread.
+async fn count_elsewhere(database: &Arc<Database>) -> i64 {
+    let database = Arc::clone(database);
+    tokio::task::spawn_blocking(move || database.read(count))
+        .await
+        .expect("the read")
+        .expect("read")
+}

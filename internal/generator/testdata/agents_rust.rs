@@ -1,9 +1,11 @@
 //! fixture-agent-runs-db end to end in the Rust repositories and runtime
-//! (D158, D183, D193), run by TestRustAgentRunsEndToEnd: agents as rows,
-//! each run in a fresh sandbox instance holding a token its task bounds,
-//! autonomy per operation, budgets and stop switches. The generated
-//! create.sql is applied in a schema of the test's own at
-//! AGENTS_TEST_DATABASE_URL, and the cases are the TypeScript
+//! (D158, D183, D193, #618), run by TestRustAgentRunsEndToEnd: agents as
+//! rows, each run in a fresh sandbox instance holding a token its task
+//! bounds, autonomy per operation, budgets and stop switches. Each case
+//! runs on the database RUST_E2E_STORE names (tests/backend): a SQLite file
+//! with the build's SQLite DDL applied, or a schema of the test's own at
+//! RUST_E2E_DATABASE_URL with create.sql applied; each prints its answers,
+//! which the Go test holds equal on the two. The cases are the TypeScript
 //! repositories' (tsgen's agents.test.ts), through the runtime's
 //! orm::agents, orm::inbound and orm::notify over the generated
 //! repositories. The agent routes are served over HTTP on a local port;
@@ -14,13 +16,16 @@
 //! the example's vault broker into a stand-in site's header. An SMS relay
 //! stand-in sends the approvals' requests.
 
+mod backend;
+
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use runtime::access::{issue_grant, revoke_grant, IssueGrant};
+use backend::{answer, in_tx, rows_of, Backend};
+use runtime::access::IssueGrant;
 use runtime::orm::agents::{
     params_hash, AgentRunRequest, AgentSandboxTool, AgentTool, AgentToolContext, AgentToolRun,
     Agents, AgentsError, Autonomy, FollowUp, GateOutcome, OnReturn, OperationClass, PrincipalRef,
@@ -28,9 +33,9 @@ use runtime::orm::agents::{
 };
 use runtime::orm::inbound::{Inbound, ReceivedMessage};
 use runtime::orm::notify::{Notifier, ReplyInput};
-use runtime::orm::postgres::{deadpool_postgres, tokio_postgres, Repositories as Untyped};
+use runtime::orm::store::{Store, StoreGrants, TxRepositories};
 use runtime::orm::rowfeatures::RowRef;
-use runtime::orm::search_tables::{index_search, SearchIndexing, SearchOptions};
+use runtime::orm::search_tables::{SearchIndexing, SearchOptions};
 use runtime::orm::{FindOptions, OrderBy, Values, WriteOptions};
 use runtime::providers::{
     providers_from, run_agent_instance, AgentInstanceOptions, ChannelAdapter, ChannelHealth,
@@ -43,7 +48,6 @@ use runtime::providers::{
 use runtime::queue::QueueDefinition;
 use runtime::{BoxError, Principal, PrincipalKind};
 use serde_json::{json, Map, Value};
-use types::orm::postgres::Repositories;
 
 const SITE_KEY: &str = "site-key-4b9e17c2";
 const VAULT_TOKEN: &str = "vault-broker-token-9d2c";
@@ -384,7 +388,7 @@ struct FollowUpTask;
 
 #[async_trait]
 impl FollowUp for FollowUpTask {
-    async fn follow_up(&self, repositories: &Untyped<'_, deadpool_postgres::Transaction<'_>>, _run: &Values, row: &RowRef, question: &str) -> Result<Option<RowRef>, BoxError> {
+    async fn follow_up(&self, repositories: &TxRepositories<'_, '_>, _run: &Values, row: &RowRef, question: &str) -> Result<Option<RowRef>, BoxError> {
         let made = repositories
             .table("Task")?
             .create_one(&values(json!({ "title": format!("Follow up: {question}"), "state": "open", "details": format!("asked on {}", row.key), "createdAt": "2026-11-26T12:00:00Z" })))
@@ -398,7 +402,7 @@ struct ReturnTask;
 
 #[async_trait]
 impl OnReturn for ReturnTask {
-    async fn on_return(&self, repositories: &Untyped<'_, deadpool_postgres::Transaction<'_>>, _run: &Values, row: &RowRef) -> Result<(), BoxError> {
+    async fn on_return(&self, repositories: &TxRepositories<'_, '_>, _run: &Values, row: &RowRef) -> Result<(), BoxError> {
         repositories
             .table("Task")?
             .update_one(&json!(row.key), &values(json!({ "state": "queued", "assignee": null })), &WriteOptions::default())
@@ -412,12 +416,6 @@ fn tool(description: &str, required: &[&str], class: OperationClass, run: Arc<dy
     AgentTool::new(description, json!({ "type": "object", "required": required, "properties": properties }), class, run)
 }
 
-async fn connect(config: &tokio_postgres::Config) -> tokio_postgres::Client {
-    let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
-    tokio::spawn(connection);
-    client
-}
-
 struct Ids {
     a: String,
     b: String,
@@ -429,9 +427,8 @@ struct Ids {
 }
 
 struct World {
-    pool: deadpool_postgres::Pool,
-    admin: tokio_postgres::Client,
-    schema: String,
+    backend: Backend,
+    store: Store,
     agents: Agents,
     notifier: Notifier,
     inbound: Inbound,
@@ -449,17 +446,8 @@ struct World {
 }
 
 async fn world() -> World {
-    let url = std::env::var("AGENTS_TEST_DATABASE_URL").expect("AGENTS_TEST_DATABASE_URL names the database");
-    let config: tokio_postgres::Config = url.parse().unwrap();
-    let admin = connect(&config).await;
-    let schema = format!("agents_rust_{}", nanos());
-    admin.batch_execute(&format!("CREATE SCHEMA {schema}")).await.unwrap();
-    let mut scoped = config;
-    scoped.options(format!("-c search_path={schema},public"));
-    let client = connect(&scoped).await;
-    client.batch_execute(include_str!("../create.sql")).await.unwrap();
-    let manager = deadpool_postgres::Manager::new(scoped, tokio_postgres::NoTls);
-    let pool = deadpool_postgres::Pool::builder(manager).max_size(16).build().unwrap();
+    let backend = Backend::open("agents_rust", include_str!("../create.sqlite.sql"), include_str!("../create.sql")).await;
+    let store = backend.store();
 
     let sms = Sms::default();
     let site = Site::default();
@@ -523,7 +511,7 @@ async fn world() -> World {
     let endpoint = format!("http://{}/api/agents", listener.local_addr().unwrap());
     let transcripts = Transcripts::default();
     let requests = QueueDefinition::parse(types::queues::AGENT_RUN_REQUEST_QUEUE).unwrap();
-    let agents = Agents::new(types::orm::postgres::tables(pool.clone()), requests.clone(), &endpoint)
+    let agents = Agents::new(store.clone(), requests.clone(), &endpoint)
         .unwrap()
         .with_providers(providers.clone())
         .with_tool("read_task", tool("Reads a task by its key.", &["key"], OperationClass::Read, Arc::new(ReadTask)))
@@ -555,7 +543,7 @@ async fn world() -> World {
         .with_watch_seconds(3600);
     let dispatch = QueueDefinition::parse(types::queues::NOTICE_WORK_QUEUE).unwrap();
     let [(approve, approve_action), (deny, deny_action)] = agents.reply_actions();
-    let notifier = Notifier::new(types::orm::postgres::tables(pool.clone()), dispatch)
+    let notifier = Notifier::new(store.clone(), dispatch)
         .unwrap()
         .with_providers(providers.clone())
         .with_reply("approval.requested", approve, approve_action)
@@ -564,7 +552,7 @@ async fn world() -> World {
     // D157's inbound path: a party's message becomes a message row and a
     // run request, and a send to a party asks the agent's policy.
     let runs = QueueDefinition::parse(types::queues::RUN_REQUEST_QUEUE).unwrap();
-    let inbound = Inbound::new(types::orm::postgres::tables(pool.clone()), notifier.clone(), runs)
+    let inbound = Inbound::new(store.clone(), notifier.clone(), runs)
         .unwrap()
         .with_providers(providers)
         .with_approval(agents.send_approval());
@@ -575,11 +563,10 @@ async fn world() -> World {
         axum::serve(listener, router).await.unwrap();
     });
 
-    let mut client = pool.get().await.unwrap();
+    let mut client = store.client().await.unwrap();
     let tx = client.transaction().await.unwrap();
     let (ann, boss) = {
-        let r = Repositories::new(&tx).unwrap().as_system();
-        let r = r.untyped();
+        let r = tx.db().repositories(store.definition().unwrap()).unwrap().as_system().with_rules_of(&store);
         let create = async |table: &str, row: Value| text(&r.table(table).unwrap().create_one(&values(row)).await.unwrap(), "id");
         let ann = create("Account", json!({ "email": "ann@example.test" })).await;
         let boss = create("Account", json!({ "email": "boss@example.test" })).await;
@@ -619,11 +606,10 @@ async fn world() -> World {
 
     // The work: two tasks about a pump, the first with a note and an
     // invoice.
-    let mut client = pool.get().await.unwrap();
+    let mut client = store.client().await.unwrap();
     let tx = client.transaction().await.unwrap();
     let ids = {
-        let r = Repositories::new(&tx).unwrap().as_system();
-        let r = r.untyped();
+        let r = tx.db().repositories(store.definition().unwrap()).unwrap().as_system().with_rules_of(&store);
         let create = async |table: &str, row: Value| text(&r.table(table).unwrap().create_one(&values(row)).await.unwrap(), "id");
         let a = create("Task", json!({ "title": "Pump overhaul", "details": "replace the pump seal", "state": "open", "createdAt": "2026-11-26T12:00:00Z" })).await;
         let b = create("Task", json!({ "title": "Pump spare", "details": "a pump in storage", "state": "open", "createdAt": "2026-11-26T12:00:00Z" })).await;
@@ -636,9 +622,8 @@ async fn world() -> World {
     drop(client);
 
     let w = World {
-        pool,
-        admin,
-        schema,
+        backend,
+        store,
         agents,
         notifier,
         inbound,
@@ -661,28 +646,60 @@ async fn world() -> World {
 impl World {
     /// Indexes every row the search index queue names (D155).
     async fn index_all(&self) {
-        let definition = types::orm::postgres_definition().unwrap();
-        loop {
-            let mut client = self.pool.get().await.unwrap();
-            let rows = client
-                .query(
-                    "DELETE FROM search_indexing_queue WHERE id IN (SELECT id FROM search_indexing_queue WHERE state = 'ready' LIMIT 100) RETURNING source_table, source_key::text",
-                    &[],
-                )
-                .await
-                .unwrap();
-            if rows.is_empty() {
-                return;
-            }
-            for row in rows {
-                let message = SearchIndexing { source_table: row.get(0), source_key: row.get(1) };
-                index_search(&mut client, definition, &message, &SearchOptions::default()).await.unwrap();
-            }
+        let definition = self.store.definition().unwrap();
+        match &self.backend {
+            Backend::Postgres { pool, .. } => loop {
+                let mut client = pool.get().await.unwrap();
+                let rows = client
+                    .query(
+                        "DELETE FROM search_indexing_queue WHERE id IN (SELECT id FROM search_indexing_queue WHERE state = 'ready' LIMIT 100) RETURNING source_table, source_key::text",
+                        &[],
+                    )
+                    .await
+                    .unwrap();
+                if rows.is_empty() {
+                    return;
+                }
+                for row in rows {
+                    let message = SearchIndexing { source_table: row.get(0), source_key: row.get(1) };
+                    runtime::orm::search_tables::index_search(&mut client, definition, &message, &SearchOptions::default()).await.unwrap();
+                }
+            },
+            Backend::Sqlite { database, .. } => loop {
+                let done = database
+                    .write(|connection| {
+                        let mut statement = connection
+                            .prepare("SELECT id, source_table, source_key FROM search_indexing_queue WHERE state = 'ready' LIMIT 100")
+                            .unwrap();
+                        let rows: Vec<(String, String, String)> = statement
+                            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                            .unwrap()
+                            .map(Result::unwrap)
+                            .collect();
+                        for (id, source_table, source_key) in &rows {
+                            connection.execute("DELETE FROM search_indexing_queue WHERE id = ?1", [id]).unwrap();
+                            let message = SearchIndexing { source_table: source_table.clone(), source_key: source_key.clone() };
+                            runtime::orm::search_tables::sqlite::index_search(connection, definition, &message, &SearchOptions::default())?;
+                        }
+                        Ok::<_, runtime::orm::Error>(rows.is_empty())
+                    })
+                    .unwrap();
+                if done {
+                    return;
+                }
+            },
         }
     }
 
-    async fn execute(&self, sql: &str) {
-        self.pool.get().await.unwrap().batch_execute(sql).await.unwrap();
+    /// Makes the run requests of `step` that wait due now: time passing.
+    async fn due(&self, step: &str) {
+        self.backend
+            .execute(
+                "UPDATE agent_run_request_queue SET due_at = now() WHERE step = $1 AND state = 'ready'",
+                "UPDATE agent_run_request_queue SET due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second') WHERE step = ?1 AND state = 'ready'",
+                &[step],
+            )
+            .await;
     }
 
     /// Runs every due message of the notifier's and the dispatcher's
@@ -716,9 +733,7 @@ impl World {
     }
 
     async fn rows(&self, table: &str, filter: Value) -> Vec<Values> {
-        let client = self.pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
-        repos.untyped().table(table).unwrap().find_many(Some(&values(filter)), &FindOptions::default()).await.unwrap().rows
+        rows_of(&self.store, table, filter, None).await
     }
 
     async fn row(&self, table: &str, id: &str) -> Values {
@@ -736,10 +751,10 @@ impl World {
     /// The newest run of an agent.
     async fn run_of(&self, agent: &str) -> Values {
         let id = self.agent_id(agent).await;
-        let client = self.pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
+        let client = self.store.client().await.unwrap();
+        let repos = client.db().repositories(self.store.definition().unwrap()).unwrap().as_system();
         let options = FindOptions { order_by: vec![OrderBy::desc("createdAt")], limit: Some(1), ..FindOptions::default() };
-        repos.untyped().table("AgentRun").unwrap().find_many(Some(&values(json!({ "agent": { "eq": id } }))), &options).await.unwrap().rows.remove(0)
+        repos.table("AgentRun").unwrap().find_many(Some(&values(json!({ "agent": { "eq": id } }))), &options).await.unwrap().rows.remove(0)
     }
 
     fn token(&self, run: &str) -> String {
@@ -772,7 +787,7 @@ impl World {
     /// Makes the dispatcher's watches due and runs them: the runs whose
     /// instances ended end.
     async fn watch(&self) {
-        self.execute("UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'watch' AND state = 'ready'").await;
+        self.due("watch").await;
         self.drain().await;
     }
 
@@ -809,9 +824,9 @@ impl World {
     }
 
     async fn request(&self, input: AgentRunRequest) -> Result<(), AgentsError> {
-        let mut client = self.pool.get().await.unwrap();
+        let mut client = self.store.client().await.unwrap();
         let tx = client.transaction().await.unwrap();
-        self.agents.request(&tx, input, Duration::ZERO).await?;
+        self.agents.request(tx.db(), input, Duration::ZERO).await?;
         tx.commit().await.unwrap();
         Ok(())
     }
@@ -852,11 +867,9 @@ impl World {
     }
 
     async fn grant(&self, holder: &str, role: &str, table: &str, key: &str) -> String {
-        let client = self.pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
-        let issued = issue_grant(
-            repos.untyped(),
-            &IssueGrant {
+        let issued = in_tx(&self.store, async |repos| {
+            repos
+                .issue_grant(&IssueGrant {
                 holder: holder.to_owned(),
                 holder_kind: PrincipalKind::Party,
                 role: role.to_owned(),
@@ -865,32 +878,23 @@ impl World {
                 starts_at: None,
                 ends_at: None,
                 ends_when: None,
-            },
-        )
+            })
+            .await
+        })
         .await
         .unwrap();
         text(&issued.grant, "id")
     }
 
     async fn create(&self, table: &str, row: Value) -> String {
-        let mut client = self.pool.get().await.unwrap();
-        let tx = client.transaction().await.unwrap();
-        let id = {
-            let repos = Repositories::new(&tx).unwrap().as_system();
-            text(&repos.untyped().table(table).unwrap().create_one(&values(row)).await.unwrap(), "id")
-        };
-        tx.commit().await.unwrap();
-        id
+        in_tx(&self.store, async |repos| text(&repos.table(table).unwrap().create_one(&values(row)).await.unwrap(), "id")).await
     }
 
     async fn update(&self, table: &str, id: &str, row: Value) {
-        let mut client = self.pool.get().await.unwrap();
-        let tx = client.transaction().await.unwrap();
-        {
-            let repos = Repositories::new(&tx).unwrap().as_system();
-            repos.untyped().table(table).unwrap().update_one(&json!(id), &values(row), &WriteOptions::default()).await.unwrap();
-        }
-        tx.commit().await.unwrap();
+        in_tx(&self.store, async |repos| {
+            repos.table(table).unwrap().update_one(&json!(id), &values(row), &WriteOptions::default()).await.unwrap();
+        })
+        .await;
     }
 
     async fn until(&self, what: &str, cond: impl AsyncFn() -> bool) {
@@ -907,9 +911,9 @@ impl World {
             let _ = self.sandbox.cancel(&instance).await;
         }
         self.server.abort();
-        let World { pool, admin, schema, .. } = self;
-        pool.close();
-        admin.batch_execute(&format!("DROP SCHEMA {schema} CASCADE")).await.unwrap();
+        let World { backend, store, agents, notifier, inbound, .. } = self;
+        drop((store, agents, notifier, inbound));
+        backend.drop_database().await;
     }
 }
 
@@ -922,9 +926,9 @@ async fn a_scheduled_run_reads_only_its_target() {
     // deadline itself (the Rust server's behavior worker does, D188), so
     // the test hands the notifier the event the deadline raises.
     {
-        let mut client = w.pool.get().await.unwrap();
+        let mut client = w.store.client().await.unwrap();
         let tx = client.transaction().await.unwrap();
-        w.notifier.from_behavior_event(&tx, "Task", "schedules", "run", a, Some(&json!({ "name": "review" }))).await.unwrap();
+        w.notifier.from_behavior_event(tx.db(), "Task", "schedules", "run", a, Some(&json!({ "name": "review" }))).await.unwrap();
         tx.commit().await.unwrap();
     }
     w.drain().await;
@@ -944,7 +948,7 @@ async fn a_scheduled_run_reads_only_its_target() {
     let parts = |token: &str| {
         axum::http::Request::get("/").header("authorization", format!("Bearer {token}")).body(()).unwrap().into_parts().0
     };
-    let plain = runtime::access::GrantAuthenticator::new(types::orm::postgres::tables(w.pool.clone())).unwrap();
+    let plain = StoreGrants::new(w.store.clone()).unwrap();
     let refused = runtime::Authenticator::authenticate(&plain, &parts(&w.token(&id))).await.unwrap_err();
     assert_eq!(refused.status.as_u16(), 401);
     let runs = w.agents.authenticator(None).unwrap();
@@ -960,9 +964,9 @@ async fn a_scheduled_run_reads_only_its_target() {
     let entries = w.transcript(&id).await;
     assert!(entries.iter().any(|e| e["kind"] == "call" && e["tool"] == "search" && e["outcome"] == "done"), "{entries:?}");
     // The run is on the timeline of the row that started it.
-    let client = w.pool.get().await.unwrap();
-    let repos = Repositories::new(&client).unwrap().as_system();
-    let backlinks = repos.untyped().references().unwrap().referenced_by(&RowRef::new("Task", a.clone()), None).await.unwrap();
+    let client = w.store.client().await.unwrap();
+    let repos = client.db().repositories(w.store.definition().unwrap()).unwrap().as_system();
+    let backlinks = repos.references().unwrap().referenced_by(&RowRef::new("Task", a.clone()), None).await.unwrap();
     assert!(backlinks.items.iter().any(|l| l.table == "AgentRun" && l.key == id), "{backlinks:?}");
     drop(repos);
     drop(client);
@@ -971,6 +975,16 @@ async fn a_scheduled_run_reads_only_its_target() {
     let done = w.run(&id).await;
     assert_eq!((text(&done, "status"), text(&done, "outcome"), number(&done, "reads")), ("done".into(), "done".into(), 3), "{done:?}");
     assert_eq!(w.mcp(&id, "read_task", json!({ "key": a })).await.0, 401);
+    answer(
+        "a deadline's run",
+        json!({
+            "trigger": text(&started, "trigger"),
+            "status": text(&done, "status"),
+            "reads": number(&done, "reads"),
+            "plain": refused.status.as_u16(),
+            "kind": format!("{:?}", run.kind),
+        }),
+    );
     w.drop().await;
 }
 
@@ -1078,6 +1092,11 @@ async fn an_ask_waits_for_an_approval_on_any_channel() {
     w.watch().await;
     let done = w.run(&id).await;
     assert_eq!((text(&done, "status"), number(&done, "approvals"), number(&done, "writes")), ("done".into(), 1, 1), "{done:?}");
+    let paid = w.paid().await;
+    answer(
+        "an ask",
+        json!({ "reply": outcome.outcome, "approval": text(&used, "state"), "via": text(&used, "decidedVia"), "paid": paid, "status": text(&done, "status") }),
+    );
     w.drop().await;
 }
 
@@ -1115,6 +1134,12 @@ async fn a_changed_amount_asks_again() {
     assert_eq!(refused.code, "money_asks");
     let read = w.agents.gate(&principal, "read_task", &json!({ "key": a }), Some(OperationClass::Read), None).await.unwrap();
     assert!(matches!(read, GateOutcome::Refused { status: 428, .. }), "{read:?}");
+    let paid = w.paid().await;
+    let superseded = text(&w.row("AgentApproval", &text(&asked[0], "id")).await, "state");
+    answer(
+        "a changed amount",
+        json!({ "asked": asked.iter().map(|r| r["params"]["amount"].clone()).collect::<Vec<_>>(), "paid": paid, "superseded": superseded, "refused": refused.code }),
+    );
     w.watch().await;
     w.drop().await;
 }
@@ -1132,6 +1157,10 @@ async fn a_budget_cap_pauses_the_agent() {
     assert_eq!((control["paused"].clone(), text(&control, "pausedReason")), (json!(true), "budget".to_owned()), "{control:?}");
     let capped = w.run(&id).await;
     assert_eq!((text(&capped, "status"), text(&capped, "outcome")), ("cancelled".into(), "budget".into()), "{capped:?}");
+    answer(
+        "a budget cap",
+        json!({ "paused": control["paused"], "reason": text(&control, "pausedReason"), "status": text(&capped, "status"), "outcome": text(&capped, "outcome") }),
+    );
     // The warning went out as the usage crossed half the limit.
     w.drain().await;
     assert!(w.sms.sent().iter().any(|(_, body)| body.contains("agent.budgetWarning")), "{:?}", w.sms.sent());
@@ -1243,9 +1272,15 @@ async fn the_transcript_holds_no_credential_value() {
     assert!(w.approvals(&id).await.is_empty());
     let token = w.token(&id);
     let all_approvals = serde_json::to_string(&w.rows("AgentApproval", json!({})).await).unwrap();
+    let mut clean = true;
     for place in [stored, serde_json::to_string(&done).unwrap(), serde_json::to_string(&entries).unwrap(), all_approvals] {
         assert!(!place.contains(SITE_KEY) && !place.contains(VAULT_TOKEN) && !place.contains(&token));
+        clean = clean && !place.contains(SITE_KEY);
     }
+    answer(
+        "a transcript",
+        json!({ "status": text(&done, "status"), "untrusted": number(&done, "untrusted"), "uses": uses.len(), "clean": clean }),
+    );
     w.drop().await;
 }
 
@@ -1367,8 +1402,8 @@ async fn a_partys_run_keeps_to_its_grants_paths_and_an_entered_sender_asks() {
     // The paths end with the grant: the tenant's grant revoked, the run
     // reaches no note.
     {
-        let client = w.pool.get().await.unwrap();
-        revoke_grant(&client, types::orm::postgres_definition().unwrap(), &grant, SystemTime::now()).await.unwrap();
+        let client = w.store.client().await.unwrap();
+        client.db().revoke_grant(w.store.definition().unwrap(), &grant, SystemTime::now()).await.unwrap();
     }
     assert_eq!(w.mcp(&verified, "read_note", json!({ "key": note_a })).await.2["status"], json!(404));
 
@@ -1409,13 +1444,13 @@ async fn an_unanswered_question_makes_a_follow_up_row() {
     w.watch().await;
     let listed = |w: &World| {
         let a = a.clone();
-        let pool = w.pool.clone();
+        let store = w.store.clone();
         async move {
-            let mut client = pool.get().await.unwrap();
+            let mut client = store.client().await.unwrap();
             let tx = client.transaction().await.unwrap();
             let listed = {
-                let repos = Repositories::new(&tx).unwrap().as_system();
-                repos.untyped().table("Task").unwrap().operation("comments", "listMessages", &json!(a), &json!({}), &WriteOptions::default()).await.unwrap()
+                let repos = tx.db().repositories(store.definition().unwrap()).unwrap().as_system().with_rules_of(&store);
+                repos.table("Task").unwrap().operation("comments", "listMessages", &json!(a), &json!({}), &WriteOptions::default()).await.unwrap()
             };
             tx.commit().await.unwrap();
             listed["items"].as_array().cloned().unwrap_or_default()
@@ -1424,7 +1459,7 @@ async fn an_unanswered_question_makes_a_follow_up_row() {
     assert_eq!(listed(&w).await.iter().map(|m| m["body"].clone()).collect::<Vec<_>>(), vec![json!("Which supplier?")]);
     assert_eq!(number(&w.run(&id).await, "messagesSent"), 1);
     // Nobody answered by the deadline: a follow-up row.
-    w.execute("UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'followUp' AND state = 'ready'").await;
+    w.due("followUp").await;
     w.drain().await;
     assert_eq!(w.rows("Task", json!({ "title": { "eq": "Follow up: Which supplier?" } })).await.len(), 1);
     // Answered in the thread, the next ask makes none.
@@ -1433,15 +1468,21 @@ async fn an_unanswered_question_makes_a_follow_up_row() {
     w.watch().await;
     let asked = listed(&w).await.into_iter().find(|m| m["body"] == "Which day?").unwrap();
     {
-        let mut client = w.pool.get().await.unwrap();
+        let mut client = w.store.client().await.unwrap();
         let tx = client.transaction().await.unwrap();
         {
-            let repos = Repositories::new(&tx).unwrap().acting(Some(w.ids.ann.clone())).with_caller(runtime::orm::Caller { subject: w.ids.ann.clone(), ..runtime::orm::Caller::default() });
-            repos.untyped().table("Task").unwrap().operation("comments", "post", &json!(a), &json!({ "body": "Tuesday", "thread": asked["id"] }), &WriteOptions::default()).await.unwrap();
+            let repos = tx
+                .db()
+                .repositories(w.store.definition().unwrap())
+                .unwrap()
+                .acting(Some(w.ids.ann.clone()))
+                .with_caller(runtime::orm::Caller { subject: w.ids.ann.clone(), ..runtime::orm::Caller::default() })
+                .with_rules_of(&w.store);
+            repos.table("Task").unwrap().operation("comments", "post", &json!(a), &json!({ "body": "Tuesday", "thread": asked["id"] }), &WriteOptions::default()).await.unwrap();
         }
         tx.commit().await.unwrap();
     }
-    w.execute("UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'followUp' AND state = 'ready'").await;
+    w.due("followUp").await;
     w.drain().await;
     assert!(w.rows("Task", json!({ "title": { "eq": "Follow up: Which day?" } })).await.is_empty());
     // Asking on a row outside its targets is refused.
@@ -1466,7 +1507,7 @@ async fn a_failed_sandbox_is_started_again_by_retries() {
     assert_eq!(w.mcp(&id, "read_task", json!({ "key": a })).await.0, 401);
     // Retries' backoff holds the next start until retryAt.
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    w.execute("UPDATE agent_run_request_queue SET due_at = now() WHERE state = 'ready' AND step = 'start'").await;
+    w.due("start").await;
     w.drain().await;
     let running = w.run(&id).await;
     assert_eq!((text(&running, "status"), number(&running, "attempts"), text(&running, "leaseHolder")), ("running".into(), 2, "agent-dispatcher".into()), "{running:?}");

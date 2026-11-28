@@ -1,5 +1,5 @@
-//! The notifier over a database's Postgres repositories (D153, D191), the
-//! TypeScript runtime's `createNotifier`: raising, routing, delivering,
+//! The notifier over a database's repositories on either dialect (D153,
+//! D191, #618), the TypeScript runtime's `createNotifier`: raising, routing, delivering,
 //! escalating and replies, over the notifier's tables, the channel
 //! identities and the dispatch queue its database declares.
 
@@ -13,7 +13,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::super::parties::identity_lapsed;
-use super::super::postgres::{deadpool_postgres, Repositories, Tables};
+#[cfg(feature = "postgres")]
+use super::super::postgres::deadpool_postgres;
+use super::super::store::{
+    Db, IntoDb, PartQueue, PgClient, PoolTransaction, Store, StoreRepositories,
+};
 use super::super::{
     AccessCaller, Caller, Definition, Error, EventDefinition, FindOptions, OrderBy, Values,
     WriteOptions, ACCESS_ROLES,
@@ -25,16 +29,14 @@ use super::{
     DEFAULT_DELIVERY_RETENTION_DAYS, DEFAULT_DELIVERY_TIMEOUT_SECONDS, DIGEST, HEALTH_TTL_MS,
     INAPP, NORMAL, RECORD, UNDO_VERB, URGENT,
 };
-use crate::access::{active_grants, reaches_of, ActiveGrantsFilter};
+use crate::access::{reaches_of, ActiveGrantsFilter};
 use crate::auth::{covers, GrantReach, Principal, PrincipalKind};
 use crate::providers::{
     time as wire_time, ChannelAdapter, OutboundMessage, Providers, RuntimeInterface, WebhookRequest,
 };
-use crate::queue::{enqueue_in, Claim, PostgresQueue, QueueDefinition, QueueError, Slot};
+use crate::queue::{Claim, QueueDefinition, QueueError, Slot};
 use crate::worker::WorkerQueue;
 use crate::BoxError;
-
-use deadpool_postgres::GenericClient;
 
 /// The refusal or failure of a notifier call.
 #[derive(Debug)]
@@ -76,12 +78,14 @@ impl From<QueueError> for NotifierError {
     }
 }
 
+#[cfg(feature = "postgres")]
 impl From<deadpool_postgres::tokio_postgres::Error> for NotifierError {
     fn from(err: deadpool_postgres::tokio_postgres::Error) -> Self {
         NotifierError::Failed(crate::error::chain(&err))
     }
 }
 
+#[cfg(feature = "postgres")]
 impl From<deadpool_postgres::PoolError> for NotifierError {
     fn from(err: deadpool_postgres::PoolError) -> Self {
         NotifierError::Failed(format!("the database is unreachable: {err}"))
@@ -342,7 +346,8 @@ struct Preference {
 }
 
 struct Inner {
-    tables: Tables,
+    tables: Store,
+    queue: PartQueue<NoticeWork>,
     definition: &'static Definition,
     dispatch: QueueDefinition,
     parts: Parts,
@@ -487,12 +492,54 @@ fn new_id() -> String {
     uuid::Uuid::new_v4().hyphenated().to_string()
 }
 
+/// A behavior's event (D104): its kind is the use's member, a dot and the
+/// behavior's kind.
+fn behavior_event(
+    table: &str,
+    member: &str,
+    kind: &str,
+    key: &str,
+    payload: Option<&Value>,
+) -> RaiseInput {
+    RaiseInput {
+        table: Some(table.to_owned()),
+        key: Some(key.to_owned()),
+        kind: format!("{member}.{kind}"),
+        payload: payload.cloned().map(obj).unwrap_or_default(),
+        ..RaiseInput::default()
+    }
+}
+
+/// `reference.cleared` on the row that held a cleared reference (D154).
+fn cleared_event(message: &Value) -> RaiseInput {
+    let member = |name: &str| {
+        message
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut payload = Values::new();
+    payload.insert("targetTable".to_owned(), json!(member("targetTable")));
+    payload.insert("targetKey".to_owned(), json!(member("targetKey")));
+    payload.insert("role".to_owned(), json!(member("role")));
+    RaiseInput {
+        table: Some(member("holderTable")),
+        key: Some(member("holderKey")),
+        kind: "reference.cleared".to_owned(),
+        payload,
+        ..RaiseInput::default()
+    }
+}
+
 impl Notifier {
     /// The notifier over `tables`, the database's repositories, with
     /// `dispatch`, its `@notifier("dispatch")` queue's descriptor. It
     /// refuses a database without the inbox, the deliveries or the routes.
-    pub fn new(tables: Tables, dispatch: QueueDefinition) -> Result<Self> {
+    pub fn new(tables: impl Into<Store>, dispatch: QueueDefinition) -> Result<Self> {
+        let tables: Store = tables.into();
         let definition = tables.definition()?;
+        let queue = PartQueue::of(&tables, dispatch.clone())?;
         let part = |name: &str| {
             definition
                 .tables
@@ -520,6 +567,7 @@ impl Notifier {
         Ok(Self {
             inner: Arc::new(Inner {
                 tables,
+                queue,
                 definition,
                 dispatch,
                 parts,
@@ -639,8 +687,8 @@ impl Notifier {
             .map_or_else(SystemTime::now, |now| now())
     }
 
-    fn pool(&self) -> &deadpool_postgres::Pool {
-        self.inner.tables.pool()
+    fn store(&self) -> &Store {
+        &self.inner.tables
     }
 
     /// The dispatch queue's descriptor.
@@ -650,8 +698,8 @@ impl Notifier {
 
     /// The repositories over `client` as the system, which reads every
     /// row, with the keys of the encrypted fields.
-    fn sys<'c, C: GenericClient + Sync>(&'c self, client: &'c C) -> Result<Repositories<'c, C>> {
-        let mut repositories = Repositories::new(client, self.inner.definition)?.as_system();
+    fn sys<'c, C: PgClient>(&'c self, client: Db<'c, C>) -> Result<StoreRepositories<'c, C>> {
+        let mut repositories = client.repositories(self.inner.definition)?.as_system();
         if let Some(keys) = self.inner.tables.keys() {
             repositories = repositories.with_keys(keys.as_ref());
         }
@@ -660,12 +708,13 @@ impl Notifier {
 
     /// The repositories over `client` as `reader`, keeping to what it
     /// reads (D156).
-    fn as_reader<'c, C: GenericClient + Sync>(
+    fn as_reader<'c, C: PgClient>(
         &'c self,
-        client: &'c C,
+        client: Db<'c, C>,
         reader: &Principal,
-    ) -> Result<Repositories<'c, C>> {
-        let mut repositories = Repositories::new(client, self.inner.definition)?
+    ) -> Result<StoreRepositories<'c, C>> {
+        let mut repositories = client
+            .repositories(self.inner.definition)?
             .acting(Some(reader.subject.clone()))
             .with_access(AccessCaller::of(Some(reader)));
         if let Some(keys) = self.inner.tables.keys() {
@@ -710,9 +759,9 @@ impl Notifier {
     }
 
     /// The row `key` of `table`, read as the system.
-    async fn row_of<C: GenericClient + Sync>(
+    async fn row_of<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         table: &str,
         key: &str,
     ) -> Result<Option<Values>> {
@@ -816,14 +865,14 @@ impl Notifier {
         tracing::warn!(slot = %channel.slot, kind = %channel.kind, detail = detail.unwrap_or_default(), "channel down");
         // One alert while it is down: an alert of the slot not within the
         // hour stands.
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let hour_ago = self.now() - Duration::from_secs(3600);
         let mut filter = Values::new();
         filter.insert("eventKind".to_owned(), eq("channel.down"));
         filter.insert("subjectKey".to_owned(), eq(channel.slot.as_str()));
         filter.insert("createdAt".to_owned(), json!({ "gt": at_text(hour_ago) }));
         let recent = self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.parts.inbox)?
             .find_one(Some(&filter), &FindOptions::default())
             .await?;
@@ -837,10 +886,10 @@ impl Notifier {
         if let Some(detail) = detail {
             payload.insert("detail".to_owned(), json!(detail));
         }
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         self.raise_in(
-            &tx,
+            tx.db(),
             RaiseInput {
                 kind: "channel.down".to_owned(),
                 key: Some(channel.slot.clone()),
@@ -860,21 +909,19 @@ impl Notifier {
     /// Raises `input` in `client`'s transaction, the transaction of the
     /// change that caused it, and answers its id. A table's own event is one
     /// its `@event` declares; a kind it does not declare is refused, and the
-    /// caller's transaction with it.
-    pub async fn raise<C: GenericClient + Sync>(
-        &self,
-        client: &C,
-        input: RaiseInput,
-    ) -> Result<String> {
-        self.raise_in(client, input, false).await
+    /// caller's transaction with it. `client` is a Postgres client or a
+    /// [`Db`]; in a caller's own rusqlite transaction, use
+    /// [`Notifier::raise_sqlite`].
+    pub async fn raise<'c>(&self, client: impl IntoDb<'c>, input: RaiseInput) -> Result<String> {
+        self.raise_in(client.into_db(), input, false).await
     }
 
     /// Raises a behavior's event (D104), as its behavior worker's Workers
     /// method hands it: its kind is the use's member, a dot and the
     /// behavior's kind, which needs no declaration.
-    pub async fn from_behavior_event<C: GenericClient + Sync>(
+    pub async fn from_behavior_event<'c>(
         &self,
-        client: &C,
+        client: impl IntoDb<'c>,
         table: &str,
         member: &str,
         kind: &str,
@@ -882,14 +929,8 @@ impl Notifier {
         payload: Option<&Value>,
     ) -> Result<String> {
         self.raise_in(
-            client,
-            RaiseInput {
-                table: Some(table.to_owned()),
-                key: Some(key.to_owned()),
-                kind: format!("{member}.{kind}"),
-                payload: payload.cloned().map(obj).unwrap_or_default(),
-                ..RaiseInput::default()
-            },
+            client.into_db(),
+            behavior_event(table, member, kind, key, payload),
             true,
         )
         .await
@@ -899,42 +940,108 @@ impl Notifier {
     /// target's delete cleared (D154), from the cleared queue's message:
     /// its `holderTable`, `holderKey`, `targetTable`, `targetKey` and
     /// `role`.
-    pub async fn cleared<C: GenericClient + Sync>(
-        &self,
-        client: &C,
-        message: &Value,
-    ) -> Result<String> {
-        let member = |name: &str| {
-            message
-                .get(name)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
-        };
-        let mut payload = Values::new();
-        payload.insert("targetTable".to_owned(), json!(member("targetTable")));
-        payload.insert("targetKey".to_owned(), json!(member("targetKey")));
-        payload.insert("role".to_owned(), json!(member("role")));
-        self.raise_in(
-            client,
-            RaiseInput {
-                table: Some(member("holderTable")),
-                key: Some(member("holderKey")),
-                kind: "reference.cleared".to_owned(),
-                payload,
-                ..RaiseInput::default()
-            },
-            true,
-        )
-        .await
+    pub async fn cleared<'c>(&self, client: impl IntoDb<'c>, message: &Value) -> Result<String> {
+        self.raise_in(client.into_db(), cleared_event(message), true)
+            .await
     }
 
-    async fn raise_in<C: GenericClient + Sync>(
+    /// [`Notifier::raise`] in the caller's own transaction on a SQLite
+    /// file (#618): `connection` is the rusqlite transaction of the change
+    /// that caused it, which the event's message commits with.
+    #[cfg(feature = "sqlite")]
+    pub fn raise_sqlite(
         &self,
-        client: &C,
+        connection: &super::super::sqlite::rusqlite::Connection,
+        input: RaiseInput,
+    ) -> Result<String> {
+        self.raise_on(connection, input, false)
+    }
+
+    /// [`Notifier::from_behavior_event`] in the caller's own transaction
+    /// on a SQLite file: the behavior worker's, on its connection (D116).
+    #[cfg(feature = "sqlite")]
+    pub fn from_behavior_event_sqlite(
+        &self,
+        connection: &super::super::sqlite::rusqlite::Connection,
+        table: &str,
+        member: &str,
+        kind: &str,
+        key: &str,
+        payload: Option<&Value>,
+    ) -> Result<String> {
+        self.raise_on(
+            connection,
+            behavior_event(table, member, kind, key, payload),
+            true,
+        )
+    }
+
+    /// [`Notifier::cleared`] in the caller's own transaction on a SQLite
+    /// file.
+    #[cfg(feature = "sqlite")]
+    pub fn cleared_sqlite(
+        &self,
+        connection: &super::super::sqlite::rusqlite::Connection,
+        message: &Value,
+    ) -> Result<String> {
+        self.raise_on(connection, cleared_event(message), true)
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn raise_on(
+        &self,
+        connection: &super::super::sqlite::rusqlite::Connection,
         input: RaiseInput,
         undeclared: bool,
     ) -> Result<String> {
+        let row = match self.raise_row(&input, undeclared)? {
+            Some((table, key)) => {
+                let def = self.inner.definition.table(&table)?;
+                let mut filter = Values::new();
+                filter.insert(def.key.clone(), eq(key.as_str()));
+                let mut repositories =
+                    super::super::sqlite::Repositories::new(connection, self.inner.definition)?
+                        .as_system();
+                if let Some(keys) = self.inner.tables.keys() {
+                    repositories = repositories.with_keys(keys.as_ref());
+                }
+                repositories
+                    .table(&table)?
+                    .find_one(Some(&filter), &FindOptions::default())?
+            }
+            None => None,
+        };
+        let (work, id) = self.raise_work(input, row)?;
+        crate::queue::sqlite::enqueue_sqlite_in(
+            connection,
+            &self.inner.dispatch,
+            &work,
+            Duration::ZERO,
+        )?;
+        Ok(id)
+    }
+
+    pub(crate) async fn raise_in<C: PgClient>(
+        &self,
+        client: Db<'_, C>,
+        input: RaiseInput,
+        undeclared: bool,
+    ) -> Result<String> {
+        let row = match self.raise_row(&input, undeclared)? {
+            Some((table, key)) => self.row_of(client, &table, &key).await?,
+            None => None,
+        };
+        let (work, id) = self.raise_work(input, row)?;
+        client
+            .enqueue(&self.inner.dispatch, &work, Duration::ZERO)
+            .await?;
+        Ok(id)
+    }
+
+    /// Refuses an event of no table of the database, or one its table
+    /// does not declare (unless `undeclared`), and answers the row whose
+    /// members its payload reads, when it reads any.
+    fn raise_row(&self, input: &RaiseInput, undeclared: bool) -> Result<Option<(String, String)>> {
         let definition = self.definition_of(input.table.as_deref());
         if let Some(table) = &input.table {
             if definition.is_none() {
@@ -952,10 +1059,20 @@ impl Notifier {
                 )));
             }
         }
+        Ok(match (declared, &input.key, definition) {
+            (Some(declared), Some(key), Some(def)) if !declared.payload.is_empty() => {
+                Some((def.name.clone(), key.clone()))
+            }
+            _ => None,
+        })
+    }
+
+    /// The route step of `input`, its payload's declared members read
+    /// from `row`, and the event's id.
+    fn raise_work(&self, input: RaiseInput, row: Option<Values>) -> Result<(NoticeWork, String)> {
         let mut payload = Values::new();
-        if let (Some(declared), Some(key), Some(def)) = (declared, &input.key, definition) {
-            if !declared.payload.is_empty() {
-                let row = self.row_of(client, &def.name, key).await?;
+        if let Some(declared) = self.event_of(input.table.as_deref(), &input.kind) {
+            if input.key.is_some() {
                 for field in &declared.payload {
                     payload.insert(
                         field.clone(),
@@ -980,8 +1097,7 @@ impl Notifier {
         let id = same_id(&event.id);
         let mut work = NoticeWork::step("route");
         work.event = Some(serde_json::to_value(&event).map_err(failed)?);
-        enqueue_in(client, &self.inner.dispatch, &work, Duration::ZERO).await?;
-        Ok(id)
+        Ok((work, id))
     }
 
     // ---- recipients ----
@@ -1020,8 +1136,8 @@ impl Notifier {
         if !self.has_table("UserRoleGrant") {
             return Ok(Vec::new());
         }
-        let client = self.pool().get().await?;
-        let sys = self.sys(&client)?;
+        let client = self.store().client().await?;
+        let sys = self.sys(client.db())?;
         let mut filter = Values::new();
         filter.insert("userId".to_owned(), eq(recipient.id.as_str()));
         let grants = sys
@@ -1059,7 +1175,7 @@ impl Notifier {
         if kind == PrincipalKind::User {
             return Ok(Principal::new(recipient.id.as_str(), Vec::<String>::new()));
         }
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let roles = self.roles_table();
         let filter = ActiveGrantsFilter {
             holder: Some(recipient.id.clone()),
@@ -1067,7 +1183,11 @@ impl Notifier {
             ..ActiveGrantsFilter::default()
         };
         let mut grants = Vec::new();
-        for grant in active_grants(&client, self.inner.definition, &filter).await? {
+        for grant in client
+            .db()
+            .active_grants(self.inner.definition, &filter)
+            .await?
+        {
             let mut reaches: Vec<String> = Vec::new();
             if let Some(roles) = &roles {
                 let mut by_name = Values::new();
@@ -1076,7 +1196,7 @@ impl Notifier {
                     eq(grant.get("role").cloned().unwrap_or(Value::Null)),
                 );
                 let role = self
-                    .sys(&client)?
+                    .sys(client.db())?
                     .table(roles)?
                     .find_one(Some(&by_name), &FindOptions::default())
                     .await?;
@@ -1099,9 +1219,9 @@ impl Notifier {
 
     /// Whether `recipient` reads the event's record, through its table's
     /// repository as the recipient.
-    async fn reads<C: GenericClient + Sync>(
+    async fn reads<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         recipient: &RecipientRef,
         table: Option<&str>,
         key: Option<&str>,
@@ -1129,9 +1249,9 @@ impl Notifier {
 
     /// The principals a path of the record names: each step a to-one
     /// relation, the last a field of ids.
-    async fn follow_path<C: GenericClient + Sync>(
+    async fn follow_path<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         event: &RaisedEvent,
         path: &str,
     ) -> Result<Vec<String>> {
@@ -1173,9 +1293,9 @@ impl Notifier {
         Ok(Vec::new())
     }
 
-    async fn recipients_of<C: GenericClient + Sync>(
+    async fn recipients_of<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         event: &RaisedEvent,
         specs: &[Value],
     ) -> Result<Vec<RecipientRef>> {
@@ -1246,9 +1366,9 @@ impl Notifier {
 
     // ---- preferences ----
 
-    async fn preference_of<C: GenericClient + Sync>(
+    async fn preference_of<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         recipient: &RecipientRef,
         kind: &str,
         urgency: &str,
@@ -1309,30 +1429,16 @@ impl Notifier {
         })
     }
 
-    /// The wall time of `at` in `zone`, from Postgres, which holds the
-    /// zone database: its minutes of the day and its second, and its date.
-    async fn wall_of<C: GenericClient + Sync>(
+    /// The wall time of `at` in `zone`: its minutes of the day and its
+    /// second, and its date, from Postgres's zone database, or on SQLite
+    /// from the runtime's bundled one.
+    async fn wall_of<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         at: SystemTime,
         zone: &str,
     ) -> Result<(u32, u32, String)> {
-        let at = super::super::rfc3339_millis(at);
-        let row = client
-            .query_one(
-                "SELECT to_char(($1::text)::timestamptz AT TIME ZONE $2::text, 'HH24:MI:SS YYYY-MM-DD')",
-                &[&at, &zone],
-            )
-            .await?;
-        let wall: String = row.get(0);
-        let (time, date) = wall.split_once(' ').unwrap_or((&wall, ""));
-        let parts: Vec<u32> = time.split(':').filter_map(|p| p.parse().ok()).collect();
-        let (hour, minute, second) = (
-            parts.first().copied().unwrap_or(0),
-            parts.get(1).copied().unwrap_or(0),
-            parts.get(2).copied().unwrap_or(0),
-        );
-        Ok((hour * 60 + minute, second, date.to_owned()))
+        Ok(client.wall_of(at, zone).await?)
     }
 
     /// The channels a notice goes out on: its preference's, the in-app
@@ -1366,9 +1472,9 @@ impl Notifier {
         (title, text)
     }
 
-    async fn create_notice<C: GenericClient + Sync>(
+    async fn create_notice<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         recipient: &RecipientRef,
         event: &RaisedEvent,
         urgency: &str,
@@ -1459,9 +1565,9 @@ impl Notifier {
         }
     }
 
-    async fn queue_delivery<C: GenericClient + Sync>(
+    async fn queue_delivery<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         notice: &Values,
         recipient: &RecipientRef,
         channel: &str,
@@ -1485,19 +1591,15 @@ impl Notifier {
             .await?;
         let mut work = NoticeWork::step("deliver");
         work.delivery = Some(string(&delivery, "id"));
-        enqueue_in(
-            client,
-            &self.inner.dispatch,
-            &work,
-            Duration::from_secs(delay),
-        )
-        .await?;
+        client
+            .enqueue(&self.inner.dispatch, &work, Duration::from_secs(delay))
+            .await?;
         Ok(())
     }
 
-    async fn next_digest_at<C: GenericClient + Sync>(
+    async fn next_digest_at<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         preference: &Preference,
     ) -> Result<Option<i64>> {
         let (Some(rule), Some(expand)) = (&preference.digest, &self.inner.expand) else {
@@ -1518,9 +1620,9 @@ impl Notifier {
 
     /// Sends `notice` to `recipient` as its urgency says: now, after quiet
     /// hours, in the next digest, or not at all.
-    async fn dispatch_notice<C: GenericClient + Sync>(
+    async fn dispatch_notice<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         notice: &Values,
         recipient: &RecipientRef,
         urgency: &str,
@@ -1553,13 +1655,13 @@ impl Notifier {
                     let delay = u64::try_from((at - millis(self.now())).max(0)).unwrap_or(0);
                     let mut work = NoticeWork::step("digest");
                     work.recipient = Some(recipient.id.clone());
-                    enqueue_in(
-                        client,
-                        &self.inner.dispatch,
-                        &work,
-                        Duration::from_secs(delay.div_ceil(1000)),
-                    )
-                    .await?;
+                    client
+                        .enqueue(
+                            &self.inner.dispatch,
+                            &work,
+                            Duration::from_secs(delay.div_ceil(1000)),
+                        )
+                        .await?;
                 }
                 return Ok(());
             }
@@ -1585,20 +1687,20 @@ impl Notifier {
     }
 
     async fn route(&self, event: RaisedEvent) -> Result<()> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         let mut filter = Values::new();
         filter.insert("enabled".to_owned(), eq(true));
         filter.insert("eventKind".to_owned(), json!({ "in": [event.kind, "*"] }));
         let candidates = self
-            .sys(&tx)?
+            .sys(tx.db())?
             .table(&self.inner.parts.routes)?
             .find_many(Some(&filter), &many(1000))
             .await?
             .rows;
         for row in candidates {
-            if self.route_matches(&tx, &event, &row).await? {
-                self.route_by(&tx, &event, &row).await?;
+            if self.route_matches(tx.db(), &event, &row).await? {
+                self.route_by(tx.db(), &event, &row).await?;
             }
         }
         tx.commit().await?;
@@ -1606,9 +1708,9 @@ impl Notifier {
     }
 
     /// Whether a route's table and filter match the event's record.
-    async fn route_matches<C: GenericClient + Sync>(
+    async fn route_matches<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         event: &RaisedEvent,
         row: &Values,
     ) -> Result<bool> {
@@ -1636,9 +1738,9 @@ impl Notifier {
     /// Routes the event by one route: a notice for each recipient who reads
     /// the record, sent as its urgency says, and the first step of the
     /// route's escalation of an urgent one.
-    async fn route_by<C: GenericClient + Sync>(
+    async fn route_by<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         event: &RaisedEvent,
         row: &Values,
     ) -> Result<()> {
@@ -1677,7 +1779,9 @@ impl Notifier {
             if let Some(task) = spec.get("task").and_then(Value::as_str) {
                 request.insert("input".to_owned(), json!({ "task": task }));
             }
-            enqueue_in(client, requests, &Value::Object(request), Duration::ZERO).await?;
+            client
+                .enqueue(requests, &Value::Object(request), Duration::ZERO)
+                .await?;
         }
         let recipients = self.recipients_of(client, event, &specs).await?;
         for recipient in &recipients {
@@ -1724,13 +1828,9 @@ impl Notifier {
         for notice in notices {
             let mut work = NoticeWork::step("escalate");
             work.notice = Some(string(&notice, "id"));
-            enqueue_in(
-                client,
-                &self.inner.dispatch,
-                &work,
-                Duration::from_secs(after),
-            )
-            .await?;
+            client
+                .enqueue(&self.inner.dispatch, &work, Duration::from_secs(after))
+                .await?;
         }
         Ok(())
     }
@@ -1743,9 +1843,9 @@ impl Notifier {
         }
     }
 
-    async fn address_of<C: GenericClient + Sync>(
+    async fn address_of<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         recipient: &RecipientRef,
         channel: &str,
     ) -> Result<Option<String>> {
@@ -1778,9 +1878,9 @@ impl Notifier {
 
     /// Falls through from a delivery that failed to the recipient's next
     /// channel.
-    async fn fall_through<C: GenericClient + Sync>(
+    async fn fall_through<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         delivery: &Values,
         detail: &str,
     ) -> Result<()> {
@@ -1834,9 +1934,9 @@ impl Notifier {
         Ok(())
     }
 
-    async fn notice_by_id<C: GenericClient + Sync>(
+    async fn notice_by_id<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         id: &str,
     ) -> Result<Option<Values>> {
         let mut filter = Values::new();
@@ -1848,9 +1948,9 @@ impl Notifier {
             .await?)
     }
 
-    async fn delivery_by_id<C: GenericClient + Sync>(
+    async fn delivery_by_id<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         id: &str,
     ) -> Result<Option<Values>> {
         let mut filter = Values::new();
@@ -1863,8 +1963,8 @@ impl Notifier {
     }
 
     async fn update_delivery(&self, id: &str, update: Values) -> Result<()> {
-        let client = self.pool().get().await?;
-        self.sys(&client)?
+        let client = self.store().client().await?;
+        self.sys(client.db())?
             .table(&self.inner.parts.deliveries)?
             .update_one(&key(id), &update, &none())
             .await?;
@@ -1872,23 +1972,23 @@ impl Notifier {
     }
 
     async fn fall_through_alone(&self, delivery: &Values, detail: &str) -> Result<()> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        self.fall_through(&tx, delivery, detail).await?;
+        self.fall_through(tx.db(), delivery, detail).await?;
         tx.commit().await?;
         Ok(())
     }
 
     async fn deliver(&self, id: &str) -> Result<()> {
-        let client = self.pool().get().await?;
-        let Some(delivery) = self.delivery_by_id(&client, id).await? else {
+        let client = self.store().client().await?;
+        let Some(delivery) = self.delivery_by_id(client.db(), id).await? else {
             return Ok(());
         };
         if text(&delivery, "state") != Some("queued") {
             return Ok(());
         }
         let notice = match text(&delivery, "notice") {
-            Some(notice) => self.notice_by_id(&client, notice).await?,
+            Some(notice) => self.notice_by_id(client.db(), notice).await?,
             None => None,
         };
         drop(client);
@@ -1910,8 +2010,8 @@ impl Notifier {
         let address = match (text(&delivery, "address"), &recipient) {
             (Some(address), _) => Some(address.to_owned()),
             (None, Some(recipient)) => {
-                let client = self.pool().get().await?;
-                self.address_of(&client, recipient, &kind).await?
+                let client = self.store().client().await?;
+                self.address_of(client.db(), recipient, &kind).await?
             }
             (None, None) => None,
         };
@@ -1928,9 +2028,9 @@ impl Notifier {
             if let (Some(table), Some(subject)) =
                 (text(notice, "subjectTable"), text(notice, "subjectKey"))
             {
-                let client = self.pool().get().await?;
+                let client = self.store().client().await?;
                 if !self
-                    .reads(&client, recipient, Some(table), Some(subject))
+                    .reads(client.db(), recipient, Some(table), Some(subject))
                     .await?
                 {
                     drop(client);
@@ -1991,16 +2091,17 @@ impl Notifier {
                 }
                 self.update_delivery(id, update).await?;
                 if channel.status && state != "delivered" && state != "read" {
-                    let client = self.pool().get().await?;
+                    let client = self.store().client().await?;
                     let mut work = NoticeWork::step("timeout");
                     work.delivery = Some(id.to_owned());
-                    enqueue_in(
-                        &client,
-                        &self.inner.dispatch,
-                        &work,
-                        Duration::from_secs(self.inner.timeout_seconds),
-                    )
-                    .await?;
+                    client
+                        .db()
+                        .enqueue(
+                            &self.inner.dispatch,
+                            &work,
+                            Duration::from_secs(self.inner.timeout_seconds),
+                        )
+                        .await?;
                 }
                 Ok(())
             }
@@ -2017,8 +2118,8 @@ impl Notifier {
     /// Delivers a notice's delivery, or one of no notice (a digest, an
     /// echo, a code) to the address it holds or its recipient's.
     async fn deliver_any(&self, id: &str) -> Result<()> {
-        let client = self.pool().get().await?;
-        let Some(delivery) = self.delivery_by_id(&client, id).await? else {
+        let client = self.store().client().await?;
+        let Some(delivery) = self.delivery_by_id(client.db(), id).await? else {
             return Ok(());
         };
         drop(client);
@@ -2033,8 +2134,8 @@ impl Notifier {
         let address = match (text(&delivery, "address"), text(&delivery, "recipient")) {
             (Some(address), _) => Some(address.to_owned()),
             (None, Some(recipient)) => {
-                let client = self.pool().get().await?;
-                self.address_of(&client, &RecipientRef::user(recipient), &kind)
+                let client = self.store().client().await?;
+                self.address_of(client.db(), &RecipientRef::user(recipient), &kind)
                     .await?
             }
             (None, None) => None,
@@ -2084,8 +2185,8 @@ impl Notifier {
     }
 
     async fn timeout(&self, id: &str) -> Result<()> {
-        let client = self.pool().get().await?;
-        let Some(delivery) = self.delivery_by_id(&client, id).await? else {
+        let client = self.store().client().await?;
+        let Some(delivery) = self.delivery_by_id(client.db(), id).await? else {
             return Ok(());
         };
         drop(client);
@@ -2097,9 +2198,9 @@ impl Notifier {
     }
 
     async fn escalate(&self, notice_id: &str) -> Result<()> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        let Some(notice) = self.notice_by_id(&tx, notice_id).await? else {
+        let Some(notice) = self.notice_by_id(tx.db(), notice_id).await? else {
             return Ok(());
         };
         if matches!(text(&notice, "state"), Some("acknowledged" | "done")) {
@@ -2111,7 +2212,7 @@ impl Notifier {
         let mut by_id = Values::new();
         by_id.insert("id".to_owned(), eq(route_id.as_str()));
         let route = self
-            .sys(&tx)?
+            .sys(tx.db())?
             .table(&self.inner.parts.routes)?
             .find_one(Some(&by_id), &FindOptions::default())
             .await?;
@@ -2126,7 +2227,7 @@ impl Notifier {
             return Ok(());
         };
         let notice_key = string(&notice, "id");
-        self.sys(&tx)?
+        self.sys(tx.db())?
             .table(&self.inner.parts.inbox)?
             .update_one(
                 &key(&notice_key),
@@ -2138,7 +2239,7 @@ impl Notifier {
         let mut of_notice = Values::new();
         of_notice.insert("notice".to_owned(), eq(notice_key.as_str()));
         let tried = self
-            .sys(&tx)?
+            .sys(tx.db())?
             .table(&self.inner.parts.deliveries)?
             .find_many(Some(&of_notice), &many(100))
             .await?
@@ -2146,7 +2247,7 @@ impl Notifier {
             .len();
         let tried = i64::try_from(tried).unwrap_or(0);
         for channel in strings(step.get("channels")).unwrap_or_default() {
-            self.queue_delivery(&tx, &notice, &recipient, &channel, tried + 1, 0)
+            self.queue_delivery(tx.db(), &notice, &recipient, &channel, tried + 1, 0)
                 .await?;
         }
         if let Some(more) = step.get("recipients").and_then(Value::as_array) {
@@ -2160,18 +2261,24 @@ impl Notifier {
                     payload: notice.get("payload").cloned().map(obj).unwrap_or_default(),
                     at: millis(self.now()),
                 };
-                for added in self.recipients_of(&tx, &event, more).await? {
+                for added in self.recipients_of(tx.db(), &event, more).await? {
                     if !self
-                        .reads(&tx, &added, event.table.as_deref(), event.key.as_deref())
+                        .reads(
+                            tx.db(),
+                            &added,
+                            event.table.as_deref(),
+                            event.key.as_deref(),
+                        )
                         .await?
                     {
                         continue;
                     }
                     if let Some(created) = self
-                        .create_notice(&tx, &added, &event, URGENT, Some(&route_id))
+                        .create_notice(tx.db(), &added, &event, URGENT, Some(&route_id))
                         .await?
                     {
-                        self.dispatch_notice(&tx, &created, &added, URGENT).await?;
+                        self.dispatch_notice(tx.db(), &created, &added, URGENT)
+                            .await?;
                     }
                 }
             }
@@ -2183,21 +2290,23 @@ impl Notifier {
                 .unwrap_or(0);
             let mut work = NoticeWork::step("escalate");
             work.notice = Some(notice_key);
-            enqueue_in(&tx, &self.inner.dispatch, &work, Duration::from_secs(after)).await?;
+            tx.db()
+                .enqueue(&self.inner.dispatch, &work, Duration::from_secs(after))
+                .await?;
         }
         tx.commit().await?;
         Ok(())
     }
 
     async fn digest(&self, recipient_id: &str) -> Result<()> {
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let waiting = {
             let filter = obj(json!({
                 "recipient": { "eq": recipient_id },
                 "urgency": { "eq": DIGEST },
                 "digestedAt": { "isNull": true },
             }));
-            self.sys(&client)?
+            self.sys(client.db())?
                 .table(&self.inner.parts.inbox)?
                 .find_many(Some(&filter), &ordered(200, OrderBy::asc("reference")))
                 .await?
@@ -2207,12 +2316,14 @@ impl Notifier {
             return Ok(());
         };
         let recipient = Self::recipient_of_notice(first);
-        let preference = self.preference_of(&client, &recipient, "*", DIGEST).await?;
+        let preference = self
+            .preference_of(client.db(), &recipient, "*", DIGEST)
+            .await?;
         let channel = Self::outward(&preference.channels).into_iter().next();
         let tx = client.transaction().await?;
         let now = at_text(self.now());
         for notice in &waiting {
-            self.sys(&tx)?
+            self.sys(tx.db())?
                 .table(&self.inner.parts.inbox)?
                 .update_one(
                     &key(&string(notice, "id")),
@@ -2235,13 +2346,15 @@ impl Notifier {
                 "detail": format!("Your digest\n{}", lines.join("\n")),
             }));
             let delivery = self
-                .sys(&tx)?
+                .sys(tx.db())?
                 .table(&self.inner.parts.deliveries)?
                 .create_one(&input)
                 .await?;
             let mut work = NoticeWork::step("deliver");
             work.delivery = Some(string(&delivery, "id"));
-            enqueue_in(&tx, &self.inner.dispatch, &work, Duration::ZERO).await?;
+            tx.db()
+                .enqueue(&self.inner.dispatch, &work, Duration::ZERO)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -2249,9 +2362,9 @@ impl Notifier {
 
     /// Starts a subscription's brief at its next time, in `client`'s
     /// transaction.
-    pub async fn schedule_subscription<C: GenericClient + Sync>(
+    pub async fn schedule_subscription<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         id: &str,
     ) -> Result<()> {
         let (Some(subscriptions), Some(expand)) =
@@ -2292,13 +2405,13 @@ impl Notifier {
         let delay = u64::try_from((at - millis(self.now())).max(0)).unwrap_or(0);
         let mut work = NoticeWork::step("brief");
         work.subscription = Some(id.to_owned());
-        enqueue_in(
-            client,
-            &self.inner.dispatch,
-            &work,
-            Duration::from_secs(delay.div_ceil(1000)),
-        )
-        .await?;
+        client
+            .enqueue(
+                &self.inner.dispatch,
+                &work,
+                Duration::from_secs(delay.div_ceil(1000)),
+            )
+            .await?;
         Ok(())
     }
 
@@ -2306,11 +2419,11 @@ impl Notifier {
         let Some(subscriptions) = self.inner.parts.subscriptions.clone() else {
             return Ok(());
         };
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let mut by_id = Values::new();
         by_id.insert("id".to_owned(), eq(id));
         let Some(row) = self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&subscriptions)?
             .find_one(Some(&by_id), &FindOptions::default())
             .await?
@@ -2328,7 +2441,7 @@ impl Notifier {
             let reader = self.reader_of(&recipient).await?;
             let filter = row.get("filter").cloned().map(obj).unwrap_or_default();
             let rows = self
-                .as_reader(&client, &reader)?
+                .as_reader(client.db(), &reader)?
                 .table(&def.name)?
                 .find_many(Some(&filter), &many(50))
                 .await?
@@ -2345,7 +2458,7 @@ impl Notifier {
         }
         let tx = client.transaction().await?;
         for channel in Self::outward(&strings(row.get("channels")).unwrap_or_default()) {
-            let address = self.address_of(&tx, &recipient, &channel).await?;
+            let address = self.address_of(tx.db(), &recipient, &channel).await?;
             let body = if lines.is_empty() {
                 "Nothing to report.".to_owned()
             } else {
@@ -2361,15 +2474,17 @@ impl Notifier {
                 "detail": format!("{}\n{body}", string(&row, "name")),
             }));
             let delivery = self
-                .sys(&tx)?
+                .sys(tx.db())?
                 .table(&self.inner.parts.deliveries)?
                 .create_one(&input)
                 .await?;
             let mut work = NoticeWork::step("deliver");
             work.delivery = Some(string(&delivery, "id"));
-            enqueue_in(&tx, &self.inner.dispatch, &work, Duration::ZERO).await?;
+            tx.db()
+                .enqueue(&self.inner.dispatch, &work, Duration::ZERO)
+                .await?;
         }
-        self.sys(&tx)?
+        self.sys(tx.db())?
             .table(&subscriptions)?
             .update_one(
                 &key(id),
@@ -2377,7 +2492,7 @@ impl Notifier {
                 &none(),
             )
             .await?;
-        self.schedule_subscription(&tx, id).await?;
+        self.schedule_subscription(tx.db(), id).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -2409,7 +2524,7 @@ impl Notifier {
     /// what `run_worker` runs with [`Notifier::handle`].
     pub fn worker_queue(&self) -> NotifierQueue {
         NotifierQueue {
-            queue: PostgresQueue::new(self.pool().clone(), self.inner.dispatch.clone()),
+            queue: self.inner.queue.clone(),
             notifier: self.clone(),
         }
     }
@@ -2417,10 +2532,10 @@ impl Notifier {
     /// Deletes up to `limit` deliveries that ended past their retention,
     /// and answers how many.
     pub async fn prune(&self, limit: u32) -> Result<u64> {
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let before = self.now() - Duration::from_secs(self.inner.retention_days * 86_400);
         let filter = obj(json!({ "endedAt": { "lt": at_text(before) } }));
-        let sys = self.sys(&client)?;
+        let sys = self.sys(client.db())?;
         let deliveries = sys.table(&self.inner.parts.deliveries)?;
         let old = deliveries
             .find_many(Some(&filter), &many(limit))
@@ -2444,14 +2559,14 @@ impl Notifier {
         states: &[&str],
         limit: Option<u32>,
     ) -> Result<Vec<Values>> {
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let mut filter = Values::new();
         filter.insert("recipient".to_owned(), eq(recipient.id.as_str()));
         if !states.is_empty() {
             filter.insert("state".to_owned(), json!({ "in": states }));
         }
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.parts.inbox)?
             .find_many(
                 Some(&filter),
@@ -2462,8 +2577,8 @@ impl Notifier {
     }
 
     async fn own_notice(&self, recipient: &RecipientRef, id: &str) -> Result<Values> {
-        let client = self.pool().get().await?;
-        match self.notice_by_id(&client, id).await? {
+        let client = self.store().client().await?;
+        match self.notice_by_id(client.db(), id).await? {
             Some(notice) if same_id(&string(&notice, "recipient")) == same_id(&recipient.id) => {
                 Ok(notice)
             }
@@ -2475,8 +2590,8 @@ impl Notifier {
     pub async fn mark_read(&self, recipient: &RecipientRef, id: &str) -> Result<()> {
         let notice = self.own_notice(recipient, id).await?;
         if text(&notice, "state") == Some("unread") {
-            let client = self.pool().get().await?;
-            self.sys(&client)?
+            let client = self.store().client().await?;
+            self.sys(client.db())?
                 .table(&self.inner.parts.inbox)?
                 .update_one(
                     &key(&string(&notice, "id")),
@@ -2500,17 +2615,17 @@ impl Notifier {
         if matches!(text(&notice, "state"), Some("acknowledged" | "done")) {
             return Ok(());
         }
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        self.acknowledge_in(&tx, &notice, via.unwrap_or(INAPP))
+        self.acknowledge_in(tx.db(), &notice, via.unwrap_or(INAPP))
             .await?;
         tx.commit().await?;
         Ok(())
     }
 
-    async fn acknowledge_in<C: GenericClient + Sync>(
+    async fn acknowledge_in<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         notice: &Values,
         via: &str,
     ) -> Result<()> {
@@ -2526,9 +2641,9 @@ impl Notifier {
         .await
     }
 
-    async fn end_deliveries<C: GenericClient + Sync>(
+    async fn end_deliveries<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         notice: &str,
         open: impl Fn(&str) -> bool,
     ) -> Result<()> {
@@ -2565,7 +2680,7 @@ impl Notifier {
     /// code [`Notifier::start_verification`] sends, or entered by hand.
     pub async fn add_identity(&self, input: AddIdentity) -> Result<Values> {
         let identities = self.identities()?;
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let trust = input.trust.unwrap_or_else(|| "unverified".to_owned());
         let mut row = obj(json!({
             "kind": input.kind,
@@ -2579,7 +2694,7 @@ impl Notifier {
             row.insert("verifiedAt".to_owned(), at_text(self.now()));
         }
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(identities)?
             .create_one(&row)
             .await?)
@@ -2589,7 +2704,7 @@ impl Notifier {
     /// entered, not revoked.
     pub async fn resolve_sender(&self, kind: &str, address: &str) -> Result<Vec<Values>> {
         let identities = self.identities()?;
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let filter = obj(json!({
             "kind": { "eq": kind },
             "address": { "eq": normalise_address(kind, address) },
@@ -2597,7 +2712,7 @@ impl Notifier {
             "revokedAt": { "isNull": true },
         }));
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(identities)?
             .find_many(Some(&filter), &many(10))
             .await?
@@ -2609,9 +2724,9 @@ impl Notifier {
     /// channel of the kind is up, or the send fails.
     pub async fn send_direct(&self, input: SendDirect) -> Result<String> {
         let channel = self.channel_of_kind(&input.channel, None).await?;
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let row = self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.parts.deliveries)?
             .create_one(&obj(json!({
                 "purpose": input.purpose.as_deref().unwrap_or("code"),
@@ -2672,10 +2787,10 @@ impl Notifier {
     /// `reset` for a password reset (D81).
     pub async fn start_verification(&self, id: &str, purpose: &str) -> Result<()> {
         let identities = self.identities()?;
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let mut by_id = Values::new();
         by_id.insert("id".to_owned(), eq(id));
-        let sys = self.sys(&client)?;
+        let sys = self.sys(client.db())?;
         let identity = sys
             .table(identities)?
             .find_one(Some(&by_id), &FindOptions::default())
@@ -2739,8 +2854,8 @@ impl Notifier {
         if wire_time::parse(expires).is_none_or(|at| at < self.now()) {
             return Ok(false);
         }
-        let client = self.pool().get().await?;
-        let sys = self.sys(&client)?;
+        let client = self.store().client().await?;
+        let sys = self.sys(client.db())?;
         let id = key(&string(identity, "id"));
         if hash != code_hash(code) {
             let attempts = number(identity, "codeAttempts") + 1;
@@ -2772,11 +2887,11 @@ impl Notifier {
     /// Checks a code given in the app; answers whether it verified.
     pub async fn confirm_identity(&self, id: &str, code: &str) -> Result<bool> {
         let identities = self.identities()?;
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let mut by_id = Values::new();
         by_id.insert("id".to_owned(), eq(id));
         let identity = self
-            .sys(&client)?
+            .sys(client.db())?
             .table(identities)?
             .find_one(Some(&by_id), &FindOptions::default())
             .await?;
@@ -2793,11 +2908,11 @@ impl Notifier {
         let Some(trust) = &self.inner.parts.trust else {
             return Ok(("low".to_owned(), Some(Vec::new())));
         };
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let mut filter = Values::new();
         filter.insert("channelKind".to_owned(), eq(channel));
         let row = self
-            .sys(&client)?
+            .sys(client.db())?
             .table(trust)?
             .find_one(Some(&filter), &FindOptions::default())
             .await?;
@@ -2809,9 +2924,9 @@ impl Notifier {
         })
     }
 
-    async fn record<C: GenericClient + Sync>(
+    async fn record<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         values: Values,
     ) -> Result<Option<String>> {
         let Some(replies) = &self.inner.parts.replies else {
@@ -2826,8 +2941,8 @@ impl Notifier {
     }
 
     async fn record_alone(&self, values: Values) -> Result<Option<String>> {
-        let client = self.pool().get().await?;
-        self.record(&client, values).await
+        let client = self.store().client().await?;
+        self.record(client.db(), values).await
     }
 
     async fn echo(&self, input: &ReplyInput, address: &str, text: &str, recipient: Option<&str>) {
@@ -2839,8 +2954,8 @@ impl Notifier {
                 return Ok::<_, NotifierError>(());
             };
             let row = {
-                let client = self.pool().get().await?;
-                self.sys(&client)?
+                let client = self.store().client().await?;
+                self.sys(client.db())?
                     .table(&self.inner.parts.deliveries)?
                     .create_one(&obj(json!({
                         "purpose": "echo",
@@ -2898,19 +3013,18 @@ impl Notifier {
     /// behaviors' commands run with its permissions.
     fn acting<'c, 't>(
         &'c self,
-        tx: &'c deadpool_postgres::Transaction<'t>,
+        tx: Db<'c, PoolTransaction<'t>>,
         principal: &Principal,
-    ) -> Result<Repositories<'c, deadpool_postgres::Transaction<'t>>> {
-        let mut repositories = Repositories::new(tx, self.inner.definition)?
+    ) -> Result<StoreRepositories<'c, PoolTransaction<'t>>> {
+        let mut repositories = tx
+            .repositories(self.inner.definition)?
             .acting(Some(principal.subject.clone()))
             .with_access(AccessCaller::of(Some(principal)))
             .with_caller(Caller::of(Some(principal)));
         if let Some(keys) = self.inner.tables.keys() {
             repositories = repositories.with_keys(keys.as_ref());
         }
-        if let Some(rules) = self.inner.tables.rules() {
-            repositories = repositories.with_rules(rules.as_ref());
-        }
+        repositories = repositories.with_rules_of(&self.inner.tables);
         Ok(repositories)
     }
 
@@ -3045,10 +3159,10 @@ impl Notifier {
             }
         }
         let ran: Result<Option<String>> = async {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             let reply = {
-                let acting = self.acting(&tx, &principal)?;
+                let acting = self.acting(tx.db(), &principal)?;
                 let context = ReplyContext {
                     repositories: &acting,
                     notice: &notice,
@@ -3064,11 +3178,11 @@ impl Notifier {
                     .filter(|v| !v.is_null())
                     .cloned()
                     .unwrap_or_else(|| now.clone());
-                self.sys(&tx)?
+                self.sys(tx.db())?
                     .table(&self.inner.parts.inbox)?
                     .update_one(&key(&notice_key), &obj(json!({ "state": "done", "acknowledgedAt": acknowledged_at, "acknowledgedVia": input.channel })), &none())
                     .await?;
-                self.end_deliveries(&tx, &notice_key, |state| !ended(state)).await?;
+                self.end_deliveries(tx.db(), &notice_key, |state| !ended(state)).await?;
                 let mut values = base.clone();
                 values.extend(obj(json!({
                     "verb": verb,
@@ -3077,7 +3191,7 @@ impl Notifier {
                     "outcome": "done",
                     "undo": if action.undoable() { json!({ "data": data, "previous": notice.get("state") }) } else { Value::Null },
                 })));
-                self.record(&tx, values).await?
+                self.record(tx.db(), values).await?
             };
             tx.commit().await?;
             Ok(reply)
@@ -3131,14 +3245,14 @@ impl Notifier {
         // An address with a code pending verifies by replying with it.
         if let (Some(table), true) = (&self.inner.parts.identities, looks_like_code(body)) {
             let pending = {
-                let client = self.pool().get().await?;
+                let client = self.store().client().await?;
                 let filter = obj(json!({
                     "kind": { "eq": address_kind },
                     "address": { "eq": address },
                     "codePurpose": { "eq": "verify" },
                     "revokedAt": { "isNull": true },
                 }));
-                self.sys(&client)?
+                self.sys(client.db())?
                     .table(table)?
                     .find_many(Some(&filter), &many(10))
                     .await?
@@ -3211,14 +3325,14 @@ impl Notifier {
         };
         let notice_key = string(&notice, "id");
         let done = {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             let filter = obj(json!({
                 "notice": { "eq": notice_key },
                 "principal": { "eq": ctx.recipient.id },
                 "outcome": { "eq": "done" },
                 "undoneAt": { "isNull": true },
             }));
-            self.sys(&client)?
+            self.sys(client.db())?
                 .table(&replies)?
                 .find_many(Some(&filter), &ordered(1, OrderBy::desc("receivedAt")))
                 .await?
@@ -3255,8 +3369,8 @@ impl Notifier {
         }
         let mut waiting = Vec::new();
         {
-            let client = self.pool().get().await?;
-            let sys = self.sys(&client)?;
+            let client = self.store().client().await?;
+            let sys = self.sys(client.db())?;
             let filter = obj(
                 json!({ "recipient": { "eq": ctx.recipient.id }, "state": { "in": ["unread", "read"] } }),
             );
@@ -3309,9 +3423,10 @@ impl Notifier {
                 )
                 .await;
         }
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        self.acknowledge_in(&tx, notice, &ctx.input.channel).await?;
+        self.acknowledge_in(tx.db(), notice, &ctx.input.channel)
+            .await?;
         let mut values = ctx.base.clone();
         values.extend(obj(json!({
             "verb": "ack",
@@ -3320,7 +3435,7 @@ impl Notifier {
             "outcome": "done",
             "undo": { "previous": notice.get("state") },
         })));
-        let reply = self.record(&tx, values).await?;
+        let reply = self.record(tx.db(), values).await?;
         tx.commit().await?;
         drop(client);
         let title = string(notice, "title");
@@ -3339,11 +3454,11 @@ impl Notifier {
     }
 
     async fn notice_of(&self, recipient: &RecipientRef, reference: i64) -> Result<Option<Values>> {
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let filter =
             obj(json!({ "recipient": { "eq": recipient.id }, "reference": { "eq": reference } }));
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.parts.inbox)?
             .find_one(Some(&filter), &FindOptions::default())
             .await?)
@@ -3392,10 +3507,10 @@ impl Notifier {
                 ..ReplyOutcome::default()
             });
         };
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         if let Some(action) = &action {
-            let acting = self.acting(&tx, &principal)?;
+            let acting = self.acting(tx.db(), &principal)?;
             let no_args: Vec<String> = Vec::new();
             let context = ReplyContext {
                 repositories: &acting,
@@ -3414,7 +3529,7 @@ impl Notifier {
             .get("previous")
             .and_then(Value::as_str)
             .unwrap_or("read");
-        self.sys(&tx)?
+        self.sys(tx.db())?
             .table(&self.inner.parts.inbox)?
             .update_one(
                 &key(&notice_key),
@@ -3423,7 +3538,7 @@ impl Notifier {
             )
             .await?;
         if let Some(replies) = &self.inner.parts.replies {
-            self.sys(&tx)?
+            self.sys(tx.db())?
                 .table(replies)?
                 .update_one(
                     &key(&string(done, "id")),
@@ -3434,7 +3549,7 @@ impl Notifier {
         }
         let mut values = ctx.base.clone();
         values.extend(obj(json!({ "verb": UNDO_VERB, "notice": notice_key, "reference": notice_ref, "outcome": "done" })));
-        let reply = self.record(&tx, values).await?;
+        let reply = self.record(tx.db(), values).await?;
         tx.commit().await?;
         drop(client);
         let said = format!("Undone: {verb} {notice_ref}.");
@@ -3494,13 +3609,13 @@ impl Notifier {
         let mut moved = 0;
         for status in channel.adapter.status(request).await.map_err(failed)? {
             let delivery = {
-                let client = self.pool().get().await?;
+                let client = self.store().client().await?;
                 let mut filter = Values::new();
                 filter.insert(
                     "providerMessageId".to_owned(),
                     eq(status.provider_message_id.as_str()),
                 );
-                self.sys(&client)?
+                self.sys(client.db())?
                     .table(&self.inner.parts.deliveries)?
                     .find_one(Some(&filter), &FindOptions::default())
                     .await?
@@ -3610,13 +3725,13 @@ impl Replying<'_> {
 /// The dispatch queue as a worker claims it (D80): the queue's claims,
 /// whose prune deletes the deliveries past their retention too.
 pub struct NotifierQueue {
-    queue: PostgresQueue<NoticeWork>,
+    queue: PartQueue<NoticeWork>,
     notifier: Notifier,
 }
 
 impl NotifierQueue {
     /// The queue's claims.
-    pub fn queue(&self) -> &PostgresQueue<NoticeWork> {
+    pub fn queue(&self) -> &PartQueue<NoticeWork> {
         &self.queue
     }
 }
@@ -3724,8 +3839,8 @@ impl PasswordReset {
         };
         let identities = self.notifier.identities()?.to_owned();
         let address = normalise_address("email", login);
-        let client = self.notifier.pool().get().await?;
-        let sys = self.notifier.sys(&client)?;
+        let client = self.notifier.store().client().await?;
+        let sys = self.notifier.sys(client.db())?;
         let filter = obj(json!({
             "kind": { "eq": "email" },
             "address": { "eq": address },
@@ -3794,9 +3909,9 @@ impl PasswordReset {
             } else {
                 obj(json!({ "codeAttempts": attempts }))
             };
-            let client = self.notifier.pool().get().await?;
+            let client = self.notifier.store().client().await?;
             self.notifier
-                .sys(&client)?
+                .sys(client.db())?
                 .table(&identities)?
                 .update_one(&id, &update, &none())
                 .await?;
@@ -3806,9 +3921,9 @@ impl PasswordReset {
             .reset_password(&string(&identity, "principal"), password)
             .await
             .map_err(failed)?;
-        let client = self.notifier.pool().get().await?;
+        let client = self.notifier.store().client().await?;
         self.notifier
-            .sys(&client)?
+            .sys(client.db())?
             .table(&identities)?
             .update_one(
                 &id,

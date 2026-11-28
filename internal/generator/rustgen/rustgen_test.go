@@ -81,14 +81,15 @@ func TestWriteTypesGolden(t *testing.T) {
 		// orm::calendar reads.
 		{service: "fixture-recurrence-db", core: true, sqlite: true},
 		// Events and notifications (D153, D191): each table's events and
-		// what it is to the notifier, in the Postgres definition, which
-		// orm::notify reads.
-		{service: "fixture-notifications-db", core: true},
+		// what it is to the notifier, in the Postgres and the SQLite
+		// definitions (#618), which orm::notify reads.
+		{service: "fixture-notifications-db", core: true, sqlite: true},
 		// Parties and the agent orchestration (D157, D158, D193): each
 		// table's party, conversations and agents part, in the Postgres
-		// definition, which orm::parties, orm::inbound and orm::agents read.
-		{service: "fixture-parties-db", core: true},
-		{service: "fixture-agent-runs-db", core: true},
+		// and the SQLite definitions (#618), which orm::parties,
+		// orm::inbound and orm::agents read.
+		{service: "fixture-parties-db", core: true, sqlite: true},
+		{service: "fixture-agent-runs-db", core: true, sqlite: true},
 	}
 
 	for _, tc := range cases {

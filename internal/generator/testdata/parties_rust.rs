@@ -1,13 +1,18 @@
 //! fixture-parties-db end to end in the Rust repositories and runtime
-//! (D157, D193), run by TestRustPartiesEndToEnd: contacts that are
+//! (D157, D193, #618), run by TestRustPartiesEndToEnd: contacts that are
 //! parties, the jobs a grant lets one reach and the reports it writes on
 //! them, the conversations and their messages, which hold files and point
 //! at rows, the run requests queue, and the notifier a user's reply runs
-//! through. The generated create.sql is applied in a schema of the test's
-//! own at PARTIES_TEST_DATABASE_URL, and the cases are the TypeScript
-//! repositories' (tsgen's parties.test.ts), through the runtime's
-//! orm::inbound over the generated repositories, with an SMS relay and a
-//! mail relay as stand-in channel adapters (D159) and a bucket in memory.
+//! through. Each case runs on the database RUST_E2E_STORE names
+//! (tests/backend): a SQLite file with the build's SQLite DDL applied, or
+//! a schema of the test's own at RUST_E2E_DATABASE_URL with create.sql
+//! applied. The cases are the TypeScript repositories' (tsgen's
+//! parties.test.ts), through the runtime's orm::inbound over the generated
+//! repositories, with an SMS relay and a mail relay as stand-in channel
+//! adapters (D159) and a bucket in memory; each prints its answers, which
+//! the Go test holds equal on the two databases.
+
+mod backend;
 
 use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
@@ -16,7 +21,8 @@ use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use runtime::access::{issue_grant, revoke_grant, IssueGrant};
+use backend::{answer, in_tx, rows_of, Backend};
+use runtime::access::IssueGrant;
 use runtime::bucket::{
     Body, Bucket, BucketError, Bytes, ListOptions, Object, Page, PutOptions, PutResult, Reader,
     SignedUrlOptions, Stream,
@@ -26,7 +32,7 @@ use runtime::orm::inbound::{
 };
 use runtime::orm::notify::Notifier;
 use runtime::orm::parties::PartyRef;
-use runtime::orm::postgres::{deadpool_postgres, tokio_postgres};
+use runtime::orm::store::{Store, TxRepositories};
 use runtime::orm::rowfeatures::RowRef;
 use runtime::orm::{AccessCaller, FindOptions, Values};
 use runtime::providers::{
@@ -34,10 +40,9 @@ use runtime::providers::{
     InboundAuthentication, InboundMessage, OptOut, OutboundMessage, ProviderDefinition,
     ProviderInstance, ProvidersOptions, RuntimeInterface, SendResult, WebhookRequest,
 };
-use runtime::queue::{PostgresQueue, QueueDefinition};
+use runtime::queue::QueueDefinition;
 use runtime::{ActingFor, BoxError, Principal, PrincipalKind};
 use serde_json::{json, Value};
-use types::orm::postgres::Repositories;
 
 const RELAY_TOKEN: &str = "relay-token";
 const INBOX: &str = "inbox@example.test";
@@ -327,19 +332,12 @@ impl SendApproval for ByWord {
     }
 }
 
-async fn connect(config: &tokio_postgres::Config) -> tokio_postgres::Client {
-    let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
-    tokio::spawn(connection);
-    client
-}
-
 /// A schema of its own holding fixture-parties-db's tables, the notifier
 /// and the inbound path over it, and the contact, the job and the grant of
 /// every case.
 struct World {
-    pool: deadpool_postgres::Pool,
-    admin: tokio_postgres::Client,
-    schema: String,
+    backend: Backend,
+    store: Store,
     notifier: Notifier,
     inbound: Inbound,
     relays: Relays,
@@ -352,17 +350,8 @@ struct World {
 }
 
 async fn world(approve: bool) -> World {
-    let url = std::env::var("PARTIES_TEST_DATABASE_URL").expect("PARTIES_TEST_DATABASE_URL names the database");
-    let config: tokio_postgres::Config = url.parse().unwrap();
-    let admin = connect(&config).await;
-    let schema = format!("parties_rust_{}", nanos());
-    admin.batch_execute(&format!("CREATE SCHEMA {schema}")).await.unwrap();
-    let mut scoped = config;
-    scoped.options(format!("-c search_path={schema},public"));
-    let client = connect(&scoped).await;
-    client.batch_execute(include_str!("../create.sql")).await.unwrap();
-    let manager = deadpool_postgres::Manager::new(scoped, tokio_postgres::NoTls);
-    let pool = deadpool_postgres::Pool::builder(manager).max_size(8).build().unwrap();
+    let backend = Backend::open("parties_rust", include_str!("../create.sqlite.sql"), include_str!("../create.sql")).await;
+    let store = backend.store();
 
     let relays = Relays::default();
     let (sms, mail) = (relays.clone(), relays.clone());
@@ -388,12 +377,12 @@ async fn world(approve: bool) -> World {
         .unwrap(),
     );
     let dispatch = QueueDefinition::parse(types::queues::NOTICE_WORK_QUEUE).unwrap();
-    let notifier = Notifier::new(types::orm::postgres::tables(pool.clone()), dispatch)
+    let notifier = Notifier::new(store.clone(), dispatch)
         .unwrap()
         .with_providers(providers.clone());
     let runs = QueueDefinition::parse(types::queues::RUN_REQUEST_QUEUE).unwrap();
     let bucket = Arc::new(MemoryBucket::default());
-    let mut inbound = Inbound::new(types::orm::postgres::tables(pool.clone()), notifier.clone(), runs)
+    let mut inbound = Inbound::new(store.clone(), notifier.clone(), runs)
         .unwrap()
         .with_providers(providers)
         .with_bucket(bucket.clone())
@@ -403,9 +392,8 @@ async fn world(approve: bool) -> World {
         inbound = inbound.with_approval(Arc::new(ByWord));
     }
     let mut w = World {
-        pool,
-        admin,
-        schema,
+        backend,
+        store,
         notifier,
         inbound,
         relays,
@@ -418,7 +406,6 @@ async fn world(approve: bool) -> World {
     };
     let (ann, dee, job) = w
         .tx(async |r| {
-            let r = r.untyped();
             r.table("Role")?
                 .create_one(&values(json!({ "name": "contractor", "permissions": ["reports.write"], "reaches": ["Report:job"] })))
                 .await?;
@@ -451,21 +438,14 @@ async fn world(approve: bool) -> World {
 impl World {
     /// Runs `work` over the system's repositories in a transaction it
     /// commits.
-    async fn tx<T>(&self, work: impl AsyncFnOnce(&Repositories<'_, deadpool_postgres::Transaction<'_>>) -> T) -> T {
-        let mut client = self.pool.get().await.unwrap();
-        let tx = client.transaction().await.unwrap();
-        let repos = Repositories::new(&tx).unwrap().as_system();
-        let out = work(&repos).await;
-        drop(repos);
-        tx.commit().await.unwrap();
-        out
+    async fn tx<T>(&self, work: impl AsyncFnOnce(&TxRepositories<'_, '_>) -> T) -> T {
+        in_tx(&self.store, work).await
     }
 
     async fn grant_to(&self, holder: &str, table: &str, key: &str) -> String {
         self.tx(async |r| {
-            let issued = issue_grant(
-                r.untyped(),
-                &IssueGrant {
+            let issued = r
+                .issue_grant(&IssueGrant {
                     holder: holder.to_owned(),
                     holder_kind: PrincipalKind::Party,
                     role: "contractor".to_owned(),
@@ -474,29 +454,27 @@ impl World {
                     starts_at: None,
                     ends_at: None,
                     ends_when: None,
-                },
-            )
-            .await
-            .unwrap();
+                })
+                .await
+                .unwrap();
             text(&issued.grant, "id")
         })
         .await
     }
 
     async fn revoke(&self, grant: &str) {
-        let client = self.pool.get().await.unwrap();
-        let definition = types::orm::postgres_definition().unwrap();
-        revoke_grant(&client, definition, grant, SystemTime::now()).await.unwrap();
+        let client = self.store.client().await.unwrap();
+        let definition = self.store.definition().unwrap();
+        client.db().revoke_grant(definition, grant, SystemTime::now()).await.unwrap();
     }
 
     async fn rows(&self, table: &str, filter: Value) -> Vec<Values> {
-        let client = self.pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
-        repos.untyped().table(table).unwrap().find_many(Some(&values(filter)), &FindOptions::default()).await.unwrap().rows
+        let _ = FindOptions::default();
+        rows_of(&self.store, table, filter, None).await
     }
 
     async fn create(&self, table: &str, row: Value) -> String {
-        self.tx(async |r| text(&r.untyped().table(table).unwrap().create_one(&values(row)).await.unwrap(), "id"))
+        self.tx(async |r| text(&r.table(table).unwrap().create_one(&values(row)).await.unwrap(), "id"))
             .await
     }
 
@@ -505,16 +483,15 @@ impl World {
     }
 
     async fn attachments(&self, table: &str, key: &str) -> Vec<runtime::orm::rowfeatures::Attachment> {
-        let client = self.pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
-        repos.untyped().attachments().unwrap().list(&RowRef::new(table, key)).await.unwrap()
+        let client = self.store.client().await.unwrap();
+        let repos = client.db().repositories(self.store.definition().unwrap()).unwrap().as_system();
+        repos.attachments().unwrap().list(&RowRef::new(table, key)).await.unwrap()
     }
 
     async fn backlinks(&self, table: &str, key: &str) -> Vec<(String, String)> {
-        let client = self.pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
+        let client = self.store.client().await.unwrap();
+        let repos = client.db().repositories(self.store.definition().unwrap()).unwrap().as_system();
         repos
-            .untyped()
             .references()
             .unwrap()
             .referenced_by(&RowRef::new(table, key), None)
@@ -541,12 +518,11 @@ impl World {
         };
         let message = self.message(&request.message).await;
         let report = {
-            let mut client = self.pool.get().await.unwrap();
+            let mut client = self.store.client().await.unwrap();
             let tx = client.transaction().await.unwrap();
             let report = {
-                let repos = Repositories::new(&tx).unwrap().with_access(AccessCaller::of(Some(&party)));
+                let repos = tx.db().repositories(self.store.definition().unwrap()).unwrap().with_access(AccessCaller::of(Some(&party)));
                 repos
-                    .untyped()
                     .table("Report")
                     .unwrap()
                     .create_one(&values(json!({ "jobId": grant.target_id, "body": text(&message, "body") })))
@@ -581,7 +557,7 @@ impl World {
 
     /// The run requests waiting, read and put back.
     async fn pending_runs(&self) -> Vec<RunRequest> {
-        let queue: PostgresQueue<RunRequest> = self.inbound.run_queue();
+        let queue = self.inbound.run_queue();
         let claims = queue.claim(50, Duration::from_secs(30)).await.unwrap();
         for claim in &claims {
             queue.release(&claim.id, &claim.token).await.unwrap();
@@ -625,9 +601,9 @@ impl World {
     }
 
     async fn drop(self) {
-        let World { pool, admin, schema, .. } = self;
-        pool.close();
-        admin.batch_execute(&format!("DROP SCHEMA {schema} CASCADE")).await.unwrap();
+        let World { backend, store, notifier, inbound, .. } = self;
+        drop((store, notifier, inbound));
+        backend.drop_database().await;
     }
 }
 
@@ -662,6 +638,14 @@ async fn a_text_with_a_photo_becomes_a_row_on_the_granted_record() {
     // A report on the granted job, written as the party, with the photo.
     let reports = w.reports().await;
     assert_eq!(reports.len(), 1);
+    answer(
+        "a granted party's text",
+        json!({
+            "outcome": outcome.outcome,
+            "reports": reports.iter().map(|r| text(r, "body")).collect::<Vec<_>>(),
+            "photos": photos.iter().map(|p| (p.name.clone(), p.size, p.content_hash.clone())).collect::<Vec<_>>(),
+        }),
+    );
     assert_eq!(text(&reports[0], "body"), "Gate fixed, photo attached");
     let report = text(&reports[0], "id");
     let filed = w.attachments("Report", &report).await;
@@ -677,11 +661,11 @@ async fn a_text_with_a_photo_becomes_a_row_on_the_granted_record() {
     // job's.
     let other = w.create("Job", json!({ "title": "Paint the fence" })).await;
     let party = w.inbound.principal_of(&w.dee_party(), None).await.unwrap();
-    let mut client = w.pool.get().await.unwrap();
+    let mut client = w.store.client().await.unwrap();
     let tx = client.transaction().await.unwrap();
     let refused = {
-        let repos = Repositories::new(&tx).unwrap().with_access(AccessCaller::of(Some(&party)));
-        repos.untyped().table("Report").unwrap().create_one(&values(json!({ "jobId": other, "body": "not mine" }))).await
+        let repos = tx.db().repositories(w.store.definition().unwrap()).unwrap().with_access(AccessCaller::of(Some(&party)));
+        repos.table("Report").unwrap().create_one(&values(json!({ "jobId": other, "body": "not mine" }))).await
     };
     assert!(refused.is_err(), "{refused:?}");
     drop(tx);
@@ -706,6 +690,16 @@ async fn a_text_from_an_unknown_number_lands_in_triage() {
     assert_eq!(held.iter().map(|m| text(m, "id")).collect::<Vec<_>>(), vec![id.clone()]);
     // Reading triage is a permission.
     assert!(matches!(w.inbound.triage(&Principal::new(w.ann.clone(), Vec::<String>::new()), None).await, Err(InboundError::Refused(_))));
+    answer(
+        "an unknown sender",
+        json!({
+            "outcome": outcome.outcome,
+            "disposition": text(&message, "disposition"),
+            "triage": text(&message, "triage"),
+            "held": held.len(),
+            "runs": w.pending_runs().await.len(),
+        }),
+    );
     w.inbound.settle(&w.staff, &id).await.unwrap();
     assert!(w.inbound.triage(&w.staff, None).await.unwrap().is_empty());
     assert!(w.reports().await.is_empty());
@@ -735,6 +729,16 @@ async fn a_lapsed_identity_reaches_nothing_until_verified_again() {
     // Nothing is sent to it either.
     let refused = w.send(&w.staff, "sms", "Are you there?").await.unwrap();
     assert!(refused.detail.as_deref().unwrap_or_default().contains("lapsed"), "{refused:?}");
+    answer(
+        "a party whose grant ended",
+        json!({
+            "outcome": outcome.outcome,
+            "disposition": text(&message, "disposition"),
+            "reports": w.reports().await.len(),
+            "onTimeline": timeline.iter().any(|m| text(m, "id") == id),
+            "send": refused.detail,
+        }),
+    );
     // Verified again by the code sent to it, the party is itself again,
     // with no grant.
     let identity = w.rows("ChannelIdentity", json!({ "kind": { "eq": "phone" }, "address": { "eq": DEE } })).await.remove(0);

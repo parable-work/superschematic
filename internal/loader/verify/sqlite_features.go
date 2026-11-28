@@ -63,20 +63,20 @@ func refuseSQLiteReaders(schema *ir.Schema, in Input, td *ir.TypeDef, decorator 
 }
 
 // checkSQLiteVersioned refuses a @versioned table in a DB service that
-// lists the sqlite dialect and enables the Rust types (D189). On SQLite a
-// @versioned table's history is a table its row triggers keep
-// (sqlmigrate's sqlite_history.go), whichever ORM writes the row, and the
-// TypeScript and the Go repositories read the row's version and no history
-// (#618: the Go repository on SQLite refuses its history reads); the Rust
-// repositories read a history with Postgres's statements alone. A service
-// whose config the loader did not read is left unchecked.
+// lists the sqlite dialect and enables the types of a language whose
+// repositories do not serve one there (D189). On SQLite a @versioned
+// table's history is a table its row triggers keep (sqlmigrate's
+// sqlite_history.go), whichever ORM writes the row, and the TypeScript, Go
+// and Rust repositories read the row's version and no history (#618: the
+// Go and Rust repositories on SQLite refuse their history reads). A
+// service whose config the loader did not read is left unchecked.
 func checkSQLiteVersioned(schema *ir.Schema, in Input, r *Result) {
 	if !slices.Contains(in.Dialects, registry.SQLDialectSQLite) {
 		return
 	}
 	var others []string
 	for _, lang := range in.TypesLanguages {
-		if lang != registry.LangTypeScript && lang != registry.LangGo {
+		if lang != registry.LangTypeScript && lang != registry.LangGo && lang != registry.LangRust {
 			others = append(others, registry.LanguageName(lang))
 		}
 	}
@@ -88,7 +88,7 @@ func checkSQLiteVersioned(schema *ir.Schema, in Input, r *Result) {
 		if td == nil || !td.Versioned || td.Role != ir.RoleDBTable {
 			continue
 		}
-		r.errorf(td.Owner, "@versioned on %s: %s lists the sqlite dialect and enables the %s types, whose repositories read a history with Postgres's statements alone; on SQLite only the TypeScript and the Go repositories serve a @versioned table so far (D189, #618). Build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]), or leave its %s types out",
+		r.errorf(td.Owner, "@versioned on %s: %s lists the sqlite dialect and enables the %s types, whose repositories read a history with Postgres's statements alone; on SQLite only the TypeScript, Go and Rust repositories serve a @versioned table so far (D189, #618). Build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]), or leave its %s types out",
 			td.Name, schema.Name, strings.Join(others, " and "), schema.Name, strings.Join(others, " and "))
 	}
 }

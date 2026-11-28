@@ -2754,6 +2754,16 @@ the Go ORM runs:
   `outputs.sql.dialects` lists `sqlite`; a write runs in a transaction the
   caller opened.
 
+A `@versioned` table's rows and their `_version` are served on SQLite
+too (#618), its history kept by the triggers of the SQLite DDL; the Rust
+repositories read no history on either dialect. The runtime's notifier,
+inbound path and agent dispatcher run over `orm::store::Store`, which holds
+either dialect's tables: on a SQLite file a transaction of theirs is a
+write a task holds across its awaits (`Database::begin_async`), which
+every other task's write waits for, and in which the same task's own
+reads and writes run, a write in a savepoint
+([events and notifications](/superschematic/guides/notifications/#in-rust)).
+
 Each table's repository has `get_one`, `find_one`, `find_many`,
 `find_page`, `create_one`, `create_many`, `update_one`, `update_many`,
 `upsert_one`, `delete_one`, `hard_delete_one` and `reencrypt`. `acting`

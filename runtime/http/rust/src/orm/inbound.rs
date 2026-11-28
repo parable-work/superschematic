@@ -35,7 +35,8 @@
 //! refuses, ask holds the message awaiting approval until
 //! [`Inbound::release`] sends it.
 //!
-//! Postgres alone, as the notifier is. Rust has no ambient caller (D181), so
+//! On Postgres and on a SQLite file (#618), as the notifier is, over
+//! [`Store`](super::store::Store). Rust has no ambient caller (D181), so
 //! a read as a principal opens the repositories for it (`with_access`).
 
 use std::collections::BTreeMap;
@@ -44,7 +45,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use deadpool_postgres::GenericClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -53,12 +53,14 @@ use super::notify::{
     ReplyOutcome,
 };
 use super::parties::{identity_lapsed, party_principal, party_tables_of, same_uuid, PartyRef};
-use super::postgres::{deadpool_postgres, Repositories, Tables};
+#[cfg(feature = "postgres")]
+use super::postgres::deadpool_postgres;
 use super::rowfeatures::{BeginFile, FileOnto, FileRef, RowRef};
+use super::store::{Db, PartQueue, PgClient, Store, StoreRepositories};
 use super::{
     rfc3339_millis, AccessCaller, Definition, Error, FindOptions, OrderBy, Values, WriteOptions,
 };
-use crate::access::{active_grants, ActiveGrantsFilter};
+use crate::access::ActiveGrantsFilter;
 use crate::auth::{covers, Principal};
 use crate::bucket::{Body, Bucket, PutOptions};
 use crate::civil::parse_rfc3339;
@@ -66,7 +68,7 @@ use crate::providers::{
     ChannelAdapter, InboundAttachment, InboundAuthentication, InboundMessage, OptOut,
     OutboundMessage, Providers, RuntimeInterface, WebhookRequest,
 };
-use crate::queue::{enqueue, PostgresQueue, QueueDefinition, QueueError};
+use crate::queue::{QueueDefinition, QueueError};
 use crate::BoxError;
 
 /// The refusal or failure of an inbound call.
@@ -116,12 +118,14 @@ impl From<QueueError> for InboundError {
     }
 }
 
+#[cfg(feature = "postgres")]
 impl From<deadpool_postgres::tokio_postgres::Error> for InboundError {
     fn from(err: deadpool_postgres::tokio_postgres::Error) -> Self {
         InboundError::Failed(crate::error::chain(&err))
     }
 }
 
+#[cfg(feature = "postgres")]
 impl From<deadpool_postgres::PoolError> for InboundError {
     fn from(err: deadpool_postgres::PoolError) -> Self {
         InboundError::Failed(format!("the database is unreachable: {err}"))
@@ -411,7 +415,8 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 struct Inner {
-    tables: Tables,
+    tables: Store,
+    queue: PartQueue<RunRequest>,
     definition: &'static Definition,
     notifier: Notifier,
     runs: QueueDefinition,
@@ -454,8 +459,14 @@ impl Inbound {
     /// which a user's reply goes, and `runs`, the `@runRequests` queue's
     /// descriptor. It refuses a database without the conversations, the
     /// messages and the channel identities.
-    pub fn new(tables: Tables, notifier: Notifier, runs: QueueDefinition) -> Result<Self> {
+    pub fn new(
+        tables: impl Into<Store>,
+        notifier: Notifier,
+        runs: QueueDefinition,
+    ) -> Result<Self> {
+        let tables: Store = tables.into();
         let definition = tables.definition()?;
+        let queue = PartQueue::of(&tables, runs.clone())?;
         let part = |of: &dyn Fn(&super::Table) -> bool| {
             definition
                 .tables
@@ -481,6 +492,7 @@ impl Inbound {
         Ok(Self {
             inner: Arc::new(Inner {
                 tables,
+                queue,
                 definition,
                 notifier,
                 runs,
@@ -595,12 +607,12 @@ impl Inbound {
             .map_or_else(SystemTime::now, |now| now())
     }
 
-    fn pool(&self) -> &deadpool_postgres::Pool {
-        self.inner.tables.pool()
+    fn store(&self) -> &Store {
+        &self.inner.tables
     }
 
     /// The tables the path reads and writes.
-    pub fn tables(&self) -> &Tables {
+    pub fn tables(&self) -> &Store {
         &self.inner.tables
     }
 
@@ -622,20 +634,21 @@ impl Inbound {
             .unwrap_or_else(|| default_address_kind(channel).to_owned())
     }
 
-    fn sys<'c, C: GenericClient + Sync>(&'c self, client: &'c C) -> Result<Repositories<'c, C>> {
-        let mut repositories = Repositories::new(client, self.inner.definition)?.as_system();
+    fn sys<'c, C: PgClient>(&'c self, client: Db<'c, C>) -> Result<StoreRepositories<'c, C>> {
+        let mut repositories = client.repositories(self.inner.definition)?.as_system();
         if let Some(keys) = self.inner.tables.keys() {
             repositories = repositories.with_keys(keys.as_ref());
         }
         Ok(repositories)
     }
 
-    fn as_principal<'c, C: GenericClient + Sync>(
+    fn as_principal<'c, C: PgClient>(
         &'c self,
-        client: &'c C,
+        client: Db<'c, C>,
         principal: &Principal,
-    ) -> Result<Repositories<'c, C>> {
-        let mut repositories = Repositories::new(client, self.inner.definition)?
+    ) -> Result<StoreRepositories<'c, C>> {
+        let mut repositories = client
+            .repositories(self.inner.definition)?
             .acting(Some(principal.subject.clone()))
             .with_access(AccessCaller::of(Some(principal)));
         if let Some(keys) = self.inner.tables.keys() {
@@ -666,11 +679,11 @@ impl Inbound {
     /// Whether `principal` reads the row `key` of `table`.
     async fn reads(&self, principal: &Principal, table: &str, key: &str) -> Result<bool> {
         let def = self.inner.definition.table(table)?;
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let mut filter = Values::new();
         filter.insert(def.key.clone(), eq(key));
         Ok(self
-            .as_principal(&client, principal)?
+            .as_principal(client.db(), principal)?
             .table(table)?
             .find_one(Some(&filter), &FindOptions::default())
             .await?
@@ -714,9 +727,9 @@ impl Inbound {
 
     /// The conversation of `party` (or of `address`, for no party) on
     /// `channel`, made when there is none.
-    async fn conversation_of<C: GenericClient + Sync>(
+    async fn conversation_of<C: PgClient>(
         &self,
-        client: &C,
+        client: Db<'_, C>,
         channel: &str,
         address: &str,
         party: Option<&PartyRef>,
@@ -754,11 +767,11 @@ impl Inbound {
     }
 
     async fn message_where(&self, member: &str, value: &str) -> Result<Option<Values>> {
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let mut filter = Values::new();
         filter.insert(member.to_owned(), eq(value));
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.messages)?
             .find_one(Some(&filter), &FindOptions::default())
             .await?)
@@ -786,7 +799,7 @@ impl Inbound {
 
     /// Stores an inbound message's files on its row through the messages
     /// table's `@attachments`, and answers what could not be.
-    async fn store(&self, message: &str, files: &[InboundAttachment]) -> Option<String> {
+    async fn store_files(&self, message: &str, files: &[InboundAttachment]) -> Option<String> {
         if files.is_empty() {
             return None;
         }
@@ -817,10 +830,10 @@ impl Inbound {
     ) -> Result<(), BoxError> {
         let digest = ring::digest::digest(&ring::digest::SHA256, &file.bytes);
         let begun = {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             let (attachment, _) = self
-                .sys(&tx)?
+                .sys(tx.db())?
                 .attachments()?
                 .begin(
                     &BeginFile {
@@ -845,9 +858,9 @@ impl Inbound {
                 PutOptions::content_type(file.media_type.clone()),
             )
             .await?;
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        self.sys(&tx)?
+        self.sys(tx.db())?
             .attachments()?
             .complete(
                 &FileRef::new(self.inner.messages.clone(), begun.id.clone()),
@@ -865,9 +878,9 @@ impl Inbound {
             return;
         }
         let added: Result<(), BoxError> = async {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
-            self.sys(&tx)?
+            self.sys(tx.db())?
                 .references()?
                 .add(
                     &RowRef::new(self.inner.messages.clone(), message),
@@ -896,13 +909,13 @@ impl Inbound {
     ) -> Result<(Values, Values)> {
         let at = input.received_at.unwrap_or_else(|| self.now());
         let (mut row, held) = {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             let held = match conversation {
                 Some(conversation) => conversation,
                 None => {
                     self.conversation_of(
-                        &tx,
+                        tx.db(),
                         &input.channel,
                         address,
                         party,
@@ -932,7 +945,7 @@ impl Inbound {
             for (member, value) in values {
                 message.insert(member, value);
             }
-            let sys = self.sys(&tx)?;
+            let sys = self.sys(tx.db())?;
             let row = sys
                 .table(&self.inner.messages)?
                 .create_one(&message)
@@ -948,14 +961,17 @@ impl Inbound {
             tx.commit().await?;
             (row, held)
         };
-        if let Some(dropped) = self.store(&string(&row, "id"), &input.attachments).await {
+        if let Some(dropped) = self
+            .store_files(&string(&row, "id"), &input.attachments)
+            .await
+        {
             let detail = match opt(&row, "detail") {
                 Some(detail) => format!("{detail}; {dropped}"),
                 None => dropped,
             };
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             row = self
-                .sys(&client)?
+                .sys(client.db())?
                 .table(&self.inner.messages)?
                 .update_one(
                     &key(&string(&row, "id")),
@@ -1004,17 +1020,18 @@ impl Inbound {
         thread: Option<Values>,
     ) -> Result<InboundOutcome> {
         let mut grants = {
-            let client = self.pool().get().await?;
-            active_grants(
-                &client,
-                self.inner.definition,
-                &ActiveGrantsFilter {
-                    holder: Some(party.key.clone()),
-                    now: Some(self.now()),
-                    ..ActiveGrantsFilter::default()
-                },
-            )
-            .await?
+            let client = self.store().client().await?;
+            client
+                .db()
+                .active_grants(
+                    self.inner.definition,
+                    &ActiveGrantsFilter {
+                        holder: Some(party.key.clone()),
+                        now: Some(self.now()),
+                        ..ActiveGrantsFilter::default()
+                    },
+                )
+                .await?
         };
         let started = |g: &Values| {
             g.get("startsAt")
@@ -1037,14 +1054,14 @@ impl Inbound {
         // channel.
         let mut conversation = None;
         if let Some(thread) = &thread {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             let mut by_id = Values::new();
             by_id.insert(
                 "id".to_owned(),
                 eq(thread.get("conversation").cloned().unwrap_or(Value::Null)),
             );
             let named = self
-                .sys(&client)?
+                .sys(client.db())?
                 .table(&self.inner.conversations)?
                 .find_one(Some(&by_id), &FindOptions::default())
                 .await?;
@@ -1093,9 +1110,11 @@ impl Inbound {
             message: same_id(&id),
             grant: grant_id.clone(),
         };
-        let mut client = self.pool().get().await?;
+        let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
-        enqueue(&tx, &self.inner.runs, &request).await?;
+        tx.db()
+            .enqueue(&self.inner.runs, &request, Duration::ZERO)
+            .await?;
         tx.commit().await?;
         Ok(InboundOutcome {
             message: Some(id),
@@ -1114,7 +1133,7 @@ impl Inbound {
         out: bool,
     ) -> Result<InboundOutcome> {
         {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             let filter = obj(json!({
                 "kind": { "eq": kind },
                 "address": { "eq": address },
@@ -1125,7 +1144,7 @@ impl Inbound {
             } else {
                 Value::Null
             };
-            self.sys(&client)?
+            self.sys(client.db())?
                 .table(&self.inner.identities)?
                 .update_many(Some(&filter), &obj(json!({ "optedOutAt": stamp })))
                 .await?;
@@ -1268,9 +1287,10 @@ impl Inbound {
         let mut current: Vec<&Values> = Vec::new();
         let mut lapsed: Vec<&Values> = Vec::new();
         {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             for identity in party_identities {
-                if identity_lapsed(&client, self.inner.definition, identity, self.now()).await? {
+                if identity_lapsed(client.db(), self.inner.definition, identity, self.now()).await?
+                {
                     lapsed.push(identity);
                 } else {
                     current.push(identity);
@@ -1412,7 +1432,7 @@ impl Inbound {
         channel: &str,
     ) -> Result<std::result::Result<Values, String>> {
         let kind = self.address_kind_of(channel);
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         let filter = obj(json!({
             "principalKind": { "eq": "party" },
             "principal": { "eq": party.key },
@@ -1421,7 +1441,7 @@ impl Inbound {
             "revokedAt": { "isNull": true },
         }));
         let rows = self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.identities)?
             .find_many(Some(&filter), &many(10))
             .await?
@@ -1437,7 +1457,7 @@ impl Inbound {
             return Ok(Err("the address opted out".to_owned()));
         }
         for identity in open {
-            if !identity_lapsed(&client, self.inner.definition, identity, self.now()).await? {
+            if !identity_lapsed(client.db(), self.inner.definition, identity, self.now()).await? {
                 return Ok(Ok(identity.clone()));
             }
         }
@@ -1455,9 +1475,9 @@ impl Inbound {
     }
 
     async fn update_message(&self, id: &str, update: Value) -> Result<Values> {
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.messages)?
             .update_one(&key(id), &obj(update), &none())
             .await?)
@@ -1485,14 +1505,14 @@ impl Inbound {
             ..OutboundMessage::default()
         };
         if self.address_kind_of(&channel) == "email" {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             let filter = obj(json!({
                 "conversation": { "eq": row.get("conversation").cloned().unwrap_or(Value::Null) },
                 "direction": { "eq": "inbound" },
                 "messageId": { "isNull": false },
             }));
             let last = self
-                .sys(&client)?
+                .sys(client.db())?
                 .table(&self.inner.messages)?
                 .find_many(Some(&filter), &newest(1, "at"))
                 .await?
@@ -1543,8 +1563,8 @@ impl Inbound {
                         },
                     );
                 }
-                let client = self.pool().get().await?;
-                let sys = self.sys(&client)?;
+                let client = self.store().client().await?;
+                let sys = self.sys(client.db())?;
                 sys.table(&self.inner.messages)?
                     .update_one(&key(&id), &update, &none())
                     .await?;
@@ -1601,11 +1621,11 @@ impl Inbound {
             .map(|identity| string(identity, "address"))
             .unwrap_or_default();
         let mut conversation = {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             let conversation = self
                 .conversation_of(
-                    &tx,
+                    tx.db(),
                     &input.channel,
                     &address,
                     Some(&input.party),
@@ -1618,9 +1638,9 @@ impl Inbound {
         // The party's address on the channel is the one it is reached at
         // now.
         if destination.is_ok() && string(&conversation, "address") != address {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             conversation = self
-                .sys(&client)?
+                .sys(client.db())?
                 .table(&self.inner.conversations)?
                 .update_one(
                     conversation.get("id").unwrap_or(&Value::Null),
@@ -1669,9 +1689,9 @@ impl Inbound {
             row
         };
         let refuse = async |detail: &str| -> Result<SendOutcome> {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             let row = self
-                .sys(&client)?
+                .sys(client.db())?
                 .table(&self.inner.messages)?
                 .create_one(&create("refused", Some(detail)))
                 .await?;
@@ -1686,7 +1706,7 @@ impl Inbound {
         }
         let since = self.now() - Duration::from_secs(self.inner.rate_seconds);
         let recent = {
-            let client = self.pool().get().await?;
+            let client = self.store().client().await?;
             let filter = obj(json!({
                 "partyTable": { "eq": input.party.table },
                 "party": { "eq": input.party.key },
@@ -1694,7 +1714,7 @@ impl Inbound {
                 "state": { "in": ["sent", "queued", "awaitingApproval"] },
                 "at": { "gt": at_text(since) },
             }));
-            self.sys(&client)?
+            self.sys(client.db())?
                 .table(&self.inner.messages)?
                 .find_many(Some(&filter), &many(self.inner.rate_messages))
                 .await?
@@ -1724,8 +1744,8 @@ impl Inbound {
             "queued"
         };
         let row = {
-            let client = self.pool().get().await?;
-            self.sys(&client)?
+            let client = self.store().client().await?;
+            self.sys(client.db())?
                 .table(&self.inner.messages)?
                 .create_one(&create(state, None))
                 .await?
@@ -1796,8 +1816,8 @@ impl Inbound {
     /// The principal a party is (D156, D157): its active grants' reach and
     /// their roles' permissions, or one grant's.
     pub async fn principal_of(&self, party: &PartyRef, grant: Option<&str>) -> Result<Principal> {
-        let client = self.pool().get().await?;
-        Ok(party_principal(&client, self.inner.definition, party, grant, self.now()).await?)
+        let client = self.store().client().await?;
+        Ok(party_principal(client.db(), self.inner.definition, party, grant, self.now()).await?)
     }
 
     /// Files a message onto a row as `as_`, which must read it: the row
@@ -1827,8 +1847,8 @@ impl Inbound {
             return Ok(());
         }
         let files = {
-            let client = self.pool().get().await?;
-            match self.sys(&client)?.attachments() {
+            let client = self.store().client().await?;
+            match self.sys(client.db())?.attachments() {
                 Ok(attachments) => {
                     attachments
                         .list(&RowRef::new(self.inner.messages.clone(), message))
@@ -1838,10 +1858,10 @@ impl Inbound {
             }
         };
         for attachment in files {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             let filed = self
-                .sys(&tx)?
+                .sys(tx.db())?
                 .attachments()?
                 .file(&FileOnto {
                     file: FileRef::new(self.inner.messages.clone(), attachment.id.clone()),
@@ -1865,9 +1885,9 @@ impl Inbound {
     /// permission.
     pub async fn triage(&self, as_: &Principal, limit: Option<u32>) -> Result<Vec<Values>> {
         self.require_permission(as_, &self.inner.triage_permission, "read triage")?;
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.messages)?
             .find_many(
                 Some(&obj(json!({ "triage": { "eq": "open" } }))),
@@ -1909,9 +1929,9 @@ impl Inbound {
         if !self.reads(as_, &party.table, &party.key).await? {
             return Err(refused(format!("no party {} {}", party.table, party.key)));
         }
-        let client = self.pool().get().await?;
+        let client = self.store().client().await?;
         Ok(self
-            .sys(&client)?
+            .sys(client.db())?
             .table(&self.inner.messages)?
             .find_many(
                 Some(&obj(json!({
@@ -1935,8 +1955,8 @@ impl Inbound {
     /// The `@runRequests` queue over the tables' pool, as a worker claims
     /// it: each message's handler is the agent dispatcher's (D158,
     /// `Agents::handle` of `AgentRunRequest::from`), or an app's own.
-    pub fn run_queue(&self) -> PostgresQueue<RunRequest> {
-        PostgresQueue::new(self.pool().clone(), self.inner.runs.clone())
+    pub fn run_queue(&self) -> PartQueue<RunRequest> {
+        self.inner.queue.clone()
     }
 }
 

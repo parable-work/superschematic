@@ -760,6 +760,12 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				// index (D186).
 				onSQLite.Calendar = onPostgres.Calendar
 				onSQLite.Searchable = sqliteSearchable(onPostgres.Searchable)
+				// The notifier (D153), the parties, the inbound path and
+				// conversations (D157) and the agent orchestration (D158)
+				// read the same tables on SQLite (#618).
+				onSQLite.Events = onPostgres.Events
+				onSQLite.Notifier = onPostgres.Notifier
+				onSQLite.Party, onSQLite.Conversations, onSQLite.Agents = onPostgres.Party, onPostgres.Conversations, onPostgres.Agents
 			}
 			sqlite.Tables = append(sqlite.Tables, onSQLite)
 		}

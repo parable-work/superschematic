@@ -44,15 +44,14 @@ var agentsRustCases = []string{
 // agentsRustCases must run, and no credential value or run token may reach
 // the test's output.
 //
-// The test needs cargo, which it skips without, the database, and runs
-// outside -short.
+// The cases run on a SQLite file with the build's SQLite DDL applied
+// (#618) and, with the database, on Postgres too, and their answers must
+// be the same.
+//
+// The test needs cargo, which it skips without, and runs outside -short.
 func TestRustAgentRunsEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the Rust agent dispatcher in -short mode")
-	}
-	dsn := os.Getenv(behaviorServerDatabaseEnv)
-	if dsn == "" {
-		t.Skip("set " + behaviorServerDatabaseEnv + " to run the Rust agent dispatcher against Postgres")
 	}
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
@@ -66,16 +65,13 @@ func TestRustAgentRunsEndToEnd(t *testing.T) {
 		"{{stub-model}}", strconv.Quote(filepath.ToSlash(filepath.Join(providers, "stub-model"))),
 		"{{vault-broker}}", strconv.Quote(filepath.ToSlash(filepath.Join(providers, "vault-broker"))),
 	).Replace(agentsRustManifest)
-	out := rustRuntimeCrate(t, cargo, "fixture-agent-runs-db", "agents", manifest, agentsRustTest, "AGENTS_TEST_DATABASE_URL="+dsn)
-	t.Logf("tests/agents.rs:\n%s", out)
-	for _, name := range agentsRustCases {
-		if !strings.Contains(out, "case: "+name+"\n") {
-			t.Errorf("the case %q did not run:\n%s", name, out)
-		}
-	}
-	for _, secret := range []string{"site-key-4b9e17c2", "vault-broker-token-9d2c", "grant_"} {
-		if strings.Contains(out, secret) {
-			t.Errorf("%q reached the test's output:\n%s", secret, out)
+	onSQLite, onPostgres := rustRuntimeCrate(t, cargo, "fixture-agent-runs-db", "agents", manifest, agentsRustTest, os.Getenv(behaviorServerDatabaseEnv))
+	checkRustRuns(t, "agents", agentsRustCases, onSQLite, onPostgres)
+	for _, out := range []string{onSQLite, onPostgres} {
+		for _, secret := range []string{"site-key-4b9e17c2", "vault-broker-token-9d2c", "grant_"} {
+			if strings.Contains(out, secret) {
+				t.Errorf("%q reached the test's output:\n%s", secret, out)
+			}
 		}
 	}
 }
@@ -97,8 +93,8 @@ axum = "0.8.9"
 reqwest = { version = "0.13.2", default-features = false }
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "net", "rt-multi-thread", "time"] }
-types = { package = %q, path = %q, features = ["postgres"] }
-runtime = { package = "superschematic-http-runtime", path = %q, features = ["postgres"] }
+types = { package = %q, path = %q, features = ["postgres", "sqlite"] }
+runtime = { package = "superschematic-http-runtime", path = %q, features = ["postgres", "sqlite"] }
 stub-model = { path = {{stub-model}} }
 vault-broker = { path = {{vault-broker}} }
 

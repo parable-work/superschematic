@@ -14,7 +14,7 @@ stop switch ends every run in flight.
 
 | Built | Not built yet |
 | --- | --- |
-| `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
+| `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
 | run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
 | autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
@@ -25,7 +25,7 @@ stop switch ends every run in flight.
 | a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; a Rust server that builds the dispatcher into its `Deps`; `@autonomy` in a Go server, which serves no MCP endpoint |
 | the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres and SQLite | |
 | a generated Go server that builds the dispatcher, the notifier and the inbound path into its `Deps`, mounts their routes and runs their queues ([the generated Go server](#the-generated-go-server)) | the same over a database that lists `sqlite` first (#717) |
-| the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres | |
+| the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres and SQLite | a generated Rust server that builds the dispatcher over a database that lists `sqlite` first (#725) |
 
 [D158](https://github.com/parable-work/superschematic/issues/607) and [D183](https://github.com/parable-work/superschematic/issues/612)
 record the design and what is left. `examples/agent-orchestration` is
@@ -434,6 +434,18 @@ does not build the dispatcher into its `Deps` yet. The sandbox's side is
 `providers::run_agent_instance`, under the runtime's `http-client`
 feature. The agent routes run each call's work in a task of its own, so a
 run cancelled while its turn runs, by a pause or a budget's cap, does not
-leave the work half done when its connection closes. A Rust types crate
-that lists `sqlite` is refused the orchestration, which runs on SQLite and
-D1 in TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+leave the work half done when its connection closes.
+
+On SQLite (#618) `Agents::new` takes `orm::sqlite::tables(database)`, as
+the notifier and the inbound path do. A run's token is a grant the SQLite
+grants' authenticator admits for the dispatcher alone, as the Postgres one
+does; a run's Lease, Retries and status run through the behaviors' core
+in a transaction of the file; the definitions keep their rows and
+`_version`, which a run records, and their history is the SQLite DDL's
+triggers'; the `search` tool reads the FTS5 index (D186); and
+`worker_queue()` claims the requests on the file. A tool of the app, an
+`AgentToolRun`, and an `AskThread`, a `FollowUp` and an `OnReturn` are
+given `orm::store::TxRepositories`, the repositories of the transaction on
+either dialect, whose statements answer at once on SQLite. A generated
+Rust server over a database that lists `sqlite` first does not build the
+dispatcher yet (#725).
