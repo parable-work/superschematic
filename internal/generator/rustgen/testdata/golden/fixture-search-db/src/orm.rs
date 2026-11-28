@@ -10026,6 +10026,26 @@ pub mod sqlite {
             self.0.operation("comments", "reopen", key, params, options)
         }
 
+        /// Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+        pub fn mark_read(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsMarkReadParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsMarkReadResult, orm::Error> {
+            self.0.operation("comments", "markRead", key, params, options)
+        }
+
+        /// Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+        pub fn follow(
+            &self,
+            key: &IdentityUUID,
+            params: &UnitCommentsFollowParams,
+            options: &WriteOptions,
+        ) -> Result<UnitCommentsFollowResult, orm::Error> {
+            self.0.operation("comments", "follow", key, params, options)
+        }
+
         /// Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.
         pub fn list_messages(
             &self,
@@ -10074,6 +10094,14 @@ pub mod sqlite {
             options: &WriteOptions,
         ) -> Result<UnitCommentsListPinnedResult, orm::Error> {
             self.0.operation("comments", "listPinned", key, params, options)
+        }
+
+        /// Reads the live row whose key is `key` through the behaviors'
+        /// core as the repositories' caller (the core's read, #713), and
+        /// answers `comments`'s fields each reader reads its own of
+        /// (`unread`), by name. It writes nothing.
+        pub fn view(&self, key: &IdentityUUID) -> Result<orm::Values, orm::Error> {
+            self.0.view("comments", key)
         }
     }
 

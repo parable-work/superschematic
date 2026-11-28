@@ -485,7 +485,8 @@ type TicketCommentsOperations interface {
 	// WithBehaviorCaller names (the core's read, #713), in a transaction, and
 	// returns comments's fields each reader reads its own of, by name (unread),
 	// each as its JSON. It writes nothing, and returns ErrNotFound when no live
-	// row holds id.
+	// row holds id, or the row is one the caller does not see (D156), as
+	// GetOne's is.
 	View(ctx context.Context, id types.IdentityUUID) (map[string]json.RawMessage, error)
 }
 
@@ -811,7 +812,8 @@ func (o ticketCommentsOperations) ListPinned(ctx context.Context, id types.Ident
 // WithBehaviorCaller names (the core's read, #713), in a transaction, and
 // returns comments's fields each reader reads its own of, by name (unread),
 // each as its JSON. It writes nothing, and returns ErrNotFound when no live
-// row holds id.
+// row holds id, or the row is one the caller does not see (D156), as GetOne's
+// is.
 func (o ticketCommentsOperations) View(ctx context.Context, id types.IdentityUUID) (map[string]json.RawMessage, error) {
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (map[string]json.RawMessage, error) {
 		read, err := rules.RunRead(ctx, rulesHost(tx), "Ticket", id.String(), behaviorCaller(ctx))
