@@ -14,8 +14,8 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
-| the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
+| the same notifier in the Rust runtime, on Postgres and SQLite ([in Rust](#in-rust)) | a generated Rust server that builds it over a database that lists `sqlite` first (#725) |
 | the same notifier in the Go runtime, on Postgres and SQLite, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | the same generated over a database that lists `sqlite` first (#717) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
@@ -353,13 +353,14 @@ Hyperdrive (D151, #702).
 ## In Rust
 
 The Rust HTTP runtime's `orm::notify` is the same notifier, on Postgres
-(D191). The Postgres definition of a generated Rust types crate carries
-each table's `@event` declarations and what each table is to the
-notifier, so `Notifier::new` finds the inbox, the deliveries, the routes
-and the rest by itself, and the crate re-exports the module as
-`orm::postgres::notify`. It takes the database's `Tables`, whose keys and
-behaviors a reply's action writes through, and the dispatch queue's
-descriptor:
+(D191) and on a SQLite file (#618). Each definition of a generated Rust
+types crate carries each table's `@event` declarations and what each
+table is to the notifier, so `Notifier::new` finds the inbox, the
+deliveries, the routes and the rest by itself, and the crate re-exports
+the module as `orm::postgres::notify`. It takes the database's tables,
+Postgres's `orm::postgres::tables(pool)` or SQLite's
+`orm::sqlite::tables(database)`, whose keys and behaviors a reply's
+action writes through, and the dispatch queue's descriptor:
 
 ```rust
 use superschematic_http_runtime::orm::notify::{approval_replies, Notifier, RaiseInput, ReplyInput};
@@ -372,7 +373,9 @@ let notifier = Notifier::new(orm::postgres::tables(pool.clone()), QueueDefinitio
     .with_reply("approval.requested", approve, approve_action)
     .with_reply("approval.requested", deny, deny_action);
 
-// In the transaction of the change that caused it.
+// In the transaction of the change that caused it: a Postgres client, a
+// Store's transaction (`tx.db()`), or on SQLite the caller's own rusqlite
+// transaction through `raise_sqlite(&connection, input)`.
 notifier.raise(&tx, RaiseInput::of("Ticket", key, "ticket.overdue")).await?;
 // The dispatch queue's worker.
 run_worker(notifier.worker_queue(), move |message| { let n = notifier.clone(); async move { Ok(n.handle(message).await?) } }, options, shutdown).await?;
@@ -395,9 +398,10 @@ a reset code through the email adapter and sets the password with the
 identity service's `reset_password`. Rust has no ambient caller, so a
 recipient's read of the record opens the repositories for the recipient
 (`with_access`). The wall time of quiet hours and digests is read from
-Postgres, which holds the zone database. Quiet hours count wall minutes
-there, so on a night the clocks change inside the window they hold a
-notice an hour too long or too short (#602). A route that names an agent puts
+Postgres, which holds the zone database, and on SQLite from the IANA
+database the runtime bundles. Quiet hours count wall minutes there, so
+on a night the clocks change inside the window they hold a notice an
+hour too long or too short (#602). A route that names an agent puts
 a run request on the agent dispatcher's queue in the routing transaction,
 once `with_agents` gives the notifier that queue (D193); without it, the
 route's agent is logged and reaches no one. `Notifier::routes` serves the
@@ -410,9 +414,19 @@ the relays' routes, and runs a `@worker` of the dispatch queue through
 `handle` (#620); the implementation adds its reply actions in
 `Wire::notifier` ([the generated Rust server's
 wiring](/superschematic/guides/api-routes/#the-generated-rust-servers-wiring)). A party's address whose grants
-have all ended since it was verified is sent nothing. A Rust types crate
-that lists `sqlite` is refused the notifier, which runs on SQLite and D1 in
-TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+have all ended since it was verified is sent nothing.
+
+On SQLite (#618) the notifier runs the same statements of the
+repositories in SQLite's words. Its transactions are held writes of the
+file (`orm::sqlite::Database::begin_async`): every other task's write
+waits for one, and the task's own reads and writes run in it, so a reply's
+action that calls the dispatcher or the inbound path writes in the reply's
+transaction. A reply action's statements answer at once there, and so
+must a file's bucket the inbound path calls in a transaction.
+`worker_queue()` claims the dispatch queue over a connection of its own to
+the file; it takes no slot and reads no next due time (D145). A generated
+Rust server over a database that lists `sqlite` first does not wire the
+notifier yet (#725): the implementation builds it over the file.
 
 ## In Go
 

@@ -43,10 +43,10 @@ pub mod agents;
 pub mod calendar;
 pub mod fieldcrypt;
 pub mod file_processing;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod inbound;
 pub mod notify;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod parties;
 mod plan;
 #[cfg(feature = "postgres")]
@@ -59,6 +59,8 @@ pub mod search_tables;
 pub mod sqlite;
 #[cfg(feature = "sqlite")]
 mod sqlite_file;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod store;
 
 use std::collections::BTreeMap;
 use std::fmt;

@@ -792,6 +792,20 @@ pub mod sqlite {
     // indexing and its route (D155, D186, #615).
     pub use orm::search_tables::sqlite as search_tables;
 {{- end}}
+{{- if .ORM.Notifications}}
+    // The notifier, on SQLite too (D153, #618): Notifier::new takes this
+    // module's tables(database).
+    pub use orm::notify;
+{{- end}}
+{{- if .ORM.Parties}}
+    // Parties, the inbound path and the conversations, on SQLite too
+    // (D157, #618).
+    pub use orm::{inbound, parties};
+{{- end}}
+{{- if .ORM.Agents}}
+    // The agent dispatcher, on SQLite too (D158, #618).
+    pub use orm::agents;
+{{- end}}
 {{- if .BindsRules}}
     use rules::adapter;
 {{- end}}

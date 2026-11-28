@@ -15,7 +15,7 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage; a generated TypeScript server that builds it into its `Deps` and mounts each relay's inbound route ([below](#take-what-comes-in)) | the same in a generated Go or Rust server |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | |
@@ -323,8 +323,9 @@ lists the whole wiring.
 ## In Rust
 
 The Rust HTTP runtime's `orm::parties` and `orm::inbound` are the same
-path, on Postgres (D193). The Postgres definition of a generated Rust
-types crate carries each table's `@party` and its conversations part, so
+path, on Postgres (D193) and on a SQLite file (#618). Each definition of
+a generated Rust types crate carries each table's `@party` and its
+conversations part, so
 `Inbound::new` finds the conversations, the messages and the channel
 identities by itself, and the crate re-exports both modules. It takes the
 database's `Tables`, the notifier (D191) and the `@runRequests` queue's
@@ -356,6 +357,11 @@ party's address. Rust has no ambient caller, so a read as the sender or
 the party opens the repositories for it (`with_access`). The approval
 policy is a `SendApproval`: the app's, or the agent dispatcher's
 `send_approval`. A run request's message and grant are in base62, as the
-repositories write a key. A Rust types crate that lists `sqlite` is
-refused `@party`, the conversations and the run requests, which run on
-SQLite and D1 in TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+repositories write a key. On SQLite `Inbound::new` takes
+`orm::sqlite::tables(database)`, the path's transactions are held writes
+of the file ([in Rust](/superschematic/guides/notifications/#in-rust)), a
+message's files go through the SQLite attachments, and `run_queue()`
+claims the run requests on the file. `party_principal` and
+`identity_lapsed` take an `orm::store::Db` of either dialect. A generated
+Rust server over a database that lists `sqlite` first does not wire the
+path yet (#725).
