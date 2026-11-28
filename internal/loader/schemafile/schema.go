@@ -1,9 +1,9 @@
 package schemafile
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"runtime"
 	"slices"
@@ -15,6 +15,7 @@ import (
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -264,6 +265,7 @@ func addMCPInvocationProperty(defs map[string]any, policy registry.ToolInvocatio
 func addEncoderDefaults(defs map[string]any) error {
 	seen := map[reflect.Type]bool{}
 	var visit func(t reflect.Type) error
+	var visitFields func(t reflect.Type, defName string, props map[string]any) error
 	visit = func(t reflect.Type) error {
 		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Map {
 			t = t.Elem()
@@ -276,9 +278,21 @@ func addEncoderDefaults(defs map[string]any) error {
 		if err != nil {
 			return err
 		}
+		return visitFields(t, t.Name(), props)
+	}
+	visitFields = func(t reflect.Type, defName string, props map[string]any) error {
 		for i := range t.NumField() {
 			field := t.Field(i)
 			name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
+			// An embedded struct with no key of its own (ir.ValueRules)
+			// writes its keys beside the embedding struct's, as the encoder
+			// and the reflector inline them.
+			if field.Anonymous && name == "" && field.Type.Kind() == reflect.Struct {
+				if err := visitFields(field.Type, defName, props); err != nil {
+					return err
+				}
+				continue
+			}
 			// A jsonschema:"-" field is IR the loader writes (an Origin
 			// marker), never a data-form key, so the reflected schema has
 			// no property for it.
@@ -298,7 +312,7 @@ func addEncoderDefaults(defs map[string]any) error {
 			}
 			prop, ok := props[name].(map[string]any)
 			if !ok {
-				return fmt.Errorf("$defs/%s has no %q property", t.Name(), name)
+				return fmt.Errorf("$defs/%s has no %q property", defName, name)
 			}
 			prop["default"] = omitted
 		}
@@ -651,8 +665,8 @@ func replaceDefsWithArgs(defs map[string]any, reg *registry.Registry, name strin
 			return err
 		}
 		registered, _ := args.Defs[def]["properties"].(map[string]any)
-		if !slices.Equal(sortedKeys(reflected), sortedKeys(registered)) {
-			return fmt.Errorf("@%s Args $defs/%s has the properties %v, but ir.%s has %v", name, def, sortedKeys(registered), def, sortedKeys(reflected))
+		if !slices.Equal(slices.Sorted(maps.Keys(reflected)), slices.Sorted(maps.Keys(registered))) {
+			return fmt.Errorf("@%s Args $defs/%s has the properties %v, but ir.%s has %v", name, def, slices.Sorted(maps.Keys(registered)), def, slices.Sorted(maps.Keys(reflected)))
 		}
 		defs[def] = args.Defs[def]
 	}
@@ -809,13 +823,9 @@ func definitionValidators(resourceURL string, document []byte) (map[string]*vali
 }
 
 func compileDefinitions(resourceURL string, document []byte) (map[string]*validator.Schema, error) {
-	resource, err := validator.UnmarshalJSON(bytes.NewReader(document))
+	compiler, err := jsonschemas.Compiler(resourceURL, document)
 	if err != nil {
-		return nil, fmt.Errorf("decoding generated JSON Schema: %w", err)
-	}
-	compiler := validator.NewCompiler()
-	if err := compiler.AddResource(resourceURL, resource); err != nil {
-		return nil, fmt.Errorf("registering generated JSON Schema: %w", err)
+		return nil, fmt.Errorf("reading generated JSON Schema: %w", err)
 	}
 	defs := make(map[string]*validator.Schema)
 	for _, defName := range []string{"Document", "TypeDef", "EnumFile", "UnionFile", "ScalarFile", "OperationSetFile"} {
@@ -840,11 +850,7 @@ func validateAgainstDef(reg *registry.Registry, data []byte, defName, source str
 	if !ok {
 		return fmt.Errorf("no compiled JSON Schema definition %q", defName)
 	}
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("%s: %w", source, err)
-	}
-	if err := sch.Validate(instance); err != nil {
+	if err := jsonschemas.Validate(sch, data); err != nil {
 		return fmt.Errorf("%s: %w", source, err)
 	}
 	return nil

@@ -20,6 +20,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sdkgen"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/profile"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 //go:embed templates/*.tmpl
@@ -347,13 +348,7 @@ type QueryParam struct {
 	Required bool
 	Pointer  bool
 
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
+	ir.ValueRules
 
 	// IsArray marks a list parameter (QueryParam<T[]>), typed []T as the
 	// Go route takes it and sent as one comma-separated value. An empty
@@ -376,9 +371,9 @@ func (p QueryParam) HasItemRules() bool {
 		return false
 	}
 	if p.ItemIsText {
-		return p.ValidateMinLength != nil || p.ValidateMaxLength != nil || p.ValidatePattern != "" || !p.IsGoPrimitive
+		return p.HasText() || !p.IsGoPrimitive
 	}
-	return p.ValidateMin != nil || p.ValidateMax != nil
+	return p.HasRange()
 }
 
 // ChecksItems reports whether the SDK checks each item of a list
@@ -399,11 +394,7 @@ func (p QueryParam) ValidatesWhenSet() bool {
 	if p.IsArray {
 		return p.ChecksListMin() || p.ValidateListMax != nil || p.ChecksItems()
 	}
-	return p.ValidateMin != nil ||
-		p.ValidateMax != nil ||
-		p.ValidateMinLength != nil ||
-		p.ValidateMaxLength != nil ||
-		p.ValidatePattern != ""
+	return p.HasValue()
 }
 
 // Validates reports whether the SDK checks the parameter before the
@@ -421,13 +412,7 @@ type ScalarArg struct {
 	Pointer  bool
 	IsArray  bool
 
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
+	ir.ValueRules
 
 	// IsArrayOfArrays marks a T[][] argument ([][]T; IsArray is also set).
 	// Each inner list is checked for nil and, unless IsGoPrimitive, each
@@ -731,18 +716,12 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	queryParams := make([]QueryParam, 0, len(ep.QueryParams))
 	for _, param := range ep.QueryParams {
 		queryParam := QueryParam{
-			Name:              param.Name,
-			GoName:            goutil.GoPublicIdentifier(param.Name),
-			GoType:            mapScalarToGo(param),
-			Required:          param.Required,
-			Pointer:           !param.Required,
-			ValidateMin:       param.ValidateMin,
-			ValidateMax:       param.ValidateMax,
-			ValidateMinLength: param.ValidateMinLength,
-			ValidateMaxLength: param.ValidateMaxLength,
-			ValidateListMin:   param.ValidateListMin,
-			ValidateListMax:   param.ValidateListMax,
-			ValidatePattern:   param.ValidatePattern,
+			Name:       param.Name,
+			GoName:     goutil.GoPublicIdentifier(param.Name),
+			GoType:     mapScalarToGo(param),
+			Required:   param.Required,
+			Pointer:    !param.Required,
+			ValueRules: param.ValueRules,
 		}
 		if param.IsArray {
 			elemType := queryListElemGoType(param, scalarSymbols)
@@ -770,23 +749,17 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			pointer = false // maps are nil-able, no pointer needed
 		}
 		scalarArgs = append(scalarArgs, ScalarArg{
-			Name:              arg.Name,
-			GoName:            goutil.GoPublicIdentifier(arg.Name),
-			GoType:            goType,
-			Required:          arg.Required,
-			Pointer:           pointer,
-			IsArray:           isArray,
-			ValidateMin:       arg.ValidateMin,
-			ValidateMax:       arg.ValidateMax,
-			ValidateMinLength: arg.ValidateMinLength,
-			ValidateMaxLength: arg.ValidateMaxLength,
-			ValidateListMin:   arg.ValidateListMin,
-			ValidateListMax:   arg.ValidateListMax,
-			ValidatePattern:   arg.ValidatePattern,
-			IsArrayOfArrays:   arg.IsArrayOfArrays,
-			IsGoPrimitive:     arg.IsGoPrimitive(),
-			IsMap:             arg.IsMap,
-			typeName:          normalizeTypeName(arg.Type),
+			Name:            arg.Name,
+			GoName:          goutil.GoPublicIdentifier(arg.Name),
+			GoType:          goType,
+			Required:        arg.Required,
+			Pointer:         pointer,
+			IsArray:         isArray,
+			ValueRules:      arg.ValueRules,
+			IsArrayOfArrays: arg.IsArrayOfArrays,
+			IsGoPrimitive:   arg.IsGoPrimitive(),
+			IsMap:           arg.IsMap,
+			typeName:        normalizeTypeName(arg.Type),
 		})
 	}
 
@@ -1096,28 +1069,20 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			toolsOutput.SchemaName = output.SchemaName
 			toolsOutput.SDKClassName = output.SDKStructName
 
-			toolsFuncs := toolsTemplateFuncs()
-			toolsRenderer := codegen.NewFileGenerator(
-				templatesFS,
-				toolsFuncs,
+			if err := toolsutil.WriteDocuments(
+				filepath.Join(outputDir, "tools"),
+				toolsOutput,
+				[]toolsutil.Document{
+					toolsutil.OpenAIDocument,
+					toolsutil.AnthropicDocument,
+					toolsutil.SchemaDocument,
+					toolsutil.MCPAuditDocument,
+					toolsutil.MCPBindingDocument,
+				},
 				codegen.WithProfiler(prof, suffixProfilePrefixes(phasePrefixes, "tools")...),
 				codegen.WithSkipFormat(skipFormat),
-			)
-			toolsDir := filepath.Join(outputDir, "tools")
-			if err := generateFile(toolsRenderer, "tools-openai.tmpl", filepath.Join(toolsDir, "openai.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/openai.json: %w", err)
-			}
-			if err := generateFile(toolsRenderer, "tools-anthropic.tmpl", filepath.Join(toolsDir, "anthropic.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/anthropic.json: %w", err)
-			}
-			if err := generateFile(toolsRenderer, "tools-schema.tmpl", filepath.Join(toolsDir, "schema.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/schema.json: %w", err)
-			}
-			if err := generateFile(toolsRenderer, "tools-mcp-audit.tmpl", filepath.Join(toolsDir, "mcp-audit.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/mcp-audit.json: %w", err)
-			}
-			if err := generateFile(toolsRenderer, "tools-mcp-binding.tmpl", filepath.Join(toolsDir, "mcp-binding.json"), toolsOutput, toolsFuncs); err != nil {
-				return fmt.Errorf("failed to generate tools/mcp-binding.json: %w", err)
+			); err != nil {
+				return err
 			}
 		}
 	}
@@ -1278,33 +1243,7 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return false
 		},
-		"escapeGoString": func(value string) string {
-			escaped := strings.ReplaceAll(value, "\\", "\\\\")
-			return strings.ReplaceAll(escaped, "\"", "\\\"")
-		},
-	}
-}
-
-func toolsTemplateFuncs() template.FuncMap {
-	return template.FuncMap{
-		"escapeJSON": func(s string) string {
-			s = strings.ReplaceAll(s, "\\", "\\\\")
-			s = strings.ReplaceAll(s, "\"", "\\\"")
-			s = strings.ReplaceAll(s, "\n", "\\n")
-			s = strings.ReplaceAll(s, "\r", "\\r")
-			s = strings.ReplaceAll(s, "\t", "\\t")
-			return s
-		},
-		"schemaJSON": toolsutil.JSONSchemaPropertyLiteral,
-		"jsonValue":  toolsutil.JSONLiteral,
-		"sortedKeys": func(m map[string]sdkgen.JSONSchemaProperty) []string {
-			keys := make([]string, 0, len(m))
-			for k := range m {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			return keys
-		},
+		"escapeGoString": codegen.EscapeString,
 	}
 }
 
@@ -1534,13 +1473,7 @@ func endpointNeedsRegexp(endpoint EndpointInfo) bool {
 }
 
 func scalarArgHasValidationConstraints(arg ScalarArg) bool {
-	return arg.ValidateMin != nil ||
-		arg.ValidateMax != nil ||
-		arg.ValidateMinLength != nil ||
-		arg.ValidateMaxLength != nil ||
-		arg.ValidateListMin != nil ||
-		arg.ValidateListMax != nil ||
-		arg.ValidatePattern != ""
+	return arg.Any()
 }
 
 func loadUnionTypeNames(typesDir string) (map[string]struct{}, error) {

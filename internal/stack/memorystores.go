@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -49,7 +50,7 @@ func (r *resolver) applyMemoryStoreSettings(where, env string, d *deployable, en
 // disabled. Platform settings beside `enabled: false` have no platform to
 // go to, and are refused.
 func (r *resolver) disableDeployables() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableMemoryStore || d.settings.enabled == nil || *d.settings.enabled {
 			continue
@@ -77,7 +78,7 @@ func (r *resolver) disableDeployables() {
 // it reaches: the union of the memoryStores of the APIs it serves, sorted
 // by name, less those the environment turns off.
 func (r *resolver) resolveMemoryStores() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if !d.res.Kind.RunsCode() {
 			continue

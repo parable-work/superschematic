@@ -36,6 +36,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -153,7 +154,7 @@ func Run(dir, pinFile, version string, check bool, fetch Fetcher) error {
 	}
 
 	failed := false
-	for _, name := range sortedKeys(outputs) {
+	for _, name := range slices.Sorted(maps.Keys(outputs)) {
 		path := filepath.Join(dir, name)
 		if check {
 			have, err := os.ReadFile(path)
@@ -298,7 +299,7 @@ func parseUpstream(pkg string, schemaJSON, metadataJSON []byte) (*upstream, erro
 		terraform: map[string]string{},
 		fields:    map[string]map[string]*aliasField{},
 	}
-	for _, tf := range sortedKeys(meta.AutoAliasing.Resources) {
+	for _, tf := range slices.Sorted(maps.Keys(meta.AutoAliasing.Resources)) {
 		res := meta.AutoAliasing.Resources[tf]
 		if res.Current == "" {
 			continue
@@ -309,7 +310,7 @@ func parseUpstream(pkg string, schemaJSON, metadataJSON []byte) (*upstream, erro
 		u.terraform[res.Current] = tf
 		u.fields[tf] = res.Fields
 	}
-	for _, token := range sortedKeys(meta.Renames.Resources) {
+	for _, token := range slices.Sorted(maps.Keys(meta.Renames.Resources)) {
 		if _, aliased := u.terraform[token]; !aliased && meta.Renames.Resources[token] != "" {
 			u.terraform[token] = meta.Renames.Resources[token]
 		}
@@ -382,7 +383,7 @@ func (u *upstream) collectTypes(s *providerschema.Schema, props map[string]*prov
 				}
 				sort.Strings(t.Required)
 				s.Types[token] = &t
-				for _, name := range sortedKeys(t.Properties) {
+				for _, name := range slices.Sorted(maps.Keys(t.Properties)) {
 					if err := visit(t.Properties[name]); err != nil {
 						return err
 					}
@@ -402,7 +403,7 @@ func (u *upstream) collectTypes(s *providerschema.Schema, props map[string]*prov
 		}
 		return nil
 	}
-	for _, name := range sortedKeys(props) {
+	for _, name := range slices.Sorted(maps.Keys(props)) {
 		if err := visit(props[name]); err != nil {
 			return err
 		}
@@ -415,7 +416,7 @@ func (u *upstream) collectTypes(s *providerschema.Schema, props map[string]*prov
 // properties reference. fields are the Terraform list and block fields at
 // this level.
 func renames(s *providerschema.Schema, prefix string, props map[string]*providerschema.Property, fields map[string]*aliasField) error {
-	for _, name := range sortedKeys(props) {
+	for _, name := range slices.Sorted(maps.Keys(props)) {
 		p := props[name]
 		tf, err := terraformName(name, p, fields)
 		if err != nil {
@@ -448,7 +449,7 @@ func terraformName(name string, p *providerschema.Property, fields map[string]*a
 		return snake, nil
 	}
 	var matches []string
-	for _, field := range sortedKeys(fields) {
+	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		if fields[field].list() && slices.Contains(plurals(toCamel(field)), name) {
 			matches = append(matches, field)
 		}
@@ -537,13 +538,4 @@ func FetchCached(url string) ([]byte, error) {
 		return nil, err
 	}
 	return data, os.Rename(tmp, path)
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

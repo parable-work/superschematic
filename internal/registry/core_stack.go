@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -306,7 +308,7 @@ func applyEnvironment(td *ir.TypeDef, arg any) error {
 	}
 	decl := &ir.EnvironmentDecl{}
 	decl.Target, _ = args["target"].(string)
-	for _, key := range sortedKeys(args) {
+	for _, key := range slices.Sorted(maps.Keys(args)) {
 		value := args[key]
 		switch key {
 		case "target":
@@ -362,7 +364,7 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 	if name, _ := element["worker"].(string); name != "" {
 		isWorker = true
 	}
-	for _, key := range sortedKeys(element) {
+	for _, key := range slices.Sorted(maps.Keys(element)) {
 		value := element[key]
 		switch key {
 		case "of":
@@ -402,7 +404,7 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 		case "platform":
 			settings.Platform, _ = value.(string)
 		case "env":
-			for _, field := range sortedKeys(value.(map[string]any)) {
+			for _, field := range slices.Sorted(maps.Keys(value.(map[string]any))) {
 				if settings.Env == nil {
 					settings.Env = map[string]ir.EnvValue{}
 				}

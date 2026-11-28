@@ -7,6 +7,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -609,7 +610,7 @@ func ruleApplies(f codegen.FieldInfo, validator string) bool {
 // ruleExpr renders one rule as a runtime Rule, with the static its pattern
 // compiles into.
 func ruleExpr(rule codegen.ValidationRule, rulesID string) (string, *PatternStatic) {
-	message := rustString(rule.Message)
+	message := rustutil.Quote(rule.Message)
 	switch rule.Validator {
 	case "minLength":
 		return fmt.Sprintf("rt::Rule::MinLength(%d, %s)", intValue(rule.Value), message), nil
@@ -639,11 +640,11 @@ func digitRuleExprs(d *codegen.DigitRules) []string {
 	var exprs []string
 	if d.Decimal {
 		exprs = append(exprs,
-			fmt.Sprintf("rt::Rule::Precision(%d, %s)", d.IntegerDigits, rustString(d.PrecisionMessage())),
-			fmt.Sprintf("rt::Rule::Scale(%d, %s)", d.Scale, rustString(d.ScaleMessage())))
+			fmt.Sprintf("rt::Rule::Precision(%d, %s)", d.IntegerDigits, rustutil.Quote(d.PrecisionMessage())),
+			fmt.Sprintf("rt::Rule::Scale(%d, %s)", d.Scale, rustutil.Quote(d.ScaleMessage())))
 	}
 	if d.Dimensions > 0 {
-		exprs = append(exprs, fmt.Sprintf("rt::Rule::Dimensions(%d, %s)", d.Dimensions, rustString(d.DimensionsMessage())))
+		exprs = append(exprs, fmt.Sprintf("rt::Rule::Dimensions(%d, %s)", d.Dimensions, rustutil.Quote(d.DimensionsMessage())))
 	}
 	return exprs
 }
@@ -770,7 +771,7 @@ func floatValue(v any) float64 {
 func rustStrings(values []string) string {
 	quoted := make([]string, len(values))
 	for i, value := range values {
-		quoted[i] = rustString(value)
+		quoted[i] = rustutil.Quote(value)
 	}
 	return strings.Join(quoted, ", ")
 }
@@ -783,34 +784,4 @@ func fieldNames(fields []FieldValidator) string {
 		names[i] = f.Name
 	}
 	return rustStrings(names)
-}
-
-// rustString renders s as a Rust string literal.
-func rustString(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		case 0:
-			b.WriteString(`\0`)
-		default:
-			if r < 0x20 || r == 0x7f {
-				fmt.Fprintf(&b, `\u{%x}`, r)
-			} else {
-				b.WriteRune(r)
-			}
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
 }

@@ -8,8 +8,10 @@ package writer
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -144,7 +146,7 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 		return doc
 	}
 
-	for _, name := range sortedKeys(schema.Types) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		def := schema.Types[name]
 		base, ok := ownerBase(def.Owner)
 		if !ok {
@@ -179,7 +181,7 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 
 	// Everything else has no file attribution; it goes in the first document.
 	first := func() *schemafile.Document {
-		keys := sortedKeys(docs)
+		keys := slices.Sorted(maps.Keys(docs))
 		if len(keys) > 0 {
 			return docs[keys[0]]
 		}
@@ -189,7 +191,7 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 	if len(schema.Types) > 0 {
 		// Types whose Owner is not a file path (authored docs can leave
 		// Owner unset until Merge stamps it) also fall through to here.
-		for _, name := range sortedKeys(schema.Types) {
+		for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 			def := schema.Types[name]
 			if _, ok := ownerBase(def.Owner); ok {
 				continue
@@ -204,14 +206,14 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 		}
 	}
 
-	for _, name := range sortedKeys(schema.Scalars) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Scalars)) {
 		doc := first()
 		if doc.Scalars == nil {
 			doc.Scalars = make(map[string]*ir.ScalarDef)
 		}
 		doc.Scalars[name] = schema.Scalars[name]
 	}
-	for _, name := range sortedKeys(schema.Enums) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Enums)) {
 		def := schema.Enums[name]
 		copied := *def
 		copied.Owner = ""
@@ -221,7 +223,7 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 		}
 		doc.Enums[name] = &copied
 	}
-	for _, name := range sortedKeys(schema.Unions) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Unions)) {
 		doc := first()
 		if doc.Unions == nil {
 			doc.Unions = make(map[string]*ir.UnionDef)
@@ -263,7 +265,7 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 	// first document only; Merge rejects documents restating them with
 	// different content, and restating identical content on every file is
 	// noise. References go there too: Merge unions each document's.
-	keys := sortedKeys(docs)
+	keys := slices.Sorted(maps.Keys(docs))
 	if len(keys) > 0 {
 		docs[keys[0]].Description = schema.Description
 		docs[keys[0]].Comment = schema.Comment
@@ -312,7 +314,7 @@ func WriteService(schema *ir.Schema, format Format, outDir string) ([]string, er
 	}
 
 	var written []string
-	for _, base := range sortedKeys(docs) {
+	for _, base := range slices.Sorted(maps.Keys(docs)) {
 		var data []byte
 		var err error
 		if format == FormatTS {
@@ -337,7 +339,7 @@ func WriteService(schema *ir.Schema, format Format, outDir string) ([]string, er
 		}
 		written = append(written, rel)
 	}
-	for _, name := range sortedKeys(schema.CompositeDefaults) {
+	for _, name := range slices.Sorted(maps.Keys(schema.CompositeDefaults)) {
 		def := schema.CompositeDefaults[name]
 		if def == nil {
 			continue
@@ -370,22 +372,12 @@ func WriteService(schema *ir.Schema, format Format, outDir string) ([]string, er
 	return written, nil
 }
 
-// sortedKeys returns map keys in sorted order for deterministic output.
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // sourceLineageImports returns the cross-service imports implied by @source
 // targets on the schema's types. Same-service (or unqualified) targets are
 // omitted -- they resolve locally without an imports block entry.
 func sourceLineageImports(schema *ir.Schema) []ir.Import {
 	byPkg := map[string]map[string]bool{}
-	for _, name := range sortedKeys(schema.Types) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		td := schema.Types[name]
 		if td.Source == nil {
 			continue
@@ -406,8 +398,8 @@ func sourceLineageImports(schema *ir.Schema) []ir.Import {
 		return nil
 	}
 	out := make([]ir.Import, 0, len(byPkg))
-	for _, pkg := range sortedKeys(byPkg) {
-		types := sortedKeys(byPkg[pkg])
+	for _, pkg := range slices.Sorted(maps.Keys(byPkg)) {
+		types := slices.Sorted(maps.Keys(byPkg[pkg]))
 		out = append(out, ir.Import{Package: pkg, Types: types})
 	}
 	return out
@@ -441,8 +433,8 @@ func mergeImportLists(base, extra []ir.Import) []ir.Import {
 		return nil
 	}
 	out := make([]ir.Import, 0, len(byPkg))
-	for _, pkg := range sortedKeys(byPkg) {
-		out = append(out, ir.Import{Package: pkg, Types: sortedKeys(byPkg[pkg])})
+	for _, pkg := range slices.Sorted(maps.Keys(byPkg)) {
+		out = append(out, ir.Import{Package: pkg, Types: slices.Sorted(maps.Keys(byPkg[pkg]))})
 	}
 	return out
 }

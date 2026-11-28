@@ -267,7 +267,7 @@ func (c ReferencesClear) FunctionSQL() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "BEGIN\n  -- The references to the rows of %s a statement deleted (D154),\n  -- cleared, and the row that held each told on its cleared queue.\n", c.Origin)
 	for _, h := range c.Holders {
-		where := fmt.Sprintf("r.%s = %s AND r.%s = o.%s::text", h.TargetTable, stringLiteral(c.Origin), h.TargetKey, c.Key)
+		where := fmt.Sprintf("r.%s = %s AND r.%s = o.%s::text", h.TargetTable, sqlutil.QuoteLiteral(c.Origin), h.TargetKey, c.Key)
 		if h.Queue == "" {
 			fmt.Fprintf(&b, "  DELETE FROM %s AS r USING old_rows AS o WHERE %s;\n", h.QuotedTable, where)
 			continue
@@ -275,7 +275,7 @@ func (c ReferencesClear) FunctionSQL() string {
 		fmt.Fprintf(&b, "  WITH cleared AS (\n    DELETE FROM %s AS r USING old_rows AS o WHERE %s\n    RETURNING r.%s::text AS holder_key, r.%s AS target_table, r.%s AS target_key, r.%s AS reference_role\n  )\n",
 			h.QuotedTable, where, h.RowColumn, h.TargetTable, h.TargetKey, h.Role)
 		fmt.Fprintf(&b, "  INSERT INTO %s (%s)\n  SELECT %s, holder_key, target_table, target_key, reference_role FROM cleared;\n",
-			h.Queue, strings.Join(h.Columns, ", "), stringLiteral(h.Type))
+			h.Queue, strings.Join(h.Columns, ", "), sqlutil.QuoteLiteral(h.Type))
 	}
 	b.WriteString("  RETURN NULL;\nEND;\n")
 	body := b.String()

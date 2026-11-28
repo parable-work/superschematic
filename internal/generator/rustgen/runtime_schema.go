@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -103,8 +104,8 @@ func runtimeSymbolOwner(schema *ir.Schema, symbol string, dependencies map[strin
 	imports := append([]ir.Import{}, schema.Imports...)
 	sort.Slice(imports, func(i, j int) bool { return imports[i].Package < imports[j].Package })
 	for _, imp := range imports {
-		dep := dependencies[DependencyServiceName(imp.Package)]
-		if dep != nil && slices.Contains(importSymbolsForDependency(imp, dep), symbol) {
+		dep := dependencies[codegen.DependencyServiceName(imp.Package)]
+		if dep != nil && slices.Contains(codegen.ImportSymbols(imp, dep), symbol) {
 			if owner := runtimeSymbolOwner(dep, symbol, dependencies, visiting); owner != nil {
 				return owner
 			}

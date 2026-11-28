@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/canonical"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/descriptor"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
 )
 
@@ -91,46 +92,13 @@ type kind struct {
 	content       []string
 }
 
-// descriptor is what the adapter reads of a graph descriptor.
-type descriptor struct {
-	Version int    `json:"version"`
-	Graph   string `json:"graph"`
-	Root    struct {
-		Table string `json:"table"`
-		Key   string `json:"key"`
-	} `json:"root"`
-	RefTable      string `json:"refTable"`
-	CommitTable   string `json:"commitTable"`
-	PatchTable    string `json:"patchTable"`
-	ReleaseTable  string `json:"releaseTable"`
-	SnapshotTable string `json:"snapshotTable"`
-	Kinds         []struct {
-		Kind          string            `json:"kind"`
-		Table         string            `json:"table"`
-		HistoryTable  string            `json:"historyTable"`
-		Key           string            `json:"key"`
-		ID            string            `json:"id"`
-		Ref           string            `json:"ref"`
-		Root          string            `json:"root"`
-		Tombstone     string            `json:"tombstone"`
-		Version       string            `json:"version"`
-		Author        string            `json:"author"`
-		Excluded      []string          `json:"excluded"`
-		ReleasedTable string            `json:"releasedTable"`
-		Columns       map[string]string `json:"columns"`
-	} `json:"kinds"`
-}
-
 // New reads a graph's descriptor. The core checks the rest of it; the
 // adapter needs its tables, each kind's role columns, the root column
 // among them, and each kind's columns.
 func New(raw json.RawMessage, opts Options) (*Adapter, error) {
-	var d descriptor
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("postgres: read the descriptor: %w", err)
-	}
-	if d.Version != 3 {
-		return nil, fmt.Errorf("postgres: descriptor version %d; this adapter reads version 3", d.Version)
+	d, err := descriptor.Read(raw)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: %w", err)
 	}
 	for member, value := range map[string]string{"root table": d.Root.Table, "root key": d.Root.Key, "refTable": d.RefTable, "commitTable": d.CommitTable, "patchTable": d.PatchTable, "releaseTable": d.ReleaseTable, "snapshotTable": d.SnapshotTable} {
 		if value == "" {

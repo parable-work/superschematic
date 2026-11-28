@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -61,7 +63,7 @@ func applyProjection(td *ir.TypeDef, args []any) error {
 	if td.Projection != nil {
 		def.Joins = td.Projection.Joins
 	}
-	for _, key := range sortedKeys(opts) {
+	for _, key := range slices.Sorted(maps.Keys(opts)) {
 		value := opts[key]
 		switch key {
 		case "pool", "name", "migration", "sourceSchema":
@@ -133,7 +135,7 @@ func projectionPredicate(where string, value any) (*ir.ProjectionPredicate, erro
 		return nil, ArgErrorf(1, "@projection %s must be an object literal", where)
 	}
 	pred := &ir.ProjectionPredicate{}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		v := obj[key]
 		switch key {
 		case "column", "setting", "function", "inFunction":
@@ -267,7 +269,7 @@ func projectionCondition(where string, value any) (*ir.ProjectionCondition, erro
 		return nil, ArgErrorf(1, "@projection %s.when must be an object literal with column and equals", where)
 	}
 	cond := &ir.ProjectionCondition{}
-	for _, key := range sortedKeys(guard) {
+	for _, key := range slices.Sorted(maps.Keys(guard)) {
 		s, ok := guard[key].(string)
 		if !ok {
 			return nil, ArgErrorf(1, "@projection %s.when.%s must be a string literal", where, key)
@@ -295,7 +297,7 @@ func projectionCollapse(value any) (*ir.ProjectionCollapse, error) {
 		return nil, ArgErrorf(1, "@projection collapse must be an object literal with by and an optional order")
 	}
 	collapse := &ir.ProjectionCollapse{}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		v := obj[key]
 		switch key {
 		case "by":
@@ -332,7 +334,7 @@ func projectionOrder(index int, value any) (*ir.ProjectionOrder, error) {
 		return nil, ArgErrorf(1, "@projection collapse.order[%d] must be an object literal with column", index)
 	}
 	term := &ir.ProjectionOrder{}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		v := obj[key]
 		switch key {
 		case "column", "direction", "nulls":
@@ -386,7 +388,7 @@ func applyJoin(td *ir.TypeDef, args []any) error {
 	j := &ir.ProjectionJoin{Type: table, Alias: alias, Kind: "inner"}
 	// Object literal keys arrive as an unordered map; the join condition is
 	// a conjunction, so sorted order is canonical.
-	for _, left := range sortedKeys(on) {
+	for _, left := range slices.Sorted(maps.Keys(on)) {
 		right, ok := on[left].(string)
 		if !ok {
 			return ArgErrorf(2, "@join on values must be alias.field string literals")

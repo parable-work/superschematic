@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -77,15 +78,15 @@ func TestConvertEndpointPreservesArrayQueryType(t *testing.T) {
 	}
 }
 
-func TestRuntimeListMinimumDropsZero(t *testing.T) {
+func TestRuntimeRulesDropAZeroListMinimum(t *testing.T) {
 	zero, one := 0, 1
-	if runtimeListMinimum(&zero) != nil {
+	if runtimeRules(ir.ValueRules{ValidateListMin: &zero}).ValidateListMin != nil {
 		t.Fatal("a zero list minimum must not generate an unsigned comparison")
 	}
-	if got := runtimeListMinimum(&one); got == nil || *got != 1 {
+	if got := runtimeRules(ir.ValueRules{ValidateListMin: &one}).ValidateListMin; got == nil || *got != 1 {
 		t.Fatal("a positive list minimum was lost")
 	}
-	if runtimeListMinimum(nil) != nil {
+	if runtimeRules(ir.ValueRules{}).ValidateListMin != nil {
 		t.Fatal("an absent list minimum must stay absent")
 	}
 }

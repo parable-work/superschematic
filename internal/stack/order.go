@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -169,17 +170,17 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 // servers has no such order and fails.
 func (r *resolver) orderRollout() {
 	callees := map[string][]string{}
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		if e := r.edges[id].res; (e.Kind == ir.EdgeHTTP || e.Kind == ir.EdgeSite) && e.From != e.To {
 			callees[e.From] = append(callees[e.From], e.To)
 		}
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		app := r.deployables[name].res
 		if app.Kind != ir.DeployableApp || app.App == nil {
 			continue
 		}
-		for _, server := range sortedKeys(r.deployables) {
+		for _, server := range slices.Sorted(maps.Keys(r.deployables)) {
 			d := r.deployables[server].res
 			if d.Kind == ir.DeployableServer && slices.ContainsFunc(d.Services, func(s ir.ServiceRef) bool { return s.Name == app.App.API }) &&
 				!slices.Contains(callees[name], server) {
@@ -214,7 +215,7 @@ func (r *resolver) orderRollout() {
 		waves[name] = wave
 		return wave
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		if r.deployables[name].res.Kind.RollsOut() && !cycle {
 			visit(name)
 		}

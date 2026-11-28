@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -287,7 +288,7 @@ func (r *References) Of(ctx context.Context, row RowRef) ([]Reference, error) {
 		byTable[ref.To.Table] = append(byTable[ref.To.Table], ref.To.Key)
 	}
 	seen := map[string]map[string]bool{}
-	for _, table := range sortedKeys(byTable) {
+	for _, table := range slices.Sorted(maps.Keys(byTable)) {
 		if _, ok := r.def.Targets[table]; !ok {
 			seen[table] = map[string]bool{}
 			continue
@@ -341,7 +342,7 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 		at              int64
 	}
 	var all []found
-	for _, table := range sortedKeys(r.def.Holders) {
+	for _, table := range slices.Sorted(maps.Keys(r.def.Holders)) {
 		holder := r.def.Holders[table]
 		if len(holder.Tables) > 0 && !slices.Contains(holder.Tables, row.Table) {
 			continue
@@ -359,7 +360,7 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 	if target.UUID {
 		ids = []string{UUIDFromDB(keyText), keyText}
 	}
-	for _, table := range sortedKeys(r.def.Comments) {
+	for _, table := range slices.Sorted(maps.Keys(r.def.Comments)) {
 		source := r.def.Comments[table]
 		var probes []any
 		var conditions []string
@@ -398,7 +399,7 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 	}
 	seen := map[string]map[string]bool{}
 	holders, shown := 0, 0
-	for _, table := range sortedKeys(byTable) {
+	for _, table := range slices.Sorted(maps.Keys(byTable)) {
 		keys := byTable[table]
 		keep, err := visible(ctx, r.host, table, keys)
 		if err != nil {
@@ -435,13 +436,4 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 		}
 	}
 	return out, nil
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

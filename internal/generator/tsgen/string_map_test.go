@@ -93,8 +93,8 @@ func TestGeneratedStringMapUsesCanonicalParser(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, scalar := range output.Scalars {
-		if scalar.Name == "Generic.StringMap" && scalar.TSType != "Record<string, string>" {
-			t.Fatalf("Generic.StringMap TypeScript type = %q, want Record<string, string>", scalar.TSType)
+		if scalar.Name == "Generic.StringMap" && scalar.TSType() != "Record<string, string>" {
+			t.Fatalf("Generic.StringMap TypeScript type = %q, want Record<string, string>", scalar.TSType())
 		}
 	}
 	const runtimeTest = `
@@ -249,8 +249,8 @@ func TestGeneratedGeoLocationIsAnObject(t *testing.T) {
 		if scalar.Name != "Geo.Location" {
 			continue
 		}
-		if scalar.StructuredJSON != "object" || !scalar.UsesLibValidate || !scalar.HasJSONParse || scalar.TSType != "{ lat: number; lon: number }" {
-			t.Fatalf("Geo.Location: StructuredJSON = %q, UsesLibValidate = %v, HasJSONParse = %v, TSType = %q", scalar.StructuredJSON, scalar.UsesLibValidate, scalar.HasJSONParse, scalar.TSType)
+		if scalar.StructuredJSON != "object" || !scalar.UsesLibValidate || !scalar.HasJSONParse || scalar.TSType() != "{ lat: number; lon: number }" {
+			t.Fatalf("Geo.Location: StructuredJSON = %q, UsesLibValidate = %v, HasJSONParse = %v, TSType = %q", scalar.StructuredJSON, scalar.UsesLibValidate, scalar.HasJSONParse, scalar.TSType())
 		}
 	}
 	const runtimeTest = `

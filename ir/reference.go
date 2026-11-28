@@ -3,6 +3,8 @@ package ir
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -216,7 +218,7 @@ func LookupScopes(schema *Schema, dependencies map[string]*Schema, name string) 
 			out = append(out, LookupScope{Service: service, Schema: dependencies[service]})
 		}
 	}
-	for _, dep := range sortedStringMapKeys(dependencies) {
+	for _, dep := range slices.Sorted(maps.Keys(dependencies)) {
 		if dep != imported && dependencies[dep] != nil {
 			out = append(out, LookupScope{Service: dep, Schema: dependencies[dep]})
 		}
@@ -755,7 +757,7 @@ func SourcedBy(schema *Schema, target string) []*TypeDef {
 	}
 	want := qualifiedSourceTarget(schema, target)
 	var out []*TypeDef
-	for _, name := range sortedStringMapKeys(schema.Types) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		td := schema.Types[name]
 		if td == nil || td.Source == nil || td.IsTrait || td.Role == RoleTrait {
 			continue
@@ -798,7 +800,7 @@ func DerivedReferences(schema *Schema, dependencies map[string]*Schema) []HeldRe
 	if schema == nil || schema.Kind != SchemaKindAPI {
 		return out
 	}
-	for _, name := range sortedStringMapKeys(schema.Types) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		td := schema.Types[name]
 		if td == nil || td.Source == nil {
 			continue

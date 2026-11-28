@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -25,7 +26,7 @@ import (
 // and forwards no end user, so it reaches what admits its API's service
 // identity or anyone.
 func (r *resolver) checkCalls() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableServer || len(d.res.Calls) == 0 {
 			continue

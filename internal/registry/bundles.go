@@ -86,24 +86,7 @@ func (b Bundle) SettingsRequired() bool {
 // ValidateSettings checks a table's settings of the bundle against its
 // settings schema. Absent settings are checked as {}.
 func (b Bundle) ValidateSettings(settings json.RawMessage) error {
-	instance := any(map[string]any{})
-	if len(settings) > 0 {
-		decoded, err := validator.UnmarshalJSON(bytes.NewReader(settings))
-		if err != nil {
-			return fmt.Errorf("bundle %s settings: %w", b.Name, err)
-		}
-		instance = decoded
-	}
-	if b.settings == nil {
-		if m, ok := instance.(map[string]any); ok && len(m) == 0 {
-			return nil
-		}
-		return fmt.Errorf("bundle %s takes no settings", b.Name)
-	}
-	if err := b.settings.Validate(instance); err != nil {
-		return fmt.Errorf("bundle %s settings: %w", b.Name, err)
-	}
-	return nil
+	return validateOptionalObject(b.settings, settings, "bundle "+b.Name, "settings")
 }
 
 // Expand returns the uses the bundle adds to a table that gives it

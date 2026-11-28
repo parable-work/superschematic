@@ -267,9 +267,13 @@ func TestDefaultsAreWhatTheEncoderOmits(t *testing.T) {
 		}
 		seen[typ] = true
 		props := root.Defs[typ.Name()].Properties
-		for i := range typ.NumField() {
-			field := typ.Field(i)
+		// VisibleFields includes an embedded struct's fields (ir.ValueRules),
+		// whose keys the encoder writes beside the embedding struct's.
+		for _, field := range reflect.VisibleFields(typ) {
 			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if field.Anonymous && name == "" && field.Type.Kind() == reflect.Struct {
+				continue
+			}
 			schemaTag, _, _ := strings.Cut(field.Tag.Get("jsonschema"), ",")
 			if !field.IsExported() || name == "-" {
 				continue
@@ -284,7 +288,7 @@ func TestDefaultsAreWhatTheEncoderOmits(t *testing.T) {
 			visit(field.Type)
 
 			value := reflect.New(typ).Elem()
-			empty := value.Field(i)
+			empty := value.FieldByIndex(field.Index)
 			switch empty.Kind() {
 			case reflect.Pointer:
 				empty.Set(reflect.New(empty.Type().Elem()))

@@ -220,12 +220,12 @@ func ProjectionViewStatements(view ProjectionView) []string {
 	if doc == "" {
 		doc = "Generated from projection type: " + view.TypeName
 	}
-	statements = append(statements, fmt.Sprintf("COMMENT ON VIEW %s IS %s", view.QualifiedView, sqlLiteral(doc)))
+	statements = append(statements, fmt.Sprintf("COMMENT ON VIEW %s IS %s", view.QualifiedView, sqlutil.QuoteLiteral(doc)))
 	for _, col := range view.Columns {
 		if col.Doc == "" {
 			continue
 		}
-		statements = append(statements, fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s", view.QualifiedView, col.QuotedName, sqlLiteral(oneLine(col.Doc))))
+		statements = append(statements, fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s", view.QualifiedView, col.QuotedName, sqlutil.QuoteLiteral(oneLine(col.Doc))))
 	}
 	return statements
 }

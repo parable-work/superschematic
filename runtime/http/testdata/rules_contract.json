@@ -1,0 +1,1112 @@
+{
+  "comment": "The behaviors' core's JSON contract as values (D103): one value of each type a host's adapter writes or reads, by the name of its TypeScript copy in runtime/http/typescript/src/rules.ts, every optional member present and every variant of each enum, as superschematic-rules (runtime/engine/rust/rules) writes them. runtime/http/typescript's src/rules-contract.test.ts holds its Core* types to them. UPDATE_RULES_CONTRACT=1 cargo test -p superschematic-rules --test contract_vectors writes it.",
+  "values": {
+    "CoreAnchor": [
+      "type",
+      {
+        "field": "status"
+      }
+    ],
+    "CoreUseSpec": [
+      {
+        "behavior": "Workflow",
+        "config": {
+          "states": [
+            "draft",
+            "paid"
+          ]
+        },
+        "anchor": {
+          "field": "status"
+        }
+      }
+    ],
+    "CoreFieldSpec": [
+      {
+        "name": "projectId",
+        "type": "uuid",
+        "dateTime": true,
+        "relation": {
+          "name": "project",
+          "type": "Project"
+        },
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "CoreRelationSpec": [
+      {
+        "name": "project",
+        "type": "Project"
+      }
+    ],
+    "CoreTypeSpec": [
+      {
+        "name": "Order",
+        "uses": [
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "draft",
+                "paid"
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "projectId",
+            "type": "uuid",
+            "dateTime": true,
+            "relation": {
+              "name": "project",
+              "type": "Project"
+            },
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    ],
+    "CoreCaller": [
+      {
+        "subject": "alice",
+        "permissions": [
+          "orders.ship"
+        ],
+        "standsIn": true,
+        "actingFor": "bob",
+        "kind": "agent",
+        "actingForKind": "user",
+        "agent": "triage",
+        "assurance": {
+          "signedInAt": 1000,
+          "userVerified": true
+        }
+      }
+    ],
+    "CoreAction": [
+      {
+        "kind": "define"
+      },
+      {
+        "kind": "publish",
+        "from": {
+          "name": "Order",
+          "uses": [
+            {
+              "behavior": "Workflow",
+              "config": {
+                "states": [
+                  "draft",
+                  "paid"
+                ]
+              },
+              "anchor": {
+                "field": "status"
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "projectId",
+              "type": "uuid",
+              "dateTime": true,
+              "relation": {
+                "name": "project",
+                "type": "Project"
+              },
+              "schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "create",
+        "id": "o1",
+        "own": {
+          "title": "Desk"
+        },
+        "params": {
+          "status": {
+            "to": "draft"
+          }
+        }
+      },
+      {
+        "kind": "update",
+        "key": "o1",
+        "patch": {
+          "title": "Chair"
+        }
+      },
+      {
+        "kind": "delete",
+        "key": "o1"
+      },
+      {
+        "kind": "operation",
+        "key": "o1",
+        "useId": "status",
+        "operation": "transition",
+        "params": {
+          "to": "paid"
+        }
+      },
+      {
+        "kind": "tableOperation",
+        "useId": "Numbering",
+        "operation": "reset",
+        "params": {
+          "from": 1
+        }
+      },
+      {
+        "kind": "deadline",
+        "key": "o1",
+        "useId": "Timers",
+        "name": "respond",
+        "at": 2000,
+        "payload": {
+          "attempt": 1
+        }
+      },
+      {
+        "kind": "change",
+        "key": "o1",
+        "change": {
+          "write": "update",
+          "at": 1000,
+          "before": {
+            "own": {
+              "title": "Desk"
+            },
+            "owned": {
+              "status": {
+                "status": "draft"
+              }
+            }
+          },
+          "after": {
+            "own": {
+              "title": "Desk"
+            },
+            "owned": {
+              "status": {
+                "status": "draft"
+              }
+            }
+          }
+        }
+      },
+      {
+        "kind": "read",
+        "key": "o1"
+      },
+      {
+        "kind": "signal",
+        "key": "o1",
+        "useId": "Comments",
+        "name": "typing",
+        "data": {
+          "draft": true
+        }
+      },
+      {
+        "kind": "namespaceOperation",
+        "behavior": "Approvals",
+        "operation": "pending",
+        "params": {
+          "limit": 10
+        }
+      }
+    ],
+    "CoreWriteKind": [
+      "insert",
+      "update",
+      "delete"
+    ],
+    "CoreRowImage": [
+      {
+        "own": {
+          "title": "Desk"
+        },
+        "owned": {
+          "status": {
+            "status": "draft"
+          }
+        }
+      }
+    ],
+    "CoreRowChange": [
+      {
+        "write": "update",
+        "at": 1000,
+        "before": {
+          "own": {
+            "title": "Desk"
+          },
+          "owned": {
+            "status": {
+              "status": "draft"
+            }
+          }
+        },
+        "after": {
+          "own": {
+            "title": "Desk"
+          },
+          "owned": {
+            "status": {
+              "status": "draft"
+            }
+          }
+        }
+      }
+    ],
+    "CoreCommand": [
+      {
+        "caller": {
+          "subject": "alice",
+          "permissions": [
+            "orders.ship"
+          ],
+          "standsIn": true,
+          "actingFor": "bob",
+          "kind": "agent",
+          "actingForKind": "user",
+          "agent": "triage",
+          "assurance": {
+            "signedInAt": 1000,
+            "userVerified": true
+          }
+        },
+        "now": 1000,
+        "action": {
+          "kind": "delete",
+          "key": "o1"
+        },
+        "request": "r1",
+        "preconditions": {
+          "Lease": {
+            "token": 3
+          }
+        }
+      }
+    ],
+    "CoreReadRequest": [
+      {
+        "kind": "row",
+        "type": "Order",
+        "key": "o1"
+      },
+      {
+        "kind": "hasRows",
+        "type": "Order"
+      },
+      {
+        "kind": "spec",
+        "type": "Order"
+      },
+      {
+        "kind": "subRows",
+        "type": "Order",
+        "key": "o1",
+        "useId": "Approvals",
+        "table": "signOffs"
+      },
+      {
+        "kind": "linked",
+        "type": "Task",
+        "field": "projectId",
+        "key": "p1",
+        "after": "t1",
+        "limit": 500
+      },
+      {
+        "kind": "holding",
+        "type": "Job",
+        "useId": "Lease",
+        "field": "holder",
+        "value": "alice",
+        "after": "j1",
+        "limit": 500
+      },
+      {
+        "kind": "rows",
+        "type": "Order",
+        "equal": {
+          "status": "open"
+        },
+        "tables": [
+          {
+            "useId": "Approvals",
+            "table": "signOffs"
+          }
+        ],
+        "after": "o1",
+        "limit": 500
+      },
+      {
+        "kind": "sharedRow",
+        "type": "Order",
+        "useId": "Numbering",
+        "table": "counts",
+        "key": "2026"
+      },
+      {
+        "kind": "composing",
+        "behavior": "Approvals"
+      },
+      {
+        "kind": "permissions",
+        "subjects": [
+          "alice",
+          "bob"
+        ]
+      }
+    ],
+    "CoreTableRef": [
+      {
+        "useId": "Approvals",
+        "table": "signOffs"
+      }
+    ],
+    "CoreRow": [
+      {
+        "own": {
+          "title": "Desk"
+        },
+        "owned": {
+          "status": {
+            "status": "draft"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "CoreSubRow": [
+      {
+        "key": "s1",
+        "values": {
+          "by": "alice"
+        }
+      }
+    ],
+    "CoreKeyedRow": [
+      {
+        "key": "o1",
+        "row": {
+          "own": {
+            "title": "Desk"
+          },
+          "owned": {
+            "status": {
+              "status": "draft"
+            }
+          },
+          "version": 1
+        },
+        "tables": {
+          "Approvals": {
+            "signOffs": [
+              {
+                "key": "s1",
+                "values": {
+                  "by": "alice"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "CoreLinkedRows": [
+      {
+        "rows": [
+          {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "status": {
+                  "status": "draft"
+                }
+              },
+              "version": 1
+            },
+            "tables": {
+              "Approvals": {
+                "signOffs": [
+                  {
+                    "key": "s1",
+                    "values": {
+                      "by": "alice"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "more": true
+      }
+    ],
+    "CoreSharedRow": [
+      {
+        "key": "2026",
+        "values": {
+          "next": 7
+        },
+        "version": 3
+      }
+    ],
+    "CoreAnswer": [
+      {
+        "row": {
+          "own": {
+            "title": "Desk"
+          },
+          "owned": {
+            "status": {
+              "status": "draft"
+            }
+          },
+          "version": 1
+        }
+      },
+      {
+        "hasRows": true
+      },
+      {
+        "spec": {
+          "name": "Order",
+          "uses": [
+            {
+              "behavior": "Workflow",
+              "config": {
+                "states": [
+                  "draft",
+                  "paid"
+                ]
+              },
+              "anchor": {
+                "field": "status"
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "projectId",
+              "type": "uuid",
+              "dateTime": true,
+              "relation": {
+                "name": "project",
+                "type": "Project"
+              },
+              "schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "subRows": [
+          {
+            "key": "s1",
+            "values": {
+              "by": "alice"
+            }
+          }
+        ]
+      },
+      {
+        "linked": {
+          "rows": [
+            {
+              "key": "o1",
+              "row": {
+                "own": {
+                  "title": "Desk"
+                },
+                "owned": {
+                  "status": {
+                    "status": "draft"
+                  }
+                },
+                "version": 1
+              },
+              "tables": {
+                "Approvals": {
+                  "signOffs": [
+                    {
+                      "key": "s1",
+                      "values": {
+                        "by": "alice"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "more": true
+        }
+      },
+      {
+        "sharedRow": {
+          "key": "2026",
+          "values": {
+            "next": 7
+          },
+          "version": 3
+        }
+      },
+      {
+        "specs": [
+          {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "paid"
+                  ]
+                },
+                "anchor": {
+                  "field": "status"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "projectId",
+                "type": "uuid",
+                "dateTime": true,
+                "relation": {
+                  "name": "project",
+                  "type": "Project"
+                },
+                "schema": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "permissions": {
+          "alice": [
+            "orders.ship"
+          ]
+        }
+      }
+    ],
+    "CoreAnswered": [
+      {
+        "request": {
+          "kind": "row",
+          "type": "Order",
+          "key": "o1"
+        },
+        "answer": {
+          "row": {
+            "own": {
+              "title": "Desk"
+            },
+            "owned": {
+              "status": {
+                "status": "draft"
+              }
+            },
+            "version": 1
+          }
+        },
+        "held": 2
+      }
+    ],
+    "CoreAnswers": [
+      {
+        "reads": [
+          {
+            "request": {
+              "kind": "row",
+              "type": "Order",
+              "key": "o1"
+            },
+            "answer": {
+              "row": {
+                "own": {
+                  "title": "Desk"
+                },
+                "owned": {
+                  "status": {
+                    "status": "draft"
+                  }
+                },
+                "version": 1
+              }
+            },
+            "held": 2
+          }
+        ],
+        "locks": [
+          "Order:o1"
+        ]
+      }
+    ],
+    "CoreStep": [
+      {
+        "read": [
+          {
+            "kind": "row",
+            "type": "Order",
+            "key": "o1"
+          }
+        ]
+      },
+      {
+        "lock": [
+          "Order:o1"
+        ]
+      },
+      {
+        "done": {
+          "refused": {
+            "code": "vetoed",
+            "status": 409,
+            "class": "BehaviorVetoError",
+            "message": "the transition is not allowed",
+            "details": {
+              "behavior": "Workflow"
+            }
+          }
+        }
+      }
+    ],
+    "CoreOutcome": [
+      {
+        "refused": {
+          "code": "vetoed",
+          "status": 409,
+          "class": "BehaviorVetoError",
+          "message": "the transition is not allowed",
+          "details": {
+            "behavior": "Workflow"
+          }
+        }
+      },
+      {
+        "changed": {
+          "rows": [
+            {
+              "kind": "update",
+              "type": "Order",
+              "key": "o1",
+              "expectedVersion": 1,
+              "own": {
+                "title": "Chair"
+              },
+              "owned": {
+                "status": {
+                  "status": "draft"
+                }
+              }
+            }
+          ],
+          "subRows": [
+            {
+              "row": {
+                "type": "Order",
+                "key": "o1"
+              },
+              "useId": "Approvals",
+              "table": "signOffs",
+              "key": "s1",
+              "change": {
+                "kind": "insert",
+                "values": {
+                  "by": "alice"
+                }
+              }
+            }
+          ],
+          "sharedRows": [
+            {
+              "type": "Order",
+              "useId": "Numbering",
+              "table": "counts",
+              "key": "2026",
+              "change": {
+                "kind": "update",
+                "expectedVersion": 3,
+                "values": {
+                  "next": 8
+                }
+              }
+            }
+          ],
+          "events": [
+            {
+              "row": {
+                "type": "Order",
+                "key": "o1"
+              },
+              "kind": "approved",
+              "useId": "Approvals",
+              "payload": {
+                "by": "alice"
+              }
+            }
+          ],
+          "deadlines": [
+            {
+              "kind": "arm",
+              "row": {
+                "type": "Order",
+                "key": "o1"
+              },
+              "useId": "Timers",
+              "name": "respond",
+              "at": 2000,
+              "payload": {
+                "attempt": 1
+              }
+            }
+          ],
+          "signals": [
+            {
+              "row": {
+                "type": "Order",
+                "key": "o1"
+              },
+              "useId": "Comments",
+              "name": "typing",
+              "data": {
+                "draft": true
+              }
+            }
+          ],
+          "result": {
+            "ok": true
+          }
+        }
+      }
+    ],
+    "CoreCode": [
+      "invalid_schema",
+      "incompatible_change",
+      "not_found",
+      "invalid_argument",
+      "forbidden",
+      "invalid_instance",
+      "conflict",
+      "vetoed",
+      "busy",
+      "behavior_error",
+      "internal"
+    ],
+    "CoreRefusal": [
+      {
+        "code": "vetoed",
+        "status": 409,
+        "class": "BehaviorVetoError",
+        "message": "the transition is not allowed",
+        "details": {
+          "behavior": "Workflow"
+        }
+      }
+    ],
+    "CoreRowRef": [
+      {
+        "type": "Order",
+        "key": "o1"
+      },
+      {
+        "type": "Order",
+        "key": null
+      }
+    ],
+    "CoreRowWrite": [
+      {
+        "kind": "create",
+        "type": "Order",
+        "key": "o1",
+        "own": {
+          "title": "Desk"
+        },
+        "owned": {
+          "status": {
+            "status": "draft"
+          }
+        }
+      },
+      {
+        "kind": "update",
+        "type": "Order",
+        "key": "o1",
+        "expectedVersion": 1,
+        "own": {
+          "title": "Chair"
+        },
+        "owned": {
+          "status": {
+            "status": "draft"
+          }
+        }
+      },
+      {
+        "kind": "delete",
+        "type": "Order",
+        "key": "o1",
+        "expectedVersion": 2
+      },
+      {
+        "kind": "gone",
+        "type": "Order",
+        "key": "o1"
+      }
+    ],
+    "CoreSubRowWrite": [
+      {
+        "row": {
+          "type": "Order",
+          "key": "o1"
+        },
+        "useId": "Approvals",
+        "table": "signOffs",
+        "key": "s1",
+        "change": {
+          "kind": "insert",
+          "values": {
+            "by": "alice"
+          }
+        }
+      },
+      {
+        "row": {
+          "type": "Order",
+          "key": "o1"
+        },
+        "useId": "Approvals",
+        "table": "signOffs",
+        "key": "s1",
+        "change": {
+          "kind": "update",
+          "values": {
+            "by": "bob"
+          }
+        }
+      },
+      {
+        "row": {
+          "type": "Order",
+          "key": "o1"
+        },
+        "useId": "Approvals",
+        "table": "signOffs",
+        "key": "s1",
+        "change": {
+          "kind": "delete"
+        }
+      }
+    ],
+    "CoreSharedRowWrite": [
+      {
+        "type": "Order",
+        "useId": "Numbering",
+        "table": "counts",
+        "key": "2026",
+        "change": {
+          "kind": "insert",
+          "values": {
+            "next": 1
+          }
+        }
+      },
+      {
+        "type": "Order",
+        "useId": "Numbering",
+        "table": "counts",
+        "key": "2026",
+        "change": {
+          "kind": "update",
+          "expectedVersion": 3,
+          "values": {
+            "next": 8
+          }
+        }
+      },
+      {
+        "type": "Order",
+        "useId": "Numbering",
+        "table": "counts",
+        "key": "2026",
+        "change": {
+          "kind": "delete",
+          "expectedVersion": 4
+        }
+      }
+    ],
+    "CoreOutboxEvent": [
+      {
+        "row": {
+          "type": "Order",
+          "key": "o1"
+        },
+        "kind": "approved",
+        "useId": "Approvals",
+        "payload": {
+          "by": "alice"
+        }
+      }
+    ],
+    "CoreDeadlineChange": [
+      {
+        "kind": "arm",
+        "row": {
+          "type": "Order",
+          "key": "o1"
+        },
+        "useId": "Timers",
+        "name": "respond",
+        "at": 2000,
+        "payload": {
+          "attempt": 1
+        }
+      },
+      {
+        "kind": "clear",
+        "row": {
+          "type": "Order",
+          "key": "o1"
+        },
+        "useId": "Timers",
+        "name": "respond"
+      }
+    ],
+    "CoreSignal": [
+      {
+        "row": {
+          "type": "Order",
+          "key": "o1"
+        },
+        "useId": "Comments",
+        "name": "typing",
+        "data": {
+          "draft": true
+        }
+      }
+    ],
+    "CoreChangeSet": [
+      {
+        "rows": [
+          {
+            "kind": "update",
+            "type": "Order",
+            "key": "o1",
+            "expectedVersion": 1,
+            "own": {
+              "title": "Chair"
+            },
+            "owned": {
+              "status": {
+                "status": "draft"
+              }
+            }
+          }
+        ],
+        "subRows": [
+          {
+            "row": {
+              "type": "Order",
+              "key": "o1"
+            },
+            "useId": "Approvals",
+            "table": "signOffs",
+            "key": "s1",
+            "change": {
+              "kind": "insert",
+              "values": {
+                "by": "alice"
+              }
+            }
+          }
+        ],
+        "sharedRows": [
+          {
+            "type": "Order",
+            "useId": "Numbering",
+            "table": "counts",
+            "key": "2026",
+            "change": {
+              "kind": "update",
+              "expectedVersion": 3,
+              "values": {
+                "next": 8
+              }
+            }
+          }
+        ],
+        "events": [
+          {
+            "row": {
+              "type": "Order",
+              "key": "o1"
+            },
+            "kind": "approved",
+            "useId": "Approvals",
+            "payload": {
+              "by": "alice"
+            }
+          }
+        ],
+        "deadlines": [
+          {
+            "kind": "arm",
+            "row": {
+              "type": "Order",
+              "key": "o1"
+            },
+            "useId": "Timers",
+            "name": "respond",
+            "at": 2000,
+            "payload": {
+              "attempt": 1
+            }
+          }
+        ],
+        "signals": [
+          {
+            "row": {
+              "type": "Order",
+              "key": "o1"
+            },
+            "useId": "Comments",
+            "name": "typing",
+            "data": {
+              "draft": true
+            }
+          }
+        ],
+        "result": {
+          "ok": true
+        }
+      }
+    ]
+  }
+}

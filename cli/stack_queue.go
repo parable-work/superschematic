@@ -65,7 +65,7 @@ const defaultQueueTimeout = 30 * time.Minute
 
 func (f *queueFlags) register(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.stackDir, "stack", "", "the Stack service directory (default: the working directory when it is one, else the one Stack service under ./schemas/services)")
-	cmd.Flags().StringVar(&f.namingPath, "naming", "", "naming config file (default <stack>/../../superschematic.toml)")
+	addNamingFlag(cmd, &f.namingPath, "(default <stack>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&f.format, "format", "text", "print what the command did as text or json")
 	cmd.Flags().StringArrayVar(&f.params, "param", nil, "a parameter's value for this run of a parameterized environment: <name>=<value> (repeatable)")
 	cmd.Flags().DurationVar(&f.timeout, "timeout", defaultQueueTimeout, "give up waiting for the operation after this long")

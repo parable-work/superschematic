@@ -2,7 +2,6 @@ package rustrestgen
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -111,9 +110,35 @@ type FieldTypes func(schema string) (map[string]string, error)
 // deriver that one name would take.
 func (o *APIOutput) SetDerivers(tables []apigen.DeriverInfo, types FieldTypes) error {
 	o.Derivers = nil
-	derivers := slices.Clone(tables)
-	slices.SortStableFunc(derivers, func(a, b apigen.DeriverInfo) int { return strings.Compare(a.Name, b.Name) })
-	for _, d := range derivers {
+	var fieldTypes map[string]string
+	plans, err := apigen.PlanDerivers("rustrestgen", o.SchemaName, tables, true, apigen.DeriverRenderer[DeriverMethod]{
+		Schema: func(_ apigen.DeriverInfo, schema apigen.DerivedSchema) (err error) {
+			fieldTypes, err = types(schema.Name)
+			return err
+		},
+		Method: func(d apigen.DeriverInfo, schema apigen.DerivedSchema, f apigen.DerivedField) (DeriverMethod, string, error) {
+			m := DeriverMethod{
+				Schema:      schema.Name,
+				Field:       f.Name,
+				Method:      rustutil.Identifier(rustutil.ToSnakeCase(schema.Name)+"_"+rustutil.ToSnakeCase(f.Name), "derive"),
+				Inputs:      rustutil.ToPascalCase(schema.Name) + rustutil.ToPascalCase(f.Name) + "Inputs",
+				Value:       fieldTypes[f.Name],
+				Instruction: f.Instruction,
+				Model:       f.Model,
+			}
+			if m.Value == "" {
+				return m, "", fmt.Errorf("rustrestgen: deriver %s of %s fills %s, whose Rust type the database's types do not declare", d.Name, o.SchemaName, m.Key())
+			}
+			for _, from := range f.From {
+				m.From = append(m.From, DerivedInput{Name: from.Name, RustName: rustutil.Identifier(rustutil.ToSnakeCase(from.Name), "value"), Type: fieldTypes[from.Name]})
+			}
+			return m, m.Method, nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for _, d := range plans {
 		info := DeriverInfo{
 			Name:        d.Name,
 			Field:       rustutil.Identifier(rustutil.ToSnakeCase(d.Name), "deriver"),
@@ -122,39 +147,12 @@ func (o *APIOutput) SetDerivers(tables []apigen.DeriverInfo, types FieldTypes) e
 			Permissions: d.Permissions,
 			Concurrency: d.Concurrency,
 			BatchSize:   d.BatchSize,
+			Schemas:     d.SchemaNames(),
+			Methods:     d.Methods,
 		}
-		methods := map[string]string{}
-		for _, schema := range d.Schemas {
-			info.Schemas = append(info.Schemas, schema.Name)
+		for _, schema := range info.Schemas {
 			// The repositories' method of the table, as rustgen names it.
-			info.Repositories = append(info.Repositories, codegen.ToSnakeCase(schema.Name))
-			fieldTypes, err := types(schema.Name)
-			if err != nil {
-				return fmt.Errorf("rustrestgen: deriver %s of %s: %w", d.Name, o.SchemaName, err)
-			}
-			for _, f := range schema.Fields {
-				key := schema.Name + "." + f.Name
-				m := DeriverMethod{
-					Schema:      schema.Name,
-					Field:       f.Name,
-					Method:      rustutil.Identifier(rustutil.ToSnakeCase(schema.Name)+"_"+rustutil.ToSnakeCase(f.Name), "derive"),
-					Inputs:      rustutil.ToPascalCase(schema.Name) + rustutil.ToPascalCase(f.Name) + "Inputs",
-					Value:       fieldTypes[f.Name],
-					Instruction: f.Instruction,
-					Model:       f.Model,
-				}
-				if m.Value == "" {
-					return fmt.Errorf("rustrestgen: deriver %s of %s fills %s, whose Rust type the database's types do not declare", d.Name, o.SchemaName, key)
-				}
-				for _, from := range f.From {
-					m.From = append(m.From, DerivedInput{Name: from.Name, RustName: rustutil.Identifier(rustutil.ToSnakeCase(from.Name), "value"), Type: fieldTypes[from.Name]})
-				}
-				if other, clash := methods[m.Method]; clash {
-					return fmt.Errorf("rustrestgen: deriver %s of %s fills %s and %s, which would both be its method %s", d.Name, o.SchemaName, other, key, m.Method)
-				}
-				methods[m.Method] = key
-				info.Methods = append(info.Methods, m)
-			}
+			info.Repositories = append(info.Repositories, codegen.ToSnakeCase(schema))
 		}
 		o.Derivers = append(o.Derivers, info)
 	}

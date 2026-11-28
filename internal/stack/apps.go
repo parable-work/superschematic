@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -47,7 +48,7 @@ func Apps(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.resolveBuckets()
 	r.runApps()
 	var apps []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableApp {
 			continue
@@ -100,7 +101,7 @@ func (r *resolver) defaultApps() {
 	if r.byApp == nil {
 		r.byApp = map[string]string{}
 	}
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		svc := r.services[name]
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
@@ -201,7 +202,7 @@ func (r *resolver) applyAppSettings(where, env string, d *deployable, entry *ir.
 // the declaration, refuses a Go or TypeScript API's app, and runs the app
 // unless the settings turn it off.
 func (r *resolver) runApps() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableApp || d.app == nil {
 			continue

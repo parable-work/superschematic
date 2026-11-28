@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"sort"
@@ -475,7 +476,7 @@ func members(v any, what string, allowed ...string) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s must be an object, not %s", what, describeMember(v))
 	}
-	for _, key := range sortedMemberKeys(m) {
+	for _, key := range slices.Sorted(maps.Keys(m)) {
 		if !slices.Contains(allowed, key) {
 			return nil, fmt.Errorf("%s has no member %s; it has %s", what, key, strings.Join(allowed, ", "))
 		}
@@ -598,7 +599,7 @@ func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
 			if len(v) == 0 {
 				return fmt.Errorf("%s: an empty object has no variable", name)
 			}
-			for _, key := range sortedMemberKeys(v) {
+			for _, key := range slices.Sorted(maps.Keys(v)) {
 				inner := key
 				if path != "" {
 					inner = path + "." + key
@@ -693,15 +694,6 @@ func DerivedVariableSegment(member string) string {
 		b.WriteRune(unicode.ToUpper(r))
 	}
 	return b.String()
-}
-
-func sortedMemberKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // The core's rule for derived field names: the service's name in upper

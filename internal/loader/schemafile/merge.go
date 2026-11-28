@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/registry"
@@ -77,7 +77,7 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 	if err := ir.CanonicalizeExtensions(doc.Extensions); err != nil {
 		fail("%s", err)
 	} else {
-		for _, key := range sortedKeys(doc.Extensions) {
+		for _, key := range slices.Sorted(maps.Keys(doc.Extensions)) {
 			if err := mergeRaw(&schema.Extensions, key, doc.Extensions[key], "extension"); err != nil {
 				fail("%s", err)
 			}
@@ -86,14 +86,14 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 	if err := ir.CanonicalizeDocuments(doc.Documents); err != nil {
 		fail("%s", err)
 	} else {
-		for _, key := range sortedKeys(doc.Documents) {
+		for _, key := range slices.Sorted(maps.Keys(doc.Documents)) {
 			if err := mergeRaw(&schema.Documents, key, doc.Documents[key], "document"); err != nil {
 				fail("%s", err)
 			}
 		}
 	}
 
-	for _, key := range sortedKeys(doc.Scalars) {
+	for _, key := range slices.Sorted(maps.Keys(doc.Scalars)) {
 		def := doc.Scalars[key]
 		if err := keyMatchesName(key, def.Name, "scalar"); err != nil {
 			fail("%s", err)
@@ -109,7 +109,7 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		schema.Scalars[def.Name] = def
 	}
 
-	for _, key := range sortedKeys(doc.Types) {
+	for _, key := range slices.Sorted(maps.Keys(doc.Types)) {
 		def := doc.Types[key]
 		if err := keyMatchesName(key, def.Name, "type"); err != nil {
 			fail("%s", err)
@@ -138,7 +138,7 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		schema.Types[def.Name] = def
 	}
 
-	for _, key := range sortedKeys(doc.Enums) {
+	for _, key := range slices.Sorted(maps.Keys(doc.Enums)) {
 		def := doc.Enums[key]
 		if err := keyMatchesName(key, def.Name, "enum"); err != nil {
 			fail("%s", err)
@@ -159,7 +159,7 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		schema.Enums[def.Name] = def
 	}
 
-	for _, key := range sortedKeys(doc.Unions) {
+	for _, key := range slices.Sorted(maps.Keys(doc.Unions)) {
 		def := doc.Unions[key]
 		if err := keyMatchesName(key, def.Name, "union"); err != nil {
 			fail("%s", err)
@@ -287,12 +287,12 @@ func checkDocumentSlotNames(doc *Document, reg *registry.Registry) error {
 	for _, spec := range reg.Documents() {
 		registered = append(registered, spec.Name)
 	}
-	for _, name := range sortedKeys(doc.Documents) {
+	for _, name := range slices.Sorted(maps.Keys(doc.Documents)) {
 		if !slices.Contains(registered, name) {
 			return unknownSlotName("documents", name, "the document", registered)
 		}
 	}
-	for _, name := range sortedKeys(doc.Types) {
+	for _, name := range slices.Sorted(maps.Keys(doc.Types)) {
 		td := doc.Types[name]
 		where := fmt.Sprintf("type %q", name)
 		if err := checkRawExtensionNames(td.Extensions, where, reg); err != nil {
@@ -319,7 +319,7 @@ func checkDocumentSlotNames(doc *Document, reg *registry.Registry) error {
 }
 
 func checkRawExtensionNames(exts map[string]json.RawMessage, where string, reg *registry.Registry) error {
-	for _, name := range sortedKeys(exts) {
+	for _, name := range slices.Sorted(maps.Keys(exts)) {
 		if !slices.Contains(reg.Extensions(), name) {
 			return unknownSlotName("extensions", name, where, reg.Extensions())
 		}
@@ -333,7 +333,7 @@ func checkRawExtensionNames(exts map[string]json.RawMessage, where string, reg *
 // appear here.
 func applyDocumentDecorators(doc *Document, schema *ir.Schema, owner string, reg *registry.Registry) []error {
 	var errs []error
-	for _, name := range sortedKeys(doc.Types) {
+	for _, name := range slices.Sorted(maps.Keys(doc.Types)) {
 		td := doc.Types[name]
 		where := fmt.Sprintf("type %q", td.Name)
 		errs = append(errs, applyExtensionDecorators(registry.Node{Schema: schema, Type: td}, td.Extensions, registry.TargetType, schema.Kind, where, owner, reg)...)
@@ -436,15 +436,4 @@ func ImportedTypeNames(schema *ir.Schema) map[string]bool {
 		}
 	}
 	return names
-}
-
-// sortedKeys returns map keys in sorted order so merges (and their
-// duplicate-name errors) are deterministic.
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

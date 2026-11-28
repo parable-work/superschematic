@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 )
 
 // RefKey marks a JSON Schema node a narrowing replaced with a type it
@@ -23,8 +25,22 @@ var TSIdentifier = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
 
 // TSRenderer renders JSON Schemas as TypeScript type expressions and
 // records whether one used JSONObject, which the module then imports.
+// Readonly marks every property, index signature and array it writes
+// readonly, as an authoring package's config types are: a readonly array
+// is not assignable to a mutable one, so a type that holds such a config
+// must be readonly too.
 type TSRenderer struct {
 	UsesJSONObject bool
+	Readonly       bool
+}
+
+// modifier is the readonly modifier a property or an index signature
+// takes, with its trailing space, or "".
+func (r *TSRenderer) modifier() string {
+	if r.Readonly {
+		return "readonly "
+	}
+	return ""
 }
 
 // Render renders a schema at an indent: the indent of the line the type
@@ -161,8 +177,15 @@ func itemsOf(s map[string]any) any {
 	return true
 }
 
-// arrayOf writes T[], or Array<T> where T is not one token.
+// arrayOf writes T[], or Array<T> where T is not one token; readonly,
+// readonly T[] where T is an identifier and ReadonlyArray<T> otherwise.
 func (r *TSRenderer) arrayOf(element string) string {
+	if r.Readonly {
+		if TSIdentifier.MatchString(element) {
+			return "readonly " + element + "[]"
+		}
+		return "ReadonlyArray<" + element + ">"
+	}
 	if TSIdentifier.MatchString(element) || strings.HasSuffix(element, "[]") && TSIdentifier.MatchString(strings.TrimRight(element, "[]")) {
 		return element + "[]"
 	}
@@ -183,7 +206,7 @@ func (r *TSRenderer) object(s map[string]any, indent string) string {
 				return "Record<string, never>"
 			}
 		case map[string]any:
-			return "{ [key: string]: " + r.Render(a, indent) + " }"
+			return "{ " + r.modifier() + "[key: string]: " + r.Render(a, indent) + " }"
 		}
 		r.UsesJSONObject = true
 		return JSONObjectType
@@ -216,13 +239,13 @@ func (r *TSRenderer) object(s map[string]any, indent string) string {
 		if required[name] {
 			optional = ""
 		}
-		fmt.Fprintf(&b, "%s%s%s: %s;\n", inner, TSPropertyKey(name), optional, r.Render(property, inner))
+		fmt.Fprintf(&b, "%s%s%s%s: %s;\n", inner, r.modifier(), TSPropertyKey(name), optional, r.Render(property, inner))
 	}
 	// Members beside the named ones hold what additionalProperties allows,
 	// which an index signature can only say as unknown, the named ones'
 	// types being part of it.
 	if _, ok := additional.(map[string]any); ok {
-		b.WriteString(inner + "[key: string]: unknown;\n")
+		b.WriteString(inner + r.modifier() + "[key: string]: unknown;\n")
 	}
 	b.WriteString(indent + "}")
 	return b.String()
@@ -243,7 +266,7 @@ func (r *TSRenderer) inlineObject(properties map[string]any, names []string, req
 		if DescriptionOf(properties[name]) != "" {
 			return "", false
 		}
-		probe := TSRenderer{}
+		probe := TSRenderer{Readonly: r.Readonly}
 		rendered := probe.Render(properties[name], "")
 		if strings.Contains(rendered, "\n") {
 			return "", false
@@ -253,7 +276,7 @@ func (r *TSRenderer) inlineObject(properties map[string]any, names []string, req
 		if required[name] {
 			optional = ""
 		}
-		members = append(members, TSPropertyKey(name)+optional+": "+rendered)
+		members = append(members, r.modifier()+TSPropertyKey(name)+optional+": "+rendered)
 	}
 	text := "{ " + strings.Join(members, "; ") + " }"
 	if len(text) > inlineWidth {
@@ -311,32 +334,9 @@ func literal(value any) string {
 	return string(encoded)
 }
 
-// TSQuote writes a single-quoted TypeScript string literal.
+// TSQuote writes a single-quoted TypeScript string literal (tsutil.Quote).
 func TSQuote(text string) string {
-	var b strings.Builder
-	b.WriteByte('\'')
-	for _, r := range text {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '\'':
-			b.WriteString(`\'`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			if r < 0x20 {
-				fmt.Fprintf(&b, `\u%04x`, r)
-			} else {
-				b.WriteRune(r)
-			}
-		}
-	}
-	b.WriteByte('\'')
-	return b.String()
+	return tsutil.Quote(text)
 }
 
 // TSPropertyKey writes a property name, quoted when it is not an identifier.

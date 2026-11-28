@@ -86,7 +86,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # Builds superscalar's archive the CLI links, and its WebAssembly
