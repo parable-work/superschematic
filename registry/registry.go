@@ -268,6 +268,7 @@ type (
 	// workflow's binary links (D78).
 	CIRendererSpec = registry.CIRendererSpec
 	CIRequest      = registry.CIRequest
+	CITasksRequest = registry.CITasksRequest
 	CIArchive      = registry.CIArchive
 	CIApp          = registry.CIApp
 	CIStack        = registry.CIStack

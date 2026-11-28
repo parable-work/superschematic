@@ -1338,7 +1338,8 @@ task = "forge/task.schema.json"
 
 Each is a JSON Schema file's path, relative to the schemas root and
 slash-separated. A section gives one or both. A name is lowercase words
-joined by hyphens. The schemas' bytes are part of the build cache's key,
+joined by hyphens, and not `github`, which the core registers for its
+[github renderer](/superschematic/guides/tasks/#run-the-tasks-on-github-actions). The schemas' bytes are part of the build cache's key,
 so a change to one rebuilds a Tasks service.
 
 A rule a JSON Schema cannot say is the forge's to check when it reads
