@@ -75,7 +75,8 @@ const rulesLayoutJSON = `{
             {
               "name": "resolve",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "row"
             }
           ],
           "tables": [
@@ -181,7 +182,8 @@ const rulesLayoutJSON = `{
             {
               "name": "resolve",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "row"
             }
           ],
           "tables": [

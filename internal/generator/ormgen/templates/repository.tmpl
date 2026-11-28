@@ -1335,6 +1335,45 @@ func (r *{{ .Name }}) requireCreatedRows(ctx context.Context, rows []*types.{{ .
 	return nil
 }
 {{- end }}
+{{- if .AnswersRows }}
+
+// keepAnsweredRow is raw, the answer of a table operation whose member
+// names a row of {{ .TypeName }} by its key in its wire form (Aliased's
+// resolve's row), with that member null when it is a row the operation's
+// caller does not see (D156), as for an answer of no row: the behaviors'
+// core reads every row, so the answer keeps to the caller here, as a read
+// does.
+func (r *{{ .Name }}) keepAnsweredRow(ctx context.Context, raw json.RawMessage, member string) (json.RawMessage, error) {
+	if !accessHeld(ctx, {{ printf "%q" .TypeName }}) {
+		return raw, nil
+	}
+	var answer map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s, %s: %w", raw, err)
+	}
+	named, ok := answer[member]
+	if !ok || string(named) == "null" {
+		return raw, nil
+	}
+	var row struct {
+		Key *string `json:"key"`
+	}
+	if err := json.Unmarshal(named, &row); err != nil || row.Key == nil {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s names a row with no key at %s: %s", member, raw)
+	}
+	key, ok := accessKey(accessTables[{{ printf "%q" .TypeName }}], *row.Key)
+	if !ok {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s names the row %q, which is no key of the table", *row.Key)
+	}
+	if err := r.requireReach(ctx, key, false); err == ErrNotFound {
+		answer[member] = json.RawMessage("null")
+		return json.Marshal(answer)
+	} else if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+{{- end }}
 
 {{- end }}
 
@@ -5195,7 +5234,7 @@ type {{ .Value }} struct{ r *{{ $repo.Name }} }
 {{- range .Operations }}
 {{- if .Table }}
 
-{{ docComment "" (printf "%s runs %s's %s on the table as a whole (D104), a command without a row, in a transaction, and returns its result. It reads the table's rows and writes them only through their own operations, each held to its version, and presents no preconditions. It returns a refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name) }}
+{{ docComment "" (printf "%s runs %s's %s on the table as a whole (D104), a command without a row, in a transaction, and returns its result. It reads the table's rows and writes them only through their own operations, each held to its version, and presents no preconditions.%s It returns a refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.HeldByAccess .AnswersRow (printf " The row its answer names at %s is null when it is one the operation's caller does not see (D156)." .AnswersRow)) "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -5209,6 +5248,12 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }
 		if err != nil {
 			return out, err
 		}
+		{{- if and $repo.HeldByAccess .AnswersRow }}
+		// The core reads every row; its answer keeps to the caller (D156).
+		if raw, err = (&{{ $repo.Name }}{tx: tx, txDB: o.r.database()}).keepAnsweredRow(ctx, raw, {{ printf "%q" .AnswersRow }}); err != nil {
+			return out, err
+		}
+		{{- end }}
 		{{- if .ResultIsStruct }}
 		out = &{{ .Result }}{}
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -5224,8 +5269,14 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }
 }
 {{- else }}
 
-{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "")) }}
+{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id%s, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "") (or (and $repo.HeldByAccess (or (and .Writes ", or the row is one the operation's caller may not write (D156), as UpdateOne's is") ", or the row is one the operation's caller does not see (D156), as GetOne's is")) "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if $repo.HeldByAccess }}
+	if err := o.r.requireReach(ctx, id{{ if $repo.PrimaryKeyIsUUID }}.ToUUID(){{ end }}, {{ .Writes }}); err != nil {
+		var none {{ .ResultReturn }}
+		return none, behaviorOutOfReach(err, {{ printf "%q" $repo.TypeName }}, {{ $repo.WireKey "id" }}, id)
+	}
+	{{- end }}
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
 	if len(params) == 0 {
@@ -5301,7 +5352,7 @@ func (r *{{ $repo.Name }}) RunEvent(ctx context.Context, event types.{{ . }}, cl
 }
 {{- end }}
 
-{{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s" (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
+{{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s%s" (or (and .CoreOwnDefaults " A member left \"\" that takes its default, an enum's or an @audience table's audience or agent access (D156), is its default, as createColumns binds it.") "") (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
 func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {
 	own := map[string]any{}
 	{{- range .CoreOwn }}
@@ -5323,6 +5374,12 @@ func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {
 	}
 	{{- else if .Present "row" }}
 	if {{ .Present "row" }} {
+		own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
+	}
+	{{- else if .EnumDefault }}
+	if {{ .Value "row" }} == "" {
+		own[{{ printf "%q" .Field }}] = {{ .Column.GoType }}({{ printf "%q" .EnumDefault }})
+	} else {
 		own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
 	}
 	{{- else }}

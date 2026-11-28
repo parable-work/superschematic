@@ -32,6 +32,9 @@ pub(crate) enum Bind {
     /// A number as the core wrote it, its text kept.
     Number(Number),
     Bool(bool),
+    /// A list of UUIDs, each its hyphenated text: on Postgres a `UUID[]`'s
+    /// text, on SQLite the JSON array of the ids it holds (D156, D182).
+    Uuids(Vec<String>),
 }
 
 impl Bind {
@@ -57,6 +60,7 @@ impl Bind {
             Bind::Int(n) => Some(n.to_string()),
             Bind::Number(number) => Some(number.to_string()),
             Bind::Bool(flag) => Some(flag.to_string()),
+            Bind::Uuids(ids) => Some(format!("{{{}}}", ids.join(","))),
         }
     }
 }
@@ -131,6 +135,25 @@ pub(crate) fn to_column(value: &Value, column: &Column, table: &Table) -> Result
         })?;
         return Ok(Bind::Text(hyphenate(n)));
     }
+    if let (true, Value::Array(items)) = (is_uuid(column), value) {
+        // A list of UUIDs (an audience's ids, D156), each hyphenated; an
+        // actual list binds so even where the layout predates `list`.
+        let ids = items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .and_then(uuid_value)
+                    .map(hyphenate)
+                    .ok_or_else(|| {
+                        internal(format!(
+                            "{}.{}: {item} is no UUID, hyphenated or base62",
+                            table.type_name, column.field
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(Bind::Uuids(ids));
+    }
     Ok(Bind::of_json(value))
 }
 
@@ -156,6 +179,22 @@ pub(crate) fn from_cell(
                 Value::from(shown(&cell))
             ))
         });
+    }
+    if is_uuid(column) && column.list {
+        return uuids_of(&cell)
+            .map(|ids| {
+                Some(Value::Array(
+                    ids.into_iter().map(|n| Value::from(base62(n))).collect(),
+                ))
+            })
+            .ok_or_else(|| {
+                internal(format!(
+                    "{}.{}: {} is no list of UUIDs, hyphenated or base62",
+                    table.type_name,
+                    column.field,
+                    Value::from(shown(&cell))
+                ))
+            });
     }
     if is_uuid(column) {
         return uuid_of(&cell)
@@ -247,6 +286,24 @@ fn uuid_of(cell: &Cell) -> Option<u128> {
         },
         _ => None,
     }
+}
+
+/// A list of UUIDs' values: Postgres's `to_jsonb` of a `UUID[]`, or the
+/// JSON text of an array SQLite holds (D182), each hyphenated or base62.
+fn uuids_of(cell: &Cell) -> Option<Vec<u128>> {
+    let parsed;
+    let items = match cell {
+        Cell::Json(Value::Array(items)) => items,
+        Cell::Text(text) => {
+            parsed = serde_json::from_str::<Value>(text).ok()?;
+            parsed.as_array()?
+        }
+        _ => return None,
+    };
+    items
+        .iter()
+        .map(|item| item.as_str().and_then(uuid_value))
+        .collect()
 }
 
 /// A value the core holds as epoch milliseconds: a number, its fraction
@@ -654,6 +711,50 @@ mod tests {
         ] {
             assert_eq!(parse_timestamp(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_list_of_uuids_reads_and_binds_element_by_element() {
+        // An audience's ids (D156): a UUID[] on Postgres, whose to_jsonb is
+        // an array of hyphenated ids, and JSON text on SQLite (D182).
+        let table = order();
+        let mut ids = Column::new("effectiveAudience", "effective_audience", "Identity.UUID");
+        ids.list = true;
+        let (key, column) = (
+            "6fe1XoZ0UJpMNNdUOSMC2X",
+            "db360f43-5530-c407-56da-9cd8e0c971dd",
+        );
+        let read = |cell: Cell| from_cell(cell, &ids, &table);
+        assert_eq!(read(Cell::Json(json!([column]))), Ok(Some(json!([key]))));
+        assert_eq!(
+            read(Cell::Text(format!("[\"{column}\"]"))),
+            Ok(Some(json!([key])))
+        );
+        assert_eq!(read(Cell::Json(json!([]))), Ok(Some(json!([]))));
+        assert_eq!(read(Cell::Null), Ok(None));
+        assert!(read(Cell::Json(json!(["no-uuid!"]))).is_err());
+        assert!(read(Cell::Text(column.to_owned())).is_err());
+        let bound = to_column(&json!([key, column]), &ids, &table);
+        assert_eq!(
+            bound,
+            Ok(Bind::Uuids(vec![column.to_owned(), column.to_owned()]))
+        );
+        assert_eq!(
+            bound.map(|bind| bind.text()),
+            Ok(Some(format!("{{{column},{column}}}")))
+        );
+        assert_eq!(
+            to_column(&json!([]), &ids, &table).map(|bind| bind.text()),
+            Ok(Some("{}".to_owned()))
+        );
+        assert!(to_column(&json!([5]), &ids, &table).is_err());
+        // A list in a UUID column binds so even where the layout predates
+        // `list`.
+        let plain = Column::new("named", "named", "Identity.UUID");
+        assert_eq!(
+            to_column(&json!([key]), &plain, &table),
+            Ok(Bind::Uuids(vec![column.to_owned()]))
+        );
     }
 
     #[test]

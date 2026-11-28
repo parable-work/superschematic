@@ -1,8 +1,7 @@
 {
   "name": "Aliased",
-  "description": "A name on each row with the aliases it was also known by, unique across the table: no two rows hold one name, as a name or an alias, in its normalized form. normalize lower, the default, reads a name with its case and its runs of white space ignored; slug reads only its letters and digits, in lower case. A create gives the name. rename keeps the old name as an alias; addAlias and removeAlias keep the others; resolve, on the table, finds the row a name or an alias names. A name another row holds is refused with that row's key, the veto name_taken. A delete frees the row's names, and a removed alias frees its own. The behaviors' core alone implements it, on a table; no engine type composes it.",
+  "description": "A name on each row with the aliases it was also known by, unique across the table: no two rows hold one name, as a name or an alias, in its normalized form. normalize lower, the default, reads a name with its case and its runs of white space ignored; slug reads only its letters and digits, in lower case. A create gives the name. rename keeps the old name as an alias; addAlias and removeAlias keep the others; resolve, on the table, finds the row a name or an alias names, to a caller who may read it. A name another row holds is refused, the veto name_taken, which names nothing of that row. A delete frees the row's names, and a removed alias frees its own. The behaviors' core alone implements it, on a table; no engine type composes it.",
   "configSchema": {
-    "type": "object",
     "additionalProperties": false,
     "properties": {
       "normalize": {
@@ -12,7 +11,8 @@
           "slug"
         ]
       }
-    }
+    },
+    "type": "object"
   },
   "fields": [
     {
@@ -66,40 +66,40 @@
       "name": "rename",
       "description": "Gives the row a new name, keeping the old one as an alias. A name the row holds as an alias becomes its name; one only its case or spacing changes leaves the aliases as they are. A name another row holds is refused, the veto name_taken. The name the row has is answered unchanged.",
       "paramsSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name"
-        ],
         "properties": {
           "name": {
             "description": "The new name.",
-            "type": "string",
+            "maxLength": 256,
             "minLength": 1,
-            "maxLength": 256
+            "type": "string"
           }
-        }
-      },
-      "resultSchema": {
-        "type": "object",
-        "additionalProperties": false,
+        },
         "required": [
           "name"
         ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
         "properties": {
-          "name": {
-            "description": "The row's name.",
-            "type": "string"
-          },
           "alias": {
             "description": "The old name, kept as an alias; absent when the rename kept none.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The row's name.",
             "type": "string"
           },
           "unchanged": {
             "description": "True when the row had the name already, so nothing was written; absent otherwise.",
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
       },
       "writes": true
     },
@@ -107,26 +107,22 @@
       "name": "addAlias",
       "description": "Adds an alias the row is also known by. A name another row holds is refused, the veto name_taken; one the row holds already, as its name or an alias, is answered unchanged.",
       "paramsSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "alias"
-        ],
         "properties": {
           "alias": {
             "description": "The alias to add.",
-            "type": "string",
+            "maxLength": 256,
             "minLength": 1,
-            "maxLength": 256
+            "type": "string"
           }
-        }
-      },
-      "resultSchema": {
-        "type": "object",
-        "additionalProperties": false,
+        },
         "required": [
           "alias"
         ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
         "properties": {
           "alias": {
             "description": "The alias, as given.",
@@ -136,7 +132,11 @@
             "description": "True when the row held the alias already, so nothing was written; absent otherwise.",
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "alias"
+        ],
+        "type": "object"
       },
       "writes": true
     },
@@ -144,26 +144,22 @@
       "name": "removeAlias",
       "description": "Removes one of the row's aliases, freeing it for any row. The row's name is refused, the veto is_name: a rename gives the row another first. An alias the row does not hold is answered unchanged.",
       "paramsSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "alias"
-        ],
         "properties": {
           "alias": {
             "description": "The alias to remove, in any form that normalizes to it.",
-            "type": "string",
+            "maxLength": 256,
             "minLength": 1,
-            "maxLength": 256
+            "type": "string"
           }
-        }
-      },
-      "resultSchema": {
-        "type": "object",
-        "additionalProperties": false,
+        },
         "required": [
           "alias"
         ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
         "properties": {
           "alias": {
             "description": "The alias removed, as it was given when added; the one asked for when the row held none.",
@@ -173,49 +169,43 @@
             "description": "True when the row held no such alias, so nothing was written; absent otherwise.",
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "alias"
+        ],
+        "type": "object"
       },
       "writes": true
     },
     {
       "name": "resolve",
-      "description": "Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing.",
-      "scope": "schema",
+      "description": "Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing. A row the caller may not read is none (D156).",
       "paramsSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name"
-        ],
         "properties": {
           "name": {
             "description": "The name or alias to find.",
-            "type": "string",
+            "maxLength": 256,
             "minLength": 1,
-            "maxLength": 256
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
       },
       "resultSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "row"
-        ],
         "properties": {
           "row": {
-            "description": "The row that holds the name; null when none does.",
-            "type": [
-              "object",
-              "null"
-            ],
             "additionalProperties": false,
-            "required": [
-              "key",
-              "name",
-              "alias"
-            ],
+            "description": "The row that holds the name; null when none does, and to a caller held to per-record access who may not read the row that does (D156).",
             "properties": {
+              "alias": {
+                "description": "True when the name found is one of the row's aliases, false when it is its name.",
+                "type": "boolean"
+              },
               "key": {
                 "description": "The row's key, in its wire form.",
                 "type": "string"
@@ -223,22 +213,31 @@
               "name": {
                 "description": "The row's name.",
                 "type": "string"
-              },
-              "alias": {
-                "description": "True when the name found is one of the row's aliases, false when it is its name.",
-                "type": "boolean"
               }
-            }
+            },
+            "required": [
+              "key",
+              "name",
+              "alias"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           }
-        }
+        },
+        "required": [
+          "row"
+        ],
+        "type": "object"
       },
-      "writes": false
+      "scope": "schema"
     }
   ],
   "vetoes": [
     {
       "code": "name_taken",
-      "description": "A create, a rename or an addAlias of a name another row holds, as its name or an alias, in its normalized form; details give the name, its normalized form and the key of the row that holds it (holder)."
+      "description": "A create, a rename or an addAlias of a name another row holds, as its name or an alias, in its normalized form; details give the name and its normalized form, and nothing of the row that holds it, which the caller may not be allowed to see (D156): resolve answers it to one who may."
     },
     {
       "code": "is_name",

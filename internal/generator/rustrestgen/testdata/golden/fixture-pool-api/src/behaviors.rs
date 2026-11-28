@@ -129,7 +129,8 @@ pub const RULES_LAYOUT: &str = r#"{
             {
               "name": "pick",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "member"
             }
           ]
         },

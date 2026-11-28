@@ -1,6 +1,6 @@
 {
   "name": "Aliased",
-  "description": "A name on each row with the aliases it was also known by, unique across the table: no two rows hold one name, as a name or an alias, in its normalized form. normalize lower, the default, reads a name with its case and its runs of white space ignored; slug reads only its letters and digits, in lower case. A create gives the name. rename keeps the old name as an alias; addAlias and removeAlias keep the others; resolve, on the table, finds the row a name or an alias names. A name another row holds is refused with that row's key, the veto name_taken. A delete frees the row's names, and a removed alias frees its own. The behaviors' core alone implements it, on a table; no engine type composes it.",
+  "description": "A name on each row with the aliases it was also known by, unique across the table: no two rows hold one name, as a name or an alias, in its normalized form. normalize lower, the default, reads a name with its case and its runs of white space ignored; slug reads only its letters and digits, in lower case. A create gives the name. rename keeps the old name as an alias; addAlias and removeAlias keep the others; resolve, on the table, finds the row a name or an alias names, to a caller who may read it. A name another row holds is refused, the veto name_taken, which names nothing of that row. A delete frees the row's names, and a removed alias frees its own. The behaviors' core alone implements it, on a table; no engine type composes it.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -179,7 +179,7 @@
     },
     {
       "name": "resolve",
-      "description": "Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing.",
+      "description": "Finds the row whose name or alias a name names, in its normalized form: a read of the table as a whole that writes nothing. A row the caller may not read is none (D156).",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -200,7 +200,7 @@
         "properties": {
           "row": {
             "additionalProperties": false,
-            "description": "The row that holds the name; null when none does.",
+            "description": "The row that holds the name; null when none does, and to a caller held to per-record access who may not read the row that does (D156).",
             "properties": {
               "alias": {
                 "description": "True when the name found is one of the row's aliases, false when it is its name.",
@@ -237,7 +237,7 @@
   "vetoes": [
     {
       "code": "name_taken",
-      "description": "A create, a rename or an addAlias of a name another row holds, as its name or an alias, in its normalized form; details give the name, its normalized form and the key of the row that holds it (holder)."
+      "description": "A create, a rename or an addAlias of a name another row holds, as its name or an alias, in its normalized form; details give the name and its normalized form, and nothing of the row that holds it, which the caller may not be allowed to see (D156): resolve answers it to one who may."
     },
     {
       "code": "is_name",
