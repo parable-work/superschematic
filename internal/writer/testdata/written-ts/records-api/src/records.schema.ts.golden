@@ -1,0 +1,262 @@
+import { AccessEntry, Agreement, Grant, Page, Ticket, Workspace } from "@schemas/records-db";
+import { Authenticated, HttpMethod, SearchQuery, docs as apiDocs, mcp, paginated, requirePermission, rest, tableOperation } from "@superschematic/api";
+import { Nullable, Secret, Validate, decrypted, source } from "@superschematic/schema";
+import { envVars } from "@superschematic/schema-config";
+import { Identity, Temporal } from "superscalar";
+
+// A row of the database's @accessLog table.
+@source(AccessEntry)
+export abstract class AccessEntryView {
+  id: Identity.UUID;
+
+  at: Temporal.DateTime;
+
+  kind: string;
+
+  principal: Nullable<string>;
+
+  principalKind: Nullable<string>;
+
+  operation: Nullable<string>;
+
+  targetType: Nullable<string>;
+
+  targetId: Nullable<string>;
+
+  field: Nullable<string>;
+}
+
+// An agreement: its terms open only for a caller who may reveal them.
+@source(Agreement)
+export abstract class AgreementView {
+  id: Identity.UUID;
+
+  name: string;
+
+  @decrypted({ permission: "agreements.reveal" })
+  terms: Nullable<string>;
+}
+
+// What a caller sets to write a page.
+@source(Page)
+export abstract class CreatePageInput {
+  workspaceId: Nullable<Identity.UUID>;
+
+  title: string;
+
+  audience: Nullable<string>;
+}
+
+// What a caller sets to open a ticket about the site the path names.
+@source(Ticket)
+export abstract class CreateTicketInput {
+  title: Validate<string, { minLength: 1 }>;
+}
+
+// What a caller sets to make a workspace.
+@source(Workspace)
+export abstract class CreateWorkspaceInput {
+  name: string;
+
+  owner: Identity.UUID;
+
+  audience: Nullable<string>;
+
+  audienceNamed: Nullable<Identity.UUID[]>;
+}
+
+// The keys of records-db's Encrypted<T> fields, which its config names
+// (D85): the API's config, so each environment sets the one secret.
+@envVars
+export abstract class FieldKeys {
+  RECORDS_DB_FIELD_KEYS: Secret<string>;
+}
+
+// A grant, a row of the database's @accessGrants table, without the hash
+// of its token.
+@source(Grant)
+export abstract class GrantView {
+  id: Identity.UUID;
+
+  holder: Identity.UUID;
+
+  holderKind: string;
+
+  role: string;
+
+  targetType: string;
+
+  targetId: Identity.UUID;
+
+  startsAt: Temporal.DateTime;
+
+  endsAt: Nullable<Temporal.DateTime>;
+
+  revokedAt: Nullable<Temporal.DateTime>;
+}
+
+// A page.
+@source(Page)
+export abstract class PageView {
+  id: Identity.UUID;
+
+  workspaceId: Nullable<Identity.UUID>;
+
+  title: string;
+
+  audience: string;
+}
+
+// Who may see a workspace.
+@source(Workspace)
+export abstract class ShareWorkspaceInput {
+  audience: Nullable<string>;
+
+  audienceNamed: Nullable<Identity.UUID[]>;
+}
+
+// A ticket.
+@source(Ticket)
+export abstract class TicketView {
+  id: Identity.UUID;
+
+  siteId: Identity.UUID;
+
+  title: string;
+}
+
+// A workspace, with who may see it.
+@source(Workspace)
+export abstract class WorkspaceView {
+  id: Identity.UUID;
+
+  name: string;
+
+  owner: Identity.UUID;
+
+  audience: string;
+
+  audienceNamed: Nullable<Identity.UUID[]>;
+}
+
+export class Workspaces extends Authenticated {
+  // The workspaces the caller sees.
+  @apiDocs({ title: "List workspaces", description: "The workspaces the caller sees.", capability: "workspaces.list-workspaces", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_workspaces", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "workspaces")
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listWorkspaces(): WorkspaceView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // A new workspace.
+  @apiDocs({ title: "Create workspace", description: "A new workspace.", capability: "workspaces.create-workspace", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "create_workspace", invocationPolicy: "auto" })
+  @rest(HttpMethod.POST, "workspaces")
+  @tableOperation()
+  createWorkspace(input: CreateWorkspaceInput): WorkspaceView {
+    throw new Error("schema declaration only");
+  }
+
+  // Changes who may see a workspace: its owner alone.
+  @apiDocs({ title: "Share workspace", description: "Changes who may see a workspace: its owner alone.", capability: "workspaces.share-workspace", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "share_workspace", invocationPolicy: "auto" })
+  @rest(HttpMethod.PATCH, "workspaces/{id}")
+  @tableOperation({ by: ["owner"] })
+  shareWorkspace(id: Identity.UUID, input: ShareWorkspaceInput): WorkspaceView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Pages extends Authenticated {
+  // The pages the caller sees, searched by their titles.
+  @apiDocs({ title: "List pages", description: "The pages the caller sees, searched by their titles.", capability: "pages.list-pages", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_pages", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "pages")
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listPages(q: SearchQuery<string>): PageView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // A new page.
+  @apiDocs({ title: "Create page", description: "A new page.", capability: "pages.create-page", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "create_page", invocationPolicy: "auto" })
+  @rest(HttpMethod.POST, "pages")
+  @tableOperation()
+  createPage(input: CreatePageInput): PageView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Agreements extends Authenticated {
+  // One agreement.
+  @apiDocs({ title: "Get agreement", description: "One agreement.", capability: "agreements.get-agreement", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "get_agreement", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "agreements/{id}")
+  @requirePermission(["agreements.read"])
+  @tableOperation()
+  getAgreement(id: Identity.UUID): AgreementView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Tickets extends Authenticated {
+  // The tickets about the sites of the agreements the caller is a member
+  // of: a row rule through three relations.
+  @apiDocs({ title: "List my tickets", description: "The tickets about the sites of the agreements the caller is a member of: a row rule through three relations.", capability: "tickets.list-my-tickets", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_my_tickets", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "my/tickets")
+  @requirePermission(["tickets.read"])
+  @tableOperation({ by: ["site.agreement.members.member"], overridePermission: "tickets.admin" })
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listMyTickets(): TicketView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // The tickets the caller reaches.
+  @apiDocs({ title: "List tickets", description: "The tickets the caller reaches.", capability: "tickets.list-tickets", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_tickets", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "tickets")
+  @requirePermission(["tickets.read"])
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listTickets(): TicketView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // A new ticket about the site the path names.
+  @apiDocs({ title: "Open ticket", description: "A new ticket about the site the path names.", capability: "tickets.open-ticket", lifecycle: "active", visibility: "public" })
+  @mcp({ handle: "open_ticket", invocationPolicy: "auto" })
+  @rest(HttpMethod.POST, "sites/{siteId}/tickets")
+  @requirePermission(["tickets.write"])
+  @tableOperation()
+  openTicket(siteId: Identity.UUID, input: CreateTicketInput): TicketView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Access extends Authenticated {
+  // The grants, for a settings page.
+  @apiDocs({ title: "List grants", description: "The grants, for a settings page.", capability: "access.list-grants", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_grants", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "access/grants")
+  @requirePermission(["access.admin"])
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listGrants(): GrantView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // The access log, for a settings page.
+  @apiDocs({ title: "List access log", description: "The access log, for a settings page.", capability: "access.list-access-log", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "list_access_log", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "access/log")
+  @requirePermission(["access.admin"])
+  @tableOperation()
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listAccessLog(): AccessEntryView[] {
+    throw new Error("schema declaration only");
+  }
+}

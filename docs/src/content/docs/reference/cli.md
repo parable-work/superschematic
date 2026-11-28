@@ -513,6 +513,13 @@ reference does not order the build, so two services may name each other.
 The IR lists the references under `references`, and a JSON or YAML schema
 file states them there, as it states `imports`.
 
+A cache entry keeps both files. A fresh checkout, or one whose
+`<schemas-root>/dist` was removed, has neither file and no stamp for the
+service. With `--cache` it reads them from the newest entry built from the
+same service directory, so it restores the service rather than rebuilding
+it. The key still covers each listed file as it is now. The restore writes
+the files back under `dist`.
+
 ## `migrate plan <service-dir>`
 
 Plan the migration of a DB service's database from a previous version of
@@ -831,6 +838,21 @@ package the linked extension's scalar catalog names for it (`Acme` from
 `@acme/schema`), and the others from superscalar. A file with a scalar
 that superscalar does not have, in a namespace no catalog names a package
 for, fails to convert to `ts`, since the import would not resolve.
+
+A table's feature declarations convert to `ts` as the decorators they are
+read from: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`,
+`@references`, `@attachments`, `@searchable`, `@audience`,
+`@accessGrants`, `@accessLog`, `@party`, `@conversations`,
+`@runRequests` and `@agents`, an operation's `@autonomy`, an `@envVars`
+class's `@providers` and a field's `@decrypted({ permission })`. The
+fields and tables the build adds for each are left out, and reading the
+file back adds them again. A class a decorator names as a value, such as
+the queue `@attachments` releases on, is written before the class that
+names it. A class whose name is a scalar namespace's, as a `@party` table
+named `Contact` is, makes the writer import that namespace under an alias
+(`Contact as ContactScalars`). A field `Aliased` keeps is written as
+`Aliased<string, C>`, from the behavior's declaration in the binary's
+registry.
 
 ## `behaviors --out <dir>`
 

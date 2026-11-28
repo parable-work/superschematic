@@ -120,7 +120,7 @@ func runFormat(cmd *cobra.Command, a *app, flags *formatFlags, inputPath string)
 	if err != nil {
 		return err
 	}
-	out, err := writer.WriteWith(doc, target, reg.Scalars())
+	out, err := writer.WriteFor(doc, target, reg)
 	if err != nil {
 		return fmt.Errorf("converting %s to %s: %w", inputPath, target, err)
 	}
