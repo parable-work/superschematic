@@ -73,7 +73,12 @@ pub async fn resolve_audience_in<C: GenericClient + Sync>(
         let row = client
             .query_one(statement, &[&message.parent_key, &after, &batch])
             .await
-            .map_err(|err| failure(&format!("resolve the audience of {}", message.child_table), &err))?;
+            .map_err(|err| {
+                failure(
+                    &format!("resolve the audience of {}", message.child_table),
+                    &err,
+                )
+            })?;
         let n: i64 = row.get("resolved");
         let last: Option<String> = row.get("last");
         resolved += u64::try_from(n).unwrap_or(0);
