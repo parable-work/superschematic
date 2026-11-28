@@ -769,7 +769,103 @@ func searchCases(t *testing.T, f searchFixture) map[string]any {
 			t.Errorf("%v index rows of notes, want the one that is not deleted", rows[0][0])
 		}
 	})
+	// Its answers are each database's own, held to the file's, so they
+	// stay out of answers, which the two databases must share.
+	t.Run("the parity file's searches answer the same titles in every runtime (#740)", func(t *testing.T) {
+		searchParity(t, f, host)
+	})
 	return answers
+}
+
+// parityAnswer is what a search of the parity file answers: its hits'
+// titles in order and its total.
+type parityAnswer struct {
+	Titles []string `json:"titles"`
+	Total  int      `json:"total"`
+}
+
+// searchParity runs the searches of runtime/http/testdata/
+// search_tables_parity.json (#740), which the TypeScript and Rust
+// runtimes' search tests run too: the corpus written into the search
+// index as it stands, in a scope of its own, and each search's titles and
+// total, or its refusal (nil), held to the file's for the dialect.
+func searchParity(t *testing.T, f searchFixture, host crosstable.Host) {
+	t.Helper()
+	ctx := context.Background()
+	data, err := os.ReadFile("testdata/search_tables_parity.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Corpus []struct {
+			Table, Key, Title, Body, Comments, Files string
+			Embedding                                []float64
+		} `json:"corpus"`
+		Searches []struct {
+			Name          string
+			Q             string
+			Tables        []string
+			Vector        []float64
+			Limit, Offset int
+			Postgres      *parityAnswer
+			SQLite        *parityAnswer `json:"sqlite"`
+		} `json:"searches"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	const scope, model = "search-parity", "parity-model"
+	null := func(text string) any {
+		if text == "" {
+			return nil
+		}
+		return text
+	}
+	for _, row := range file.Corpus {
+		args := []any{row.Table, row.Key, row.Title, null(row.Body), null(row.Comments), null(row.Files), scope}
+		statement := `INSERT INTO search_index (source_table, source_key, title, body, comments, files, scope) VALUES ($1, $2, $3, $4, $5, $6, $7)`
+		if !f.sqlite {
+			var embedding, embeddingModel any
+			if row.Embedding != nil {
+				embedding, embeddingModel = row.Embedding, model
+			}
+			args = append(args, embedding, embeddingModel)
+			statement = `INSERT INTO search_index (source_table, source_key, title, body, comments, files, scope, embedding, embedding_model) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::float8[], $9)`
+		}
+		if _, err := f.exec(ctx, statement, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, search := range file.Searches {
+		want := search.Postgres
+		if f.sqlite {
+			want = search.SQLite
+		}
+		var options crosstable.SearchOptions
+		if search.Vector != nil {
+			options.Embeddings = &crosstable.Embeddings{Model: model, Embedder: crosstable.EmbedderFunc(func(context.Context, []string) ([][]float64, error) { return nil, nil })}
+		}
+		result, err := crosstable.SearchTables(ctx, host, user(alice), crosstable.SearchRequest{
+			Q: search.Q, Tables: search.Tables, Scope: []string{scope}, Vector: search.Vector, Limit: search.Limit, Offset: search.Offset,
+		}, options)
+		var got *parityAnswer
+		var refused crosstable.Invalid
+		switch {
+		case errors.As(err, &refused):
+		case err != nil:
+			t.Fatalf("%s: %v", search.Name, err)
+		default:
+			got = &parityAnswer{Titles: []string{}, Total: result.Total}
+			for _, hit := range result.Items {
+				got.Titles = append(got.Titles, hit.Title)
+			}
+		}
+		gotJSON, _ := json.Marshal(got)
+		wantJSON, _ := json.Marshal(want)
+		if string(gotJSON) != string(wantJSON) {
+			t.Errorf("%s: %s, want %s", search.Name, gotJSON, wantJSON)
+		}
+	}
 }
 
 func idp0(text string) *types.IdentityUUID { v := id(text); return &v }

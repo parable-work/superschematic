@@ -106,6 +106,7 @@ func sqliteSearchable(postgres string) (string, error) {
 		return "", fmt.Errorf("its search definition does not read: %v", err)
 	}
 	s.Document = ""
+	s.Config = ""
 	s.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
 	s.KeyType = "text"
 	s.IndexAudience = &ormSearchIndexAudience{Contains: sqlutil.SQLiteAudienceContains, Placeholder: sqlutil.SQLiteAudiencePlaceholder}

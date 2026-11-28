@@ -677,6 +677,52 @@ async fn search_across_tables_on_postgres() {
         assert!(matches!(refused, Err(Error::Invalid(_))), "{refused:?}");
     }
 
+    case("the parity file's searches answer the same titles in every runtime (#740)");
+    {
+        // The parity file's corpus, written into the index as it stands in
+        // a scope of its own, and each search's titles and total, or its
+        // refusal (null), held to the file's on Postgres.
+        let file: Value = serde_json::from_str(include_str!("../search_tables_parity.json")).unwrap();
+        let text = |row: &Value, name: &str| match row[name].as_str() {
+            Some(t) => format!("'{}'", t.replace('\'', "''")),
+            None => "NULL".to_owned(),
+        };
+        for row in file["corpus"].as_array().unwrap() {
+            let (embedding, model) = match row["embedding"].as_array() {
+                Some(v) => (format!("ARRAY[{}]::float8[]", v.iter().map(Value::to_string).collect::<Vec<_>>().join(", ")), "'parity-model'".to_owned()),
+                None => ("NULL".to_owned(), "NULL".to_owned()),
+            };
+            db.sql(&format!(
+                "INSERT INTO search_index (source_table, source_key, title, body, comments, files, scope, embedding, embedding_model) VALUES ({}, {}, {}, {}, {}, {}, 'search-parity', {embedding}, {model})",
+                text(row, "table"), text(row, "key"), text(row, "title"), text(row, "body"), text(row, "comments"), text(row, "files"),
+            ))
+            .await;
+        }
+        let reader = user(&alice_id);
+        for search in file["searches"].as_array().unwrap() {
+            let name = search["name"].as_str().unwrap();
+            let request = SearchRequest {
+                q: search["q"].as_str().unwrap().to_owned(),
+                tables: search["tables"].as_array().map(|t| t.iter().map(|v| v.as_str().unwrap().to_owned()).collect()),
+                scope: Some(vec!["search-parity".to_owned()]),
+                limit: search["limit"].as_i64(),
+                offset: search["offset"].as_i64(),
+                vector: search["vector"].as_array().map(|v| v.iter().map(|x| x.as_f64().unwrap()).collect()),
+            };
+            let options = if request.vector.is_some() {
+                SearchOptions { embeddings: Some(SearchEmbeddings { model: "parity-model".to_owned(), embedder: Arc::new(Down), max_chars: None }), ..SearchOptions::default() }
+            } else {
+                SearchOptions::default()
+            };
+            let got = match db.search(Some(&reader), request, &options).await {
+                Ok(result) => json!({ "titles": result.items.iter().map(|hit| hit.title.clone()).collect::<Vec<_>>(), "total": result.total }),
+                Err(Error::Invalid(_)) => Value::Null,
+                Err(other) => panic!("{name}: {other:?}"),
+            };
+            assert_eq!(got, search["postgres"], "{name}");
+        }
+    }
+
     db.drop_schema().await;
 }
 

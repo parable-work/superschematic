@@ -994,11 +994,13 @@ func (n *Notifier) dispatchNotice(ctx context.Context, h notifications.Host, not
 	}
 	delay := 0
 	if urgency != Urgent {
-		minutes, second, _, err := n.wallOf(ctx, h, n.now(), p.timeZone)
+		// The window's instants in the recipient's zone, which a change of
+		// the clocks inside it moves (#602).
+		quiet, err := quietDelay(n.now(), p.timeZone, p.quietStart, p.quietEnd)
 		if err != nil {
 			return err
 		}
-		delay = QuietDelaySeconds(minutes, second, p.quietStart, p.quietEnd)
+		delay = quiet
 	}
 	return n.queueDelivery(ctx, h, notice, recipient, list[0], 1, delay)
 }

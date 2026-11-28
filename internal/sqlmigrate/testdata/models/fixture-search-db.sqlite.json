@@ -2,7 +2,7 @@
   "dialect": "sqlite",
   "rawSql": [
     {
-      "checksum": "27d4e989bd8ab2f56ba9a831a8681547d3415386271aceac92e355c74a250f42",
+      "checksum": "ce785fd89fa01ff598b9c56e450bf42c8dcbb5fc71d23220bb1fad008d9c5d40",
       "down": [
         "DROP TRIGGER IF EXISTS \"search_index_fts_delete\"",
         "DROP TRIGGER IF EXISTS \"search_index_fts_update\"",
@@ -13,10 +13,15 @@
       "origin": "SearchIndex",
       "position": "indexes",
       "statements": [
-        "CREATE VIRTUAL TABLE \"search_index_fts\" USING fts5(title, body, comments, files, ref, source_table UNINDEXED, source_key UNINDEXED, tokenize = 'unicode61 remove_diacritics 0')",
+        "DROP TRIGGER IF EXISTS \"search_index_fts_delete\"",
+        "DROP TRIGGER IF EXISTS \"search_index_fts_update\"",
+        "DROP TRIGGER IF EXISTS \"search_index_fts_insert\"",
+        "DROP TABLE IF EXISTS \"search_index_fts\"",
+        "CREATE VIRTUAL TABLE \"search_index_fts\" USING fts5(title, body, comments, files, ref, source_table UNINDEXED, source_key UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')",
         "CREATE TRIGGER \"search_index_fts_insert\" AFTER INSERT ON \"search_index\" FOR EACH ROW\nBEGIN\n  -- An index row's words (D186).\n  INSERT INTO \"search_index_fts\" (title, body, comments, files, ref, source_table, source_key)\n    VALUES (NEW.title, NEW.body, NEW.comments, NEW.files, 'r' || hex(NEW.source_table || char(31) || NEW.source_key), NEW.source_table, NEW.source_key);\nEND",
         "CREATE TRIGGER \"search_index_fts_update\" AFTER UPDATE OF title, body, comments, files, source_table, source_key ON \"search_index\" FOR EACH ROW\nBEGIN\n  -- An index row's words, written again (D186).\n  DELETE FROM \"search_index_fts\" WHERE \"search_index_fts\" MATCH 'ref : \"' || 'r' || hex(OLD.source_table || char(31) || OLD.source_key) || '\"';\n  INSERT INTO \"search_index_fts\" (title, body, comments, files, ref, source_table, source_key)\n    VALUES (NEW.title, NEW.body, NEW.comments, NEW.files, 'r' || hex(NEW.source_table || char(31) || NEW.source_key), NEW.source_table, NEW.source_key);\nEND",
-        "CREATE TRIGGER \"search_index_fts_delete\" AFTER DELETE ON \"search_index\" FOR EACH ROW\nBEGIN\n  -- An index row's words, deleted with it (D186).\n  DELETE FROM \"search_index_fts\" WHERE \"search_index_fts\" MATCH 'ref : \"' || 'r' || hex(OLD.source_table || char(31) || OLD.source_key) || '\"';\nEND"
+        "CREATE TRIGGER \"search_index_fts_delete\" AFTER DELETE ON \"search_index\" FOR EACH ROW\nBEGIN\n  -- An index row's words, deleted with it (D186).\n  DELETE FROM \"search_index_fts\" WHERE \"search_index_fts\" MATCH 'ref : \"' || 'r' || hex(OLD.source_table || char(31) || OLD.source_key) || '\"';\nEND",
+        "INSERT INTO \"search_index_fts\" (title, body, comments, files, ref, source_table, source_key)\n  SELECT si.title, si.body, si.comments, si.files, 'r' || hex(si.source_table || char(31) || si.source_key), si.source_table, si.source_key FROM \"search_index\" AS si"
       ]
     }
   ],

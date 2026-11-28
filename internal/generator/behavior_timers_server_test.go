@@ -133,6 +133,14 @@ func TestTimersGoServerAndWorkerOnPostgres(t *testing.T) {
 // outputRoot, as a stack's build plans it, writes it, and vets it.
 func vetBehaviorWorkerEntrypoint(t *testing.T, outputRoot string, paths naming.LocalPaths, api, db *ir.Schema, env []string, stack, name string) {
 	t.Helper()
+	vetBehaviorWorkerEntrypointOn(t, outputRoot, paths, api, db, env, stack, name, false)
+}
+
+// vetBehaviorWorkerEntrypointOn is vetBehaviorWorkerEntrypoint over db's
+// SQLite file when sqlite, whose DB service then lists sqlite first
+// (#717).
+func vetBehaviorWorkerEntrypointOn(t *testing.T, outputRoot string, paths naming.LocalPaths, api, db *ir.Schema, env []string, stack, name string, sqlite bool) {
+	t.Helper()
 	n := naming.Default()
 	output, err := apigen.Generate(api, apigen.Options{
 		Provider:     sessionauth.Provider{},
@@ -154,6 +162,7 @@ func vetBehaviorWorkerEntrypoint(t *testing.T, outputRoot string, paths naming.L
 			Kind:   ir.EdgeSQL, Service: db.Name,
 		}},
 	}
+	output.Deps.SQLite = sqlite
 	implDir := filepath.Join(t.TempDir(), "impl")
 	if err := os.MkdirAll(implDir, 0o755); err != nil {
 		t.Fatal(err)

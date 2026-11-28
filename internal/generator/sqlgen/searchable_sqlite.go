@@ -48,6 +48,12 @@ var SearchFTSColumns = []string{"title", "body", "comments", "files", "ref", "so
 // case, no diacritic removed and no word stemmed (D58, D155).
 const SearchFTSTokenizer = "unicode61 remove_diacritics 0"
 
+// SearchFTSFoldingTokenizer is the tokenizer of an index that folds
+// diacritics (outputs.sql.search.foldDiacritics, #740), as Postgres's
+// search_unaccent configuration reads words: diacritics removed too, the
+// engine's own tokenizer (D58).
+const SearchFTSFoldingTokenizer = "unicode61 remove_diacritics 2"
+
 // searchFTSRef is the ref token of an index row, of row's source table and
 // key: an r and the hex of both with a unit separator between, one token
 // of letters and digits, so a MATCH of ref finds the row's words alone.
@@ -58,8 +64,13 @@ func searchFTSRef(row string) string {
 // SearchFTS is the search index's words on SQLite (D186): the FTS5 table
 // and the three triggers on the index table that keep it, in the order
 // create.sql runs them, and the down that drops them. quote quotes an
-// identifier as the SQLite dialect does; index is the index table's name.
-func SearchFTS(index string, quote func(string) string) (up, down []string) {
+// identifier as the SQLite dialect does; index is the index table's name;
+// fold removes diacritics (#740). The up drops what it makes first and
+// fills the table from the index rows last, so it runs again over what it
+// made, as a plan runs a changed piece, or every piece after it rebuilds a
+// table, and the words it holds are the index's, whatever tokenizer they
+// were read with before.
+func SearchFTS(index string, quote func(string) string, fold bool) (up, down []string) {
 	table := quote(index)
 	fts := quote(SearchFTSTable)
 	columns := make([]string, len(SearchFTSColumns))
@@ -77,11 +88,9 @@ func SearchFTS(index string, quote func(string) string) (up, down []string) {
 		return fmt.Sprintf("  DELETE FROM %s WHERE %s MATCH 'ref : \"' || %s || '\"';\n", fts, fts, searchFTSRef(row))
 	}
 	name := func(event string) string { return quote(SearchFTSTable + "_" + event) }
-	up = []string{
-		fmt.Sprintf("CREATE VIRTUAL TABLE %s USING fts5(%s, tokenize = %s)", fts, strings.Join(columns, ", "), stringLiteral(SearchFTSTokenizer)),
-		fmt.Sprintf("CREATE TRIGGER %s AFTER INSERT ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words (D186).\n%sEND", name("insert"), table, insert("NEW")),
-		fmt.Sprintf("CREATE TRIGGER %s AFTER UPDATE OF title, body, comments, files, source_table, source_key ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words, written again (D186).\n%s%sEND", name("update"), table, remove("OLD"), insert("NEW")),
-		fmt.Sprintf("CREATE TRIGGER %s AFTER DELETE ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words, deleted with it (D186).\n%sEND", name("delete"), table, remove("OLD")),
+	tokenizer := SearchFTSTokenizer
+	if fold {
+		tokenizer = SearchFTSFoldingTokenizer
 	}
 	down = []string{
 		"DROP TRIGGER IF EXISTS " + name("delete"),
@@ -89,6 +98,14 @@ func SearchFTS(index string, quote func(string) string) (up, down []string) {
 		"DROP TRIGGER IF EXISTS " + name("insert"),
 		"DROP TABLE IF EXISTS " + fts,
 	}
+	up = append(append([]string(nil), down...),
+		fmt.Sprintf("CREATE VIRTUAL TABLE %s USING fts5(%s, tokenize = %s)", fts, strings.Join(columns, ", "), stringLiteral(tokenizer)),
+		fmt.Sprintf("CREATE TRIGGER %s AFTER INSERT ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words (D186).\n%sEND", name("insert"), table, insert("NEW")),
+		fmt.Sprintf("CREATE TRIGGER %s AFTER UPDATE OF title, body, comments, files, source_table, source_key ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words, written again (D186).\n%s%sEND", name("update"), table, remove("OLD"), insert("NEW")),
+		fmt.Sprintf("CREATE TRIGGER %s AFTER DELETE ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words, deleted with it (D186).\n%sEND", name("delete"), table, remove("OLD")),
+		fmt.Sprintf("INSERT INTO %s (%s)\n  SELECT si.title, si.body, si.comments, si.files, %s, si.source_table, si.source_key FROM %s AS si",
+			fts, strings.Join(SearchFTSColumns, ", "), searchFTSRef("si"), table),
+	)
 	return up, down
 }
 

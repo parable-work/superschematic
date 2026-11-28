@@ -1446,7 +1446,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		}
 	}
 	deps.Providers = providers
-	deps.Wiring = apigen.WithFiles(deps.Wiring, database, providers)
+	deps.Wiring = apigen.WithFiles(deps.Wiring, database, providers, deps.SQLite)
 	return deps, roots, nil
 }
 

@@ -65,6 +65,7 @@ var searchRustSQLiteCases = []string{
 	"an index row follows its row: an audience change and a delete at once, a change of text once the queue drains",
 	"scope keeps a search to the app's filter",
 	"embeddings are refused on SQLite, which ranks by the words",
+	searchParityCase,
 }
 
 // TestRustRecurrenceOnSQLite builds fixture-recurrence-db's Rust types with
@@ -183,11 +184,12 @@ func runRustCrossTablesOnSQLite(t *testing.T, db, name, source string, cases []s
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for file, content := range map[string]string{
-		"Cargo.toml":            fmt.Sprintf(rustCrossTablesManifest, name, naming.Default().RustTypesCrate(db), filepath.ToSlash(typesDir), features, filepath.ToSlash(paths.HTTPRuntimeRust), features),
-		"Cargo.lock":            string(lock),
-		"create.sql":            string(ddl),
-		"src/lib.rs":            "//! " + db + "'s Rust reads across tables on SQLite: see tests/.\n",
-		"tests/" + name + ".rs": source,
+		"Cargo.toml":                fmt.Sprintf(rustCrossTablesManifest, name, naming.Default().RustTypesCrate(db), filepath.ToSlash(typesDir), features, filepath.ToSlash(paths.HTTPRuntimeRust), features),
+		"Cargo.lock":                string(lock),
+		"create.sql":                string(ddl),
+		"src/lib.rs":                "//! " + db + "'s Rust reads across tables on SQLite: see tests/.\n",
+		"tests/" + name + ".rs":     source,
+		"search_tables_parity.json": searchParityJSON(t),
 	} {
 		if err := os.WriteFile(filepath.Join(crateDir, file), []byte(content), 0o644); err != nil {
 			t.Fatal(err)

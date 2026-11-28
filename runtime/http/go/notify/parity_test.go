@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // parityPath is the notifier's vectors, which the TypeScript runtime's
@@ -35,6 +36,13 @@ type parityVectors struct {
 		End   *string `json:"end"`
 		Want  int     `json:"want"`
 	} `json:"quietHours"`
+	QuietHoursAcrossChanges []struct {
+		At    string `json:"at"`
+		Zone  string `json:"zone"`
+		Start string `json:"start"`
+		End   string `json:"end"`
+		Want  int    `json:"want"`
+	} `json:"quietHoursAcrossChanges"`
 	Trust []struct {
 		Held     []string `json:"held"`
 		Cap      []string `json:"cap"`
@@ -64,7 +72,7 @@ func TestNotifyParityVectors(t *testing.T) {
 	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatal(err)
 	}
-	if len(vectors.Addresses) == 0 || len(vectors.Replies) == 0 || len(vectors.QuietHours) == 0 || len(vectors.Trust) == 0 || len(vectors.CodeHashes) == 0 || len(vectors.SameIDs) == 0 {
+	if len(vectors.Addresses) == 0 || len(vectors.Replies) == 0 || len(vectors.QuietHours) == 0 || len(vectors.QuietHoursAcrossChanges) == 0 || len(vectors.Trust) == 0 || len(vectors.CodeHashes) == 0 || len(vectors.SameIDs) == 0 {
 		t.Fatal("the vectors are missing a section")
 	}
 	for _, c := range vectors.Addresses {
@@ -89,6 +97,21 @@ func TestNotifyParityVectors(t *testing.T) {
 		second, _ := strconv.Atoi(parts[2])
 		if got := QuietDelaySeconds(hour*60+minute, second, text(c.Start), text(c.End)); got != c.Want {
 			t.Errorf("quiet hours at %s in [%s, %s): %d, want %d", c.Wall, text(c.Start), text(c.End), got, c.Want)
+		}
+	}
+	// The nights the clocks change inside the window (#602): the window's
+	// instants in the zone, which the wall time alone does not give.
+	for _, c := range vectors.QuietHoursAcrossChanges {
+		at, err := time.Parse(time.RFC3339, c.At)
+		if err != nil {
+			t.Fatal(err)
+		}
+		loc, err := time.LoadLocation(c.Zone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := QuietDelayAt(at, loc, c.Start, c.End); got != c.Want {
+			t.Errorf("quiet hours at %s in %s, [%s, %s): %d, want %d", c.At, c.Zone, c.Start, c.End, got, c.Want)
 		}
 	}
 	for _, c := range vectors.Trust {

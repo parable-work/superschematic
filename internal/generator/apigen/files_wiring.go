@@ -16,14 +16,14 @@ import (
 
 // WithFiles is w with the file processor's pass when db, the API's
 // database, declares @attachments and providers, the API's, fill a files
-// slot: a wiring of its own when w is nil. It answers w as it is
-// otherwise.
-func WithFiles(w *DepsWiring, db *ir.Schema, providers *DepsProviders) *DepsWiring {
+// slot: a wiring of its own when w is nil, on SQLite when sqlite (#717).
+// It answers w as it is otherwise.
+func WithFiles(w *DepsWiring, db *ir.Schema, providers *DepsProviders, sqlite bool) *DepsWiring {
 	if db == nil || len(db.AttachmentsTables()) == 0 || !providers.HasInterface("files") {
 		return w
 	}
 	if w == nil {
-		w = &DepsWiring{}
+		w = &DepsWiring{SQLite: sqlite}
 	}
 	w.Files = true
 	return w

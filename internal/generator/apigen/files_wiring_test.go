@@ -25,21 +25,24 @@ func TestTheFilePassNeedsAttachmentsAndAFilesSlot(t *testing.T) {
 	files := &apigen.DepsProviders{Slots: []apigen.DepsProviderSlot{{Slot: "SMS", Interface: "channel"}, {Slot: "PREVIEWS", Interface: "files"}}}
 	sms := &apigen.DepsProviders{Slots: []apigen.DepsProviderSlot{{Slot: "SMS", Interface: "channel"}}}
 
-	alone := apigen.WithFiles(nil, withFiles, files)
+	alone := apigen.WithFiles(nil, withFiles, files, false)
 	if alone == nil || !alone.Files || alone.Wires() || alone.Constructs() || alone.Serves() || alone.Authenticates() {
 		t.Errorf("the pass alone: %+v", alone)
 	}
+	if onSQLite := apigen.WithFiles(nil, withFiles, files, true); onSQLite == nil || !onSQLite.SQLite || onSQLite.DatabaseType() != "*orm.SQLiteDatabase" {
+		t.Errorf("the pass alone on SQLite takes the pool's ORM: %+v", onSQLite)
+	}
 	search := &apigen.DepsWiring{Search: true, SearchQueues: []string{"SearchIndexing"}}
-	if got := apigen.WithFiles(search, withFiles, files); got != search || !got.Files || !got.Wires() {
+	if got := apigen.WithFiles(search, withFiles, files, false); got != search || !got.Files || !got.Wires() {
 		t.Errorf("the pass beside search: %+v", got)
 	}
 	for name, got := range map[string]*apigen.DepsWiring{
-		"no files slot":           apigen.WithFiles(nil, withFiles, sms),
-		"no providers":            apigen.WithFiles(nil, withFiles, nil),
-		"no @attachments":         apigen.WithFiles(nil, without, files),
-		"no database":             apigen.WithFiles(nil, nil, files),
-		"search, no slot":         apigen.WithFiles(&apigen.DepsWiring{Search: true}, withFiles, sms),
-		"search, no @attachments": apigen.WithFiles(&apigen.DepsWiring{Search: true}, without, files),
+		"no files slot":           apigen.WithFiles(nil, withFiles, sms, false),
+		"no providers":            apigen.WithFiles(nil, withFiles, nil, false),
+		"no @attachments":         apigen.WithFiles(nil, without, files, false),
+		"no database":             apigen.WithFiles(nil, nil, files, false),
+		"search, no slot":         apigen.WithFiles(&apigen.DepsWiring{Search: true}, withFiles, sms, false),
+		"search, no @attachments": apigen.WithFiles(&apigen.DepsWiring{Search: true}, without, files, false),
 	} {
 		if got != nil && got.Files {
 			t.Errorf("%s: the pass is wired: %+v", name, got)

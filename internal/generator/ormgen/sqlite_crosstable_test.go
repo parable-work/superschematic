@@ -67,6 +67,7 @@ var sqliteCrossTablesCases = []sqliteCrossTablesCase{
 			"an uploaded file's text the file processor extracts is indexed with its row, and a file the processor fails on ends failed",
 			"a scope keeps to its rows, and an embedding is refused on SQLite",
 			"reindexSearch indexes every row of a table that became searchable",
+			"the parity file's searches answer the same titles in every runtime (#740)",
 		},
 	},
 }

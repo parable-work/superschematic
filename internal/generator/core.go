@@ -41,7 +41,12 @@ var sqlOutputSchema = json.RawMessage(`{
 				"name": {"type": "string", "minLength": 1}
 			}
 		},
-		"requireUpdatedBy": {"type": "boolean"}
+		"requireUpdatedBy": {"type": "boolean"},
+		"search": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {"foldDiacritics": {"type": "boolean"}}
+		}
 	}
 }`)
 
