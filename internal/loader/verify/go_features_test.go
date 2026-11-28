@@ -106,10 +106,10 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 0 {
 		t.Fatalf("an audience, grants, the access log, references, attachments, Recurrence, the calendar, search, events, the notifier and channel identities in Go: %v", got)
 	}
-	// A calendar source titled by a sealed field is not: the Go calendar
-	// reads a title from its column.
+	// So is a calendar source titled by a sealed field: the Go calendar
+	// opens its title under the database's keys (#616).
 	served.Types["Document"].Fields[0].EncryptedAtRest = true
-	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 1 || !strings.Contains(got[0], "does not serve @calendarSource document titled by title, an Encrypted<T> field (D152, D187)") {
+	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 0 {
 		t.Fatalf("a sealed title: %v", got)
 	}
 

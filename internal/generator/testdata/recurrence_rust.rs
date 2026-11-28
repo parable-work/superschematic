@@ -511,7 +511,7 @@ async fn recurrence_on_postgres() {
             .unwrap();
         assert_eq!((row.get::<_, String>(0).as_str(), row.get::<_, bool>(1)), ("open", true));
         let dues: Vec<String> = app.hearing.of(&id).into_iter().filter(|(kind, _)| kind == "due").map(|(_, key)| key).collect();
-        assert_eq!(dues, [first.key.clone()]);
+        assert_eq!(dues, std::slice::from_ref(&first.key));
     }
 
     case("complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it");

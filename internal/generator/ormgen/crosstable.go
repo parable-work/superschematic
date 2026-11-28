@@ -83,6 +83,11 @@ func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel, sqlite bool) 
 					return nil, err
 				}
 				entry.Title = title.Quoted
+				// A title of an Encrypted<T> field is its envelope, which the
+				// read opens under the database's keys (#616).
+				if title.Def != nil && title.Def.EncryptedAtRest {
+					entry.TitleSealed, entry.TitleField = true, source.Title
+				}
 				if source.Field != "" {
 					field, err := column(name, source.Field)
 					if err != nil {
@@ -189,6 +194,8 @@ type calendarSourceDef struct {
 	Owner       string                  `json:"owner,omitempty"`
 	OwnerUUID   bool                    `json:"ownerUuid,omitempty"`
 	Permission  string                  `json:"permission,omitempty"`
+	TitleSealed bool                    `json:"titleSealed,omitempty"`
+	TitleField  string                  `json:"titleField,omitempty"`
 	Occurrences *calendarOccurrencesDef `json:"occurrences,omitempty"`
 }
 

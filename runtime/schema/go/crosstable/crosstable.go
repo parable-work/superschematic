@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
+	"github.com/parable-work/superschematic/runtime/schema/go/fieldcrypt"
 	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 )
 
@@ -132,8 +133,21 @@ type CalendarSource struct {
 	OwnerUUID bool   `json:"ownerUuid,omitempty"`
 	// Permission is the permission the schema's source needs (#601);
 	// CalendarOptions.Permissions may name another, which wins.
-	Permission  string               `json:"permission,omitempty"`
+	Permission string `json:"permission,omitempty"`
+	// TitleSealed says the title's column holds an Encrypted<T> field's
+	// envelope (D85, #616), which the read opens through the host's keys
+	// (Unsealer), bound to the table type, TitleField and the row's key.
+	TitleSealed bool                 `json:"titleSealed,omitempty"`
+	TitleField  string               `json:"titleField,omitempty"`
 	Occurrences *CalendarOccurrences `json:"occurrences,omitempty"`
+}
+
+// Unsealer is a Host that holds the keys of its database's Encrypted<T>
+// fields (D85): a calendar source titled by one opens each title through
+// them (#616). A Host that is none reads such a title as an error that
+// wraps fieldcrypt.ErrNoKeys.
+type Unsealer interface {
+	FieldKeys() *fieldcrypt.Keyring
 }
 
 // permissionUnder is the permission a caller needs to read the source

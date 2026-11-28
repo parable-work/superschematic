@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parable-work/superschematic/runtime/schema/go/fieldcrypt"
 	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 )
 
@@ -236,6 +237,22 @@ func form(value any, timestamp bool) (string, bool) {
 	return fmt.Sprint(value), true
 }
 
+// titleOf is a row's title as its entry shows it: the column's text, or,
+// for a source titled by an Encrypted<T> field (#616), its envelope opened
+// under the host's keys, bound to the table type, the field and the row's
+// key as text, as the repositories seal it. An envelope that does not open
+// fails the read, as a repository's read of it does.
+func titleOf(h Host, typeName string, source CalendarSource, row, value string) (string, error) {
+	if !source.TitleSealed || value == "" {
+		return value, nil
+	}
+	var keys *fieldcrypt.Keyring
+	if unsealer, ok := h.(Unsealer); ok {
+		keys = unsealer.FieldKeys()
+	}
+	return keys.Open(fieldcrypt.Cell{Table: typeName, Field: source.TitleField, Row: row}, value)
+}
+
 // rowsOf reads a field source's rows in the window.
 func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, source CalendarSource, from, to time.Time, limit int, mine bool, caller Caller) ([]CalendarEntry, bool, error) {
 	if source.Field == "" {
@@ -280,7 +297,11 @@ func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, s
 		if !ok {
 			continue
 		}
-		entry := CalendarEntry{Source: source.Name, Kind: source.Kind, Color: source.Color, Type: typeName, Key: wireKey(table.UUID, text(row, "key")), Title: text(row, "title"), Start: start, AllDay: !source.Timestamp}
+		title, err := titleOf(h, typeName, source, text(row, "key"), text(row, "title"))
+		if err != nil {
+			return nil, false, err
+		}
+		entry := CalendarEntry{Source: source.Name, Kind: source.Kind, Color: source.Color, Type: typeName, Key: wireKey(table.UUID, text(row, "key")), Title: title, Start: start, AllDay: !source.Timestamp}
 		if finish, ok := form(row["finish"], source.Timestamp); ok {
 			entry.End = finish
 		}
@@ -342,7 +363,11 @@ func occurrencesOf(ctx context.Context, h Host, typeName string, table CalendarT
 			return nil, false, err
 		}
 		for _, parent := range parents {
-			titles[text(parent, "key")] = text(parent, "title")
+			title, err := titleOf(h, typeName, source, text(parent, "key"), text(parent, "title"))
+			if err != nil {
+				return nil, false, err
+			}
+			titles[text(parent, "key")] = title
 		}
 	}
 	var out []CalendarEntry

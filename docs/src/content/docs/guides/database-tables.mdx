@@ -4240,8 +4240,9 @@ stack's Go server mounts `CalendarRoutes` itself at `/api/calendar`,
 behind the API's auth step but for a feed's fetch, with the options its
 implementation's `NewWiring` answers in `Wiring.Calendar`
 ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server));
-it serves no MCP endpoint, so no calendar tool. A Go server whose
-calendar source is titled by an `Encrypted<T>` field is refused it. Over a
+it serves no MCP endpoint, so no calendar tool. A calendar source titled
+by an `Encrypted<T>` field opens each title under the database's field
+keys (`WithFieldKeys`), as its repository's read does. Over a
 database that lists `sqlite`, Recurrence's operations run through the core
 in the SQLite repositories' transactions, and the SQLite database's
 `CrossTables()` reads the calendar and serves its feed on the file
