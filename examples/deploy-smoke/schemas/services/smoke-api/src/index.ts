@@ -18,4 +18,26 @@ export {
   TitleInput,
   Totals,
 } from "./smoke-api.schema";
+export {
+  BillReminders,
+  BillView,
+  Bills,
+  DeliveryView,
+  IndexSearch,
+  MemoInput,
+  MemoView,
+  Memos,
+  Notices,
+  Notify,
+  OccurrenceView,
+  PayeeInput,
+  PayeeView,
+  Payees,
+  PhoneInput,
+  Reachable,
+  RouteWritten,
+  Runs,
+  SmokeApiConfig,
+  TriagedView,
+} from "./platform.schema";
 export * from "./service.generated";
