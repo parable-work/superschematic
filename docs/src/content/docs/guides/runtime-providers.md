@@ -33,7 +33,10 @@ depends on none of them.
 
 [D159](https://github.com/parable-work/superschematic/issues/608)
 records the design and what is left. `examples/runtime-providers` is the
-worked example this page quotes.
+worked example this page quotes. Its sandbox and its model are stubs, so
+it runs with no account: [set up your own
+provider](#set-up-your-own-provider) says how to write one for the
+service an app uses.
 
 ## Write a provider package
 
@@ -394,3 +397,317 @@ the app with its key as that principal, and composes with
 `session.GrantAuthenticator`. An `Injection` has no exported field, so
 no other package makes one that holds a value, and its JSON and every
 `fmt` verb print its reference and target alone.
+
+## Set up your own provider
+
+The examples run with no account anywhere. Their sandbox is
+`local-sandbox`, which runs each instance as a process on the machine and
+isolates nothing, and their model is `stub-model`, whose answers follow
+from the turn. The channel adapters, the vault broker and the file
+processor talk to stand-ins of their services in the examples' tests. An
+app that wants a real service writes a provider package for it: a sandbox
+over a container runtime, a model provider over a model API, an adapter
+over the service a message goes out through.
+
+No skeleton package ships, since each stub is one: a small package of one
+interface that type-checks, in TypeScript, Go and Rust, whose test holds
+its manifest to its code. Start from the stub of your interface, under
+`examples/runtime-providers`:
+
+| Interface | TypeScript and Go | Rust |
+| --- | --- | --- |
+| `sandbox` | `providers/local-sandbox` | `rust/local-sandbox` |
+| `model` | `providers/stub-model` | `rust/stub-model` |
+| `channel` | `providers/sms-relay-a` (statuses and replies by callback), `providers/sms-relay-b` (send only); in TypeScript alone, `providers/mail-relay` (email) and `providers/chat-bridge` (a bridge that connects outward) | `rust/sms-relay-a`, `rust/sms-relay-b` |
+| `credentials` | `providers/vault-broker` | `rust/vault-broker` |
+| `files` | `providers/text-preview` | `rust/text-preview` |
+
+### The steps
+
+1. **Copy the stub's directory** into your project and rename it. Write
+   the provider in the language of the server that links it, or in each:
+   a Go server refuses a listed provider whose directory holds no Go
+   module, and a Rust server one with no crate.
+   - TypeScript: an npm package whose default export is the definition.
+     It imports `@superschematic/http-runtime/providers` from the copy the
+     server uses (a peer dependency, once the runtime is published), so
+     an `Injection` it seals is one the runtime opens.
+   - Go: a module whose root package exports `Definition()`, in the same
+     directory as the `package.json`, or alone with a
+     `superschematic.json`. Drop the stub's `replace` block, which points
+     into this checkout.
+   - Rust: a crate whose root exports `definition()`. Replace the stub's
+     `path` dependency on the runtime, which points into this checkout,
+     with the runtime your server uses.
+2. **Name it and declare its settings**, in the manifest the build reads
+   and in the definition the server links: the `package.json`'s
+   `superschematic.provider` (or the `superschematic.json`'s `provider`),
+   or the `Cargo.toml`'s `[package.metadata.superschematic.provider]`.
+   Give it a name of lower-case words joined by hyphens, `implements` its
+   interface, a `config` key per setting, `secret` on a key or a token,
+   `optional` on a setting it can do without, and a `role` only when it
+   calls the app. Name it and its settings after what they are
+   (`container-sandbox`, `URL`, `TOKEN`), not after a service.
+3. **Implement the members** of its interface, below. Read a secret
+   setting with `settings.secret(...)` (`Secret` in Go), which answers a
+   secret value, and reveal it only where the request to the service is
+   made. Take the HTTP client as a parameter, as `sms-relay-a` does (a
+   `fetch` in TypeScript, an `*http.Client` in Go, a trait object in
+   Rust), so a test can put a stand-in of the service behind it.
+4. **Test the package** on its own. Copy the stub's test that holds the
+   manifest to the code: `checkProviderPackage(packageJson, definition,
+   provider)` in TypeScript, as the example's first case does, and
+   `providers.ReadManifest(".")` with `providers.CheckManifest` in Go
+   (`provider_test.go`). A Rust server holds each crate's `definition()`
+   to its manifest as it starts. Then run the stub's own cases with yours
+   in its place: in `examples/runtime-providers/test/providers.test.ts`,
+   "the local sandbox runs an instance..." and "the stub model calls a
+   tool...". Run them against a stand-in of the service, and against the
+   service itself only when the test's environment holds a key for it.
+5. **List it in the API's providers**, by its directory or its npm name
+   ([use providers in an API](#use-providers-in-an-api)). Keep the stub
+   listed for the environments that still use it.
+6. **Declare its settings in the API's `@envVars` class**: a field per
+   setting, named after the slot and the key, a secret one a
+   `Nullable<Secret<string>>`. Keep each field nullable: a required
+   `Secret<T>` is a secret of every environment, the stub's too.
+7. **Name it in one environment.** Set the slot to its name in that
+   environment's `env`, with its plain settings, and leave every other
+   environment on the stub. `superschematic stack secrets set
+   <environment>` asks for its secret settings in that environment alone.
+   `superschematic build` of the stack checks the manifest against the
+   interface's contract, and the settings' fields and their bindings
+   ([choose a provider per environment](#choose-a-provider-per-environment)).
+8. **Test it end to end**, as [below](#test-it-end-to-end).
+
+For an API whose config names `SANDBOX` and `MODEL`, as
+`examples/agent-orchestration`'s does, steps 5 to 7 come to this:
+
+```ts
+providers: ["../../../providers/local-sandbox", "../../../providers/container-sandbox",
+            "../../../providers/stub-model", "../../../providers/model-api"],
+```
+
+```ts
+@envVars
+@providers({ SANDBOX: "sandbox", MODEL: "model" })
+export abstract class WorkApiConfig {
+  SANDBOX: Nullable<string>;
+  SANDBOX_WORKDIR: Nullable<string>;       // local-sandbox's
+  SANDBOX_URL: Nullable<string>;           // container-sandbox's
+  SANDBOX_TOKEN: Nullable<Secret<string>>;
+  MODEL: Nullable<string>;
+  MODEL_MODEL: Nullable<string>;           // both models'
+  MODEL_URL: Nullable<string>;             // model-api's
+  MODEL_KEY: Nullable<Secret<string>>;
+}
+```
+
+```ts
+// Dev, on this machine, keeps the stubs.
+{ of: WorkApi, env: { SANDBOX: "local-sandbox", MODEL: "stub-model" } }
+
+// Staging names the real ones.
+{ of: WorkApi, env: {
+  SANDBOX: "container-sandbox", SANDBOX_URL: "https://containers.example.test",
+  MODEL: "model-api", MODEL_URL: "https://models.example.test", MODEL_MODEL: "large",
+} }
+```
+
+```sh
+superschematic stack secrets set Staging   # SANDBOX_TOKEN and MODEL_KEY
+```
+
+Dev is asked for neither secret, since no provider its slots name reads
+them.
+
+### A sandbox provider
+
+The dispatcher starts one instance per run, polls it until it ends, reads
+what it cost, and cancels it when the run is paused or its agent's budget
+runs out ([agent runs](/superschematic/guides/agent-runs/#start-a-run)).
+Its members are `start`, `cancel`, `status` and `cost`: `SandboxProvider`
+in TypeScript, the same in Go with a `context.Context` first (`Start`,
+`Cancel`, `Status`, `Cost`), and the `SandboxProvider` trait in Rust,
+which the definition answers as `ProviderInstance::Sandbox`.
+
+| Member | What it must do |
+| --- | --- |
+| `start(spec)` | Start a fresh instance of the spec's `image` (a container runtime) or `command` (a process), with `env` as plain variables and `secrets` through the runtime's own secret store, held to `limits`. Answer its `id` and `startedAt`. Fail when it cannot start: the dispatcher revokes the run's token, and Retries starts the run again after its backoff. |
+| `cancel(id)` | Stop the instance. Cancelling one that has stopped does nothing. |
+| `status(id)` | Answer `starting`, `running`, `succeeded`, `failed` or `cancelled`, with the exit code and a detail. The dispatcher polls it every few seconds and heartbeats the run's Lease while the instance runs. `succeeded` ends the run done, `cancelled` cancelled, and `failed` failed, with the detail. |
+| `cost(id)` | Answer its wall seconds and CPU seconds so far, and the amount when the runtime says. The dispatcher reads it after the instance ends, and the agent's Budget counts the wall seconds. |
+
+What the dispatcher puts in the spec:
+
+- `runId`, and the `image` and `command` of the agent's definition;
+- `env`: `AGENT_RUN_ID`, `AGENT_ENDPOINT`, `AGENT_NAME`,
+  `AGENT_DEFINITION_VERSION`, `AGENT_CREDENTIALS` (references alone), and
+  what the app's `sandboxSpec` adds;
+- `secrets`: `AGENT_RUN_TOKEN`, and what the app's `sandboxSpec` adds,
+  such as the credential broker's token;
+- `limits`: `wallSeconds` always, from the definition's limits, and
+  `cpuSeconds` and `memoryMb` when the definition sets them.
+
+The instance runs the runtime's side of a run: `runAgentInstance` in
+TypeScript, `providers.RunAgentInstance` in Go, `run_agent_instance` in
+Rust, so the image holds a program that calls it. It calls
+`AGENT_ENDPOINT`, so the instance needs a route out to the app and no
+open port. It reports the outcome and exits; the provider reports an exit
+of 0 as `succeeded`.
+
+The provider must:
+
+- take the id alone in `cancel`, `status` and `cost`, which may come from
+  another process than the one that started it: on Workers the
+  dispatcher's queue drains at each Cron firing. Keep nothing in memory a
+  later call needs, and ask the runtime by the id. `local-sandbox` keeps
+  its processes in memory, which serves one machine alone;
+- reach the runtime over HTTP, not a process API, so it runs wherever the
+  dispatcher runs, Workers included;
+- stop an instance at its `wallSeconds`, and start each run on a fresh
+  instance, carrying nothing from one run to the next.
+
+It must never put a secret's value in a log line, an error message, the
+instance's name or labels, its plain `env`, or its id. The dispatcher logs
+a failed start's message, so an error quotes no request that carried a
+secret. Log the secrets' names, as `local-sandbox` does.
+
+The build holds the manifest to the contract: `implements: "sandbox"`,
+and the operations `start`, `cancel`, `status` and `cost`, none of them
+optional. The TypeScript and Go servers check, when they first make the
+provider, that it has each one; in Rust the trait does. The stack refuses
+an environment that runs an API whose database declares the agents'
+tables while no sandbox slot is set.
+
+```ts
+import { defineProvider, type SandboxProvider } from "@superschematic/http-runtime/providers";
+
+export default defineProvider({
+  name: "container-sandbox",
+  implements: "sandbox",
+  config: { URL: {}, TOKEN: { secret: true } },
+  create(settings, context): SandboxProvider {
+    const url = settings.text("URL");
+    const token = settings.secret("TOKEN"); // revealed into the runtime's request alone
+    return {
+      async start(spec) { throw new Error("not implemented"); }, // run spec.image with spec.env, spec.secrets and spec.limits
+      async cancel(id) { throw new Error("not implemented"); },  // stop it; nothing when it has stopped
+      async status(id) { throw new Error("not implemented"); },  // the runtime's state of id
+      async cost(id) { throw new Error("not implemented"); },    // its wall and CPU seconds
+    };
+  },
+});
+```
+
+### A model provider
+
+The dispatcher completes each turn of a run in the app, not in the
+sandbox, so the model's key stays in the app
+([each turn](/superschematic/guides/agent-runs/#each-turn)). The member
+is `complete(turn)`: `ModelProvider` in TypeScript, `Complete(ctx, turn)`
+in Go, and the `ModelProvider` trait in Rust, which the definition
+answers as `ProviderInstance::Model`. `embed`, for search's re-ranking
+(D155), is optional and no operation of the contract, so the manifest
+does not list it: an optional member in TypeScript,
+`providers.ModelEmbedder` in Go, and the trait's `embed` in Rust, which
+answers `None` unless the provider overrides it.
+
+`complete` must:
+
+- build the API's request from `turn.messages` alone: the `system`,
+  `user`, `assistant` and `tool` messages in order, each assistant
+  message's `toolCalls` before the `tool` messages that answer them by
+  `toolCallId`, and its `providerState` passed back as the API requires;
+- mark `untrusted` content in the way the API takes it, as data and never
+  as instructions: a tool result that carries a party's message or a web
+  page;
+- offer `turn.tools`, each a name, a description and its input's JSON
+  Schema, and use `turn.model`, or a default from a setting (`MODEL`), and
+  `turn.maxTokens`;
+- answer `content`, the `toolCalls` the model made, each with the API's
+  id, `stop` (`end`, `toolUse` or `maxTokens`), and `usage`:
+  `inputTokens` and `outputTokens`, which the agent's budget counts, and
+  the amount when the API says;
+- return in `providerState` what the API needs back on the next turn, as
+  JSON, or leave it out;
+- fail when the API does: the turn answers `502 model_failed`, its message
+  redacted.
+
+It must never put the API key anywhere but the request's header: not in
+a message, a log line, an error message, or `providerState`, which the
+dispatcher keeps unredacted while the run lives. No credential value
+reaches a model's text (ground rule 6): credentials reach the runner in
+the sandbox alone. A model provider adds no setting or secret to the
+messages, and logs no turn's messages, which hold the task and the tool
+results.
+
+The build holds the manifest to the contract: `implements: "model"` and
+the operation `complete`. An API whose database declares the agents'
+tables needs a model slot set too.
+
+```ts
+import { defineProvider, type ModelProvider } from "@superschematic/http-runtime/providers";
+
+export default defineProvider({
+  name: "model-api",
+  implements: "model",
+  config: { URL: {}, KEY: { secret: true }, MODEL: { optional: true } },
+  create(settings, context): ModelProvider {
+    const url = settings.text("URL");
+    const key = settings.secret("KEY"); // revealed into the request's header alone
+    const model = settings.optionalText("MODEL");
+    return {
+      // turn.messages and turn.tools in; content, toolCalls, stop and usage out
+      async complete(turn) { throw new Error("not implemented"); },
+    };
+  },
+});
+```
+
+### A channel adapter, a credential provider, a file processor
+
+These have stubs that already talk to a stand-in service over HTTP, so
+the copy of step 1 changes the requests they make and little else:
+
+- **A channel adapter** answers its `kind` and implements `send` and
+  `health`, and `status` and `inbound` when the service posts delivery
+  statuses or messages back, which its manifest then lists in
+  `operations`. Those reach it at `POST /webhooks/<slot>/status` and
+  `/inbound`, the slot in lower case: check the service's signature
+  there. A bridge that connects outward has a `role` such as
+  `messages.relay` and a key of its own. Every environment that sends
+  notices needs one ([events and notifications](/superschematic/guides/notifications/)).
+- **A credential provider**'s `list` answers titles and sites and reads
+  no value. `resolve` reads the one field and seals it, from a secret
+  value, in an `Injection` for the target it was asked for
+  (`Injection.fill` and `Injection.header` in TypeScript and Rust,
+  `providers.FillInjection` and `HeaderInjection` in Go), and refuses a
+  reference outside what its settings allow. No build check covers it.
+- **A file processor** answers its `mediaTypes` and implements
+  `extractText` and `preview`, each answering null (`nil`, `None`) for a
+  file it does not read, which the pass then hands to the next files
+  slot. Search over attachments' text needs one.
+
+### Test it end to end
+
+The agent runs' end-to-end tests run the dispatcher over the stubs:
+`TestAgentRunsEndToEnd` (`internal/generator/tsgen`), and
+`TestGoAgentRunsEndToEnd` and `TestRustAgentRunsEndToEnd`
+(`internal/generator`).
+
+- A sandbox provider runs the TypeScript cases in the stub's place.
+  `agentsProviders` in `internal/generator/tsgen/agents_test.go` copies
+  `local-sandbox.ts` beside the test, and `agents.test.ts` names it in its
+  `providersFrom`: point both at your package. Each instance runs the
+  test's `command`, `bun agent_runner.ts`, with the spec's env, and calls
+  the test's endpoint on loopback, so the instance needs Bun, the runner
+  and a route to the test's host. The Go and Rust cases run their
+  instances in the test's own process.
+- A model provider keeps the stub in these cases, which script each turn
+  through its `call <tool> <json>` answers. Hold it to the stub's cases of
+  step 4, then start a run in the environment that names it.
+
+A channel adapter's end-to-end proof is the notifier's: name it in one
+environment and send a notice there, as `examples/notifications` does over
+its relays.
