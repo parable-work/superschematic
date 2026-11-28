@@ -85,8 +85,8 @@ const concurrency = workerConcurrency(2, stackEnvOf(env));
 const drainSeconds = workerDrainSeconds(50, stackEnvOf(env));
 
 // The wakes the worker's own enqueues send, as its QUEUE_WAKES binding
-// names them (D151): none where the platform binds none, as the cloudflare
-// target binds a drainer none, leaving what it writes to the next firing.
+// names them (D151): on the cloudflare target, a binding of each other
+// drainer's wake relay (#600); none where the platform binds none.
 installQueueWakes(env);
 
 // The API's config as Cloudflare loads the version, from the string

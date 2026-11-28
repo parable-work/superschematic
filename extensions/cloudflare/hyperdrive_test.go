@@ -103,7 +103,8 @@ func worker(name string) ir.DeployableRef {
 // ledgerStack deploys finances-api, exposed at workers.dev, and
 // finances-db on the cloudflare target: Staging's finances-db is on the
 // Hyperdrive config its settings name, and its embedding worker claims for
-// 40 seconds a firing; Production's config may cache reads, its server's
+// 40 seconds a firing, within the 60 s of CPU time its settings give one;
+// Production's config may cache reads, its server's
 // compatibility date is one before Node's modules came with no flag, and
 // its sync worker handles one item at a time; Preview extends Staging with
 // a parameter.
@@ -120,7 +121,7 @@ func ledgerStack() *ir.Stack {
 				Name: "Staging", Target: cloudflare.Target, Values: values,
 				Settings: []*ir.DeployableSettings{
 					{Of: ir.DeployableRef{Service: &db}, Values: map[string]any{"hyperdrive": stagingHyperdrive}},
-					{Of: worker("EmbedLineItems"), Values: map[string]any{"drainSeconds": float64(40)}},
+					{Of: worker("EmbedLineItems"), Values: map[string]any{"drainSeconds": float64(40), "cpuMs": float64(60000)}},
 				},
 			},
 			{
@@ -234,7 +235,7 @@ func TestWorkersBindTheirHyperdriveConfig(t *testing.T) {
 		}
 	}
 	for worker, want := range map[string][2]string{
-		"finances-api-sync-plaid-item":  {"2", "50"},
+		"finances-api-sync-plaid-item":  {"2", "22"},
 		"finances-api-embed-line-items": {"4", "40"},
 	} {
 		bindings := versionBindings(t, node(t, env, worker+".version"))
@@ -329,14 +330,14 @@ func TestHyperdriveRefusals(t *testing.T) {
 			code: stack.CodeUnrealizable,
 			want: "worker finances-api-sync-plaid-item may run up to 2 instances (maxInstances) in environment Staging, and no target scales a worker with its queue's depth yet (D53, amended); leave maxInstances out",
 		},
-		"a window past a Cron Trigger's run": {
+		"a window past its CPU time": {
 			env: "Staging",
 			edit: func(s *ir.Stack, services []stack.Service) []stack.Service {
 				s.Environments[0].Settings[1].Values["drainSeconds"] = float64(900)
 				return services
 			},
 			code: stack.CodeUnrealizable,
-			want: "worker finances-api-embed-line-items claims for 15m and lets its handlers finish for 8s at each firing, 15m8s in all, and Cloudflare stops a scheduled run after 15m; shorten drainSeconds or its @worker's grace",
+			want: "worker finances-api-embed-line-items claims for 15m and lets its handlers finish for 8s at each firing, and a firing on Workers may take 60000ms of CPU time (cpuMs), which the two must fit within so the firing ends before Cloudflare stops it; shorten drainSeconds to 52 or raise cpuMs (D151)",
 		},
 		"an unknown setting": {
 			env: "Staging",
