@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 
@@ -202,7 +203,7 @@ func identityRoutesOAuth(v any) (*ir.IdentityOAuthConfig, error) {
 		*dst = int64(n)
 		return nil
 	}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		value := obj[key]
 		var err error
 		switch key {
@@ -246,7 +247,7 @@ func identityRoutesOAuthClients(v any) (*ir.IdentityOAuthClients, error) {
 		return nil, ArgErrorf(0, "@userSessions oauth.clients must be an object literal: { metadataDocuments?, registration? }")
 	}
 	clients := &ir.IdentityOAuthClients{}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		var dst **bool
 		switch key {
 		case "metadataDocuments":

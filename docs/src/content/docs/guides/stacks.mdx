@@ -2633,7 +2633,7 @@ retention and dead messages are as on gcp
 
 | Setting | Default | |
 | --- | --- | --- |
-| `drainSeconds` | `50`, or less for a behavior worker | how long each firing claims; it and the grace must fit in a Cron Trigger's 15 minutes, and a behavior worker's in its `cpuMs` |
+| `drainSeconds` | `50`, or what `cpuMs` leaves | how long each firing claims; it and the grace must fit in its `cpuMs` |
 | `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: handlers' work counts, waits do not |
 | `logs` | `true` | Workers Logs |
 | `telemetry` | the environment's | `false` or `true`: whether it exports its traces |
@@ -2646,13 +2646,17 @@ worker does not resolve, and neither does one whose queue is on D1.
 `mode: "drain"` ([Drain mode](#drain-mode)) changes nothing here: each
 firing already drains the queue and stops.
 
+A firing's window and grace fit within the CPU time a firing may take,
+30 seconds unless `cpuMs` says, since wall time bounds CPU time, so a
+firing ends before Cloudflare stops it whatever its handlers do (D151,
+#600): the window is 50 seconds or what the CPU time leaves, 22 seconds
+with the defaults, and a `drainSeconds` that does not fit does not
+resolve. Set `cpuMs` to give a worker its 50 seconds.
+
 A `@behaviorWorker` is a drainer too (D151). Its `drain.ts` runs its
 table's deadline, change and event queues at each firing, all at once,
-with the handlers its `main.ts` runs under `stack dev`. Its window and
-grace fit within the CPU time a firing may take, 30 seconds unless
-`cpuMs` says, since wall time bounds CPU time: the window is 50 seconds or
-what the CPU time leaves, 22 seconds with the defaults, and a
-`drainSeconds` that does not fit does not resolve. A claim takes up to
+with the handlers its `main.ts` runs under `stack dev`, its window held
+to its CPU time as every drainer's is. A claim takes up to
 `concurrency` messages of a queue. A firing that ends with messages left
 logs `backlog left for the next firing`, naming the queue and how many it
 handled; the next firing takes the rest.
@@ -2666,8 +2670,16 @@ instance sleeps until the message is due, then runs one firing as a
 drain, which stops once the queues are idle. So an urgent deadline fires
 within seconds of its time, and anything later at the firing after it,
 within a minute. A change a trigger writes, which a Reaction hears, waits
-for the next firing, and so does what one worker's handlers leave
-another.
+for the next firing.
+
+A drainer's handlers wake another drainer as a server does, through the
+other's wake relay (#600): a Worker of the woken drainer's own, named as
+its Worker with `-wake` after it, workers.dev off, which runs a script the
+extension embeds and hands each wake to the drainer's Workflow. The
+waking drainer holds a service binding to the relay, which waits for
+nothing, so two drainers over one database, which each wake the other,
+leave no cycle in the deploy's graph. A drainer no other drainer writes
+to has no relay.
 
 ### Sites on Workers
 

@@ -2,6 +2,7 @@ package stackdeploy
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -93,7 +94,7 @@ func checkImages(env *ir.ResolvedEnvironment, images map[string]string) (missing
 			}
 		}
 	}
-	for _, name := range sortedKeys(images) {
+	for _, name := range slices.Sorted(maps.Keys(images)) {
 		d := env.Deployable(name)
 		switch {
 		case d == nil || !d.HasImage():
@@ -124,7 +125,7 @@ func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.Resol
 	if err != nil {
 		return nil, err
 	}
-	for _, server := range sortedKeys(images) {
+	for _, server := range slices.Sorted(maps.Keys(images)) {
 		if d := env.Deployable(server); d != nil && appOff(d) {
 			continue
 		}

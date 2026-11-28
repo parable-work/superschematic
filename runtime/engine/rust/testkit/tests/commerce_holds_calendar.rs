@@ -42,29 +42,13 @@ const PROMPTLY: Duration = Duration::from_secs(10);
 
 /// Epoch milliseconds of a UTC date and time.
 fn utc(year: i64, month: i64, day: i64, hour: i64, minute: i64) -> i64 {
-    // Howard Hinnant's days_from_civil.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let of_era = year - era * 400;
-    let of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-    let days = era * 146_097 + of_era * 365 + of_era / 4 - of_era / 100 + of_year - 719_468;
-    days * DAY + hour * HOUR + minute * MINUTE
+    superschematic_engine::civil::to_days(year, month, day) * DAY + hour * HOUR + minute * MINUTE
 }
 
 /// An instant as RFC 3339 in UTC, as a date-time field holds it.
 fn iso(ms: i64) -> String {
-    // Howard Hinnant's civil_from_days.
-    let days = ms.div_euclid(DAY);
+    let (year, month, day) = superschematic_engine::civil::from_days(ms.div_euclid(DAY));
     let of_day = ms.rem_euclid(DAY);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let of_era = z - era * 146_097;
-    let year_of_era = (of_era - of_era / 1460 + of_era / 36_524 - of_era / 146_096) / 365;
-    let of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let mp = (5 * of_year + 2) / 153;
-    let day = of_year - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:00Z",
         of_day / HOUR,

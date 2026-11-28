@@ -161,7 +161,7 @@ func postgresSeedLiteral(v SeedValue) string {
 		return "NULL::" + v.Type
 	}
 	if isJSONType(base) {
-		return stringLiteral(seedJSON(v.Value)) + "::" + v.Type
+		return sqlutil.QuoteLiteral(seedJSON(v.Value)) + "::" + v.Type
 	}
 	if list {
 		items, _ := v.Value.([]any)
@@ -185,7 +185,7 @@ func sqliteSeedLiteral(v SeedValue) string {
 	case v.Value == nil:
 		return "NULL"
 	case list || isJSONType(base):
-		return stringLiteral(seedJSON(v.Value))
+		return sqlutil.QuoteLiteral(seedJSON(v.Value))
 	}
 	return seedScalar(v.Value, base == "BOOLEAN", "1", "0")
 }
@@ -208,9 +208,9 @@ func seedScalar(value any, boolean bool, yes, no string) string {
 	case json.Number:
 		return v.String()
 	case string:
-		return stringLiteral(v)
+		return sqlutil.QuoteLiteral(v)
 	}
-	return stringLiteral(seedJSON(value))
+	return sqlutil.QuoteLiteral(seedJSON(value))
 }
 
 // seedJSON is a value's JSON text, its object keys sorted.

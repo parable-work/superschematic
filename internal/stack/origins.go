@@ -3,6 +3,7 @@ package stack
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -97,7 +98,7 @@ func inOrigin(e *edge) bool {
 // and the API's path (ir.SiteOriginURL), which the site's config hands the
 // page as `stack dev`'s proxy does (D91).
 func (r *resolver) checkOriginURLs() {
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		e := r.edges[id]
 		if !inOrigin(e) {
 			continue

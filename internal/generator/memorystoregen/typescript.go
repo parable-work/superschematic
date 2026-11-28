@@ -3,6 +3,7 @@ package memorystoregen
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -155,22 +156,13 @@ func (w *tsWriter) imports(runtimePackage string, typesPackage func(string) stri
 		}
 	}
 	fmt.Fprintf(&b, "import { %s } from %s;\n", strings.Join(names, ", "), tsString(runtimePackage))
-	for _, service := range sortedKeys(w.parsers) {
-		fmt.Fprintf(&b, "import { %s } from %s;\n", strings.Join(sortedKeys(w.parsers[service]), ", "), tsString(typesPackage(service)))
+	for _, service := range slices.Sorted(maps.Keys(w.parsers)) {
+		fmt.Fprintf(&b, "import { %s } from %s;\n", strings.Join(slices.Sorted(maps.Keys(w.parsers[service])), ", "), tsString(typesPackage(service)))
 	}
-	for _, service := range sortedKeys(w.typesImports) {
-		fmt.Fprintf(&b, "import type { %s } from %s;\n", strings.Join(sortedKeys(w.typesImports[service]), ", "), tsString(typesPackage(service)+"/types"))
+	for _, service := range slices.Sorted(maps.Keys(w.typesImports)) {
+		fmt.Fprintf(&b, "import type { %s } from %s;\n", strings.Join(slices.Sorted(maps.Keys(w.typesImports[service])), ", "), tsString(typesPackage(service)+"/types"))
 	}
 	return b.String()
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // definitions writes the const of each declaration, then the codecs and
@@ -523,8 +515,7 @@ func tsDocBlock(indent string, paragraphs ...string) string {
 
 // tsString is s as a single-quoted TypeScript string.
 func tsString(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`, "\r", `\r`, " ", ` `, " ", ` `)
-	return "'" + r.Replace(s) + "'"
+	return tsutil.Quote(s)
 }
 
 // tsInt is n with an underscore every three digits.

@@ -1,3 +1,4 @@
+import { readCapped } from '../read-capped.js';
 import { isAllowedRedirect } from './oauth-protocol.js';
 import { parseGoURL } from './url.js';
 
@@ -199,22 +200,10 @@ export function cacheSecondsOf(cacheControl: string | null): number {
   return Math.min(Number(maxAge[1]), METADATA_DOCUMENT_MAX_TTL_SECONDS);
 }
 
-async function readCapped(response: Response): Promise<string> {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > METADATA_DOCUMENT_MAX_BYTES) {
-      await reader.cancel();
-      throw new ClientMetadataError(`the document is larger than ${METADATA_DOCUMENT_MAX_BYTES} bytes`);
-    }
-    chunks.push(value);
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks));
+async function readDocument(response: Response): Promise<string> {
+  const bytes = await readCapped(response.body, METADATA_DOCUMENT_MAX_BYTES);
+  if (!bytes) throw new ClientMetadataError(`the document is larger than ${METADATA_DOCUMENT_MAX_BYTES} bytes`);
+  return new TextDecoder().decode(bytes);
 }
 
 /**
@@ -290,7 +279,7 @@ export function clientMetadataFetcher(options: ClientMetadataFetchOptions = {}):
         await response.body?.cancel();
         throw new ClientMetadataError(`${url.href} answered ${response.status}`);
       }
-      const text = await readCapped(response);
+      const text = await readDocument(response);
       let json: unknown;
       try {
         json = JSON.parse(text);

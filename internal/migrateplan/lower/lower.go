@@ -24,8 +24,8 @@ package lower
 
 import (
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -185,7 +185,7 @@ func Document(doc *schemafile.Document, values Values) (*schemafile.Document, er
 		return doc, nil
 	}
 	var lowered *schemafile.Document
-	for _, name := range sortedNames(doc.Types) {
+	for _, name := range slices.Sorted(maps.Keys(doc.Types)) {
 		td := doc.Types[name]
 		if td == nil || !Composes(td) {
 			continue
@@ -326,15 +326,6 @@ func withKeyScalar(doc *schemafile.Document, table *ir.TypeDef) bool {
 		}
 	}
 	return false
-}
-
-func sortedNames(types map[string]*ir.TypeDef) []string {
-	names := make([]string, 0, len(types))
-	for name := range types {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // joinNames lists names as prose: a, b and c.

@@ -3,6 +3,7 @@ package tsreader
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -300,7 +301,7 @@ func (r *behaviorClassReader) readOptions(class string, marker decoratorRef, out
 				bad("the contracts it asks, by name, each with what it means here")
 				continue
 			}
-			for _, contract := range sortedAnyKeys(asks) {
+			for _, contract := range slices.Sorted(maps.Keys(asks)) {
 				text, _ := asks[contract].(string)
 				decl.Contracts = append(decl.Contracts, registry.BehaviorContract{Name: contract, Role: registry.ContractRoleAsks, Description: text})
 			}
@@ -632,13 +633,4 @@ func stringList(value any) ([]string, bool) {
 		out = append(out, s)
 	}
 	return out, true
-}
-
-func sortedAnyKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
@@ -1253,18 +1254,11 @@ func (s *RustServer) planLoopback(taken rustNames) {
 	if s.Background() || s.App != nil {
 		return
 	}
-	serves := make([]string, len(s.APIs))
-	guarded := map[string]bool{}
-	for i, a := range s.APIs {
-		serves[i] = a.Service
-		guarded[a.Service] = a.ServiceAuthenticator != ""
-	}
-	if !slices.ContainsFunc(s.Clients, func(c *RustClient) bool { return guarded[c.Service] }) {
-		return
-	}
-	s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
-	for _, c := range s.Clients {
-		if guarded[c.Service] {
+	var sends []bool
+	s.Loopback, sends = planLoopback(s.APIs, func(a *RustAPI) (string, bool) { return a.Service, a.ServiceAuthenticator != "" },
+		s.Clients, func(c *RustClient) string { return c.Service }, taken.take)
+	for i, c := range s.Clients {
+		if sends[i] {
 			c.Loopback = s.Loopback.Var
 		}
 	}
@@ -1443,9 +1437,9 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 	return nil
 }
 
-// quoteToml is s as a TOML basic string.
+// quoteToml is s as a TOML basic string (codegen.QuoteTOML).
 func quoteToml(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+	return codegen.QuoteTOML(s)
 }
 
 // planRustDocker plans the Dockerfile, or says why there is none. The image
@@ -2048,9 +2042,9 @@ func WriteRust(s *RustServer, dir string) error {
 	return nil
 }
 
-// rustString is s as a Rust string literal.
+// rustString is s as a Rust string literal (rustutil.Quote).
 func rustString(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`
+	return rustutil.Quote(s)
 }
 
 // rustWidth is the width rustfmt lays a line out in.

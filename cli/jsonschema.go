@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/tasks"
@@ -48,7 +47,7 @@ plan command prints. A reader in another language generates its types from them.
 	cmd.Flags().BoolVar(&flags.taskFile, "task-file", false, "emit the JSON Schema of the task file a Tasks service's build writes instead")
 	cmd.Flags().BoolVar(&flags.taskPlan, "task-plan", false, "emit the JSON Schema of the plan `tasks plan` prints instead")
 	cmd.MarkFlagsMutuallyExclusive("config", "task-file", "task-plan")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; json-schema has no service directory to find superschematic.toml from)")
+	addNamingFlag(cmd, &flags.namingPath, "(default: built-in names; json-schema has no service directory to find superschematic.toml from)")
 	return cmd
 }
 
@@ -71,14 +70,7 @@ func runJSONSchema(cmd *cobra.Command, a *app, flags *jsonSchemaFlags) error {
 	// The same registry build threads through the loader and generators;
 	// a binary carrying extensions sees their kinds, decorators and
 	// documents in the emitted schema.
-	names := naming.Default()
-	if flags.namingPath != "" {
-		var err error
-		if names, err = resolveNaming(flags.namingPath, ""); err != nil {
-			return err
-		}
-	}
-	reg, err := a.resolveRegistry(names)
+	reg, err := a.flagRegistry(flags.namingPath)
 	if err != nil {
 		return err
 	}

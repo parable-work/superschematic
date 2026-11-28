@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -436,139 +435,10 @@ func (r *CustomerRepository) GetOne(ctx context.Context, id types.IdentityUUID, 
 	}
 
 	// Hydrate relationship foreign keys into nested objects from typed field selections.
-	if opts != nil && opts.Fields.AddressesNested != nil {
-		childFields := *opts.Fields.AddressesNested
-		if childFields.IsZero() {
-			childFields = AddressFields{Id: true}
+	if opts != nil {
+		if err := r.hydrateHasMany(ctx, []*types.Customer{result}, opts.Fields); err != nil {
+			return nil, err
 		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			"Customer",
-			"Addresses",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
-
-		// Get repository for related type
-		var repo *AddressRepository
-		if r.tx != nil {
-			txDB := r.txDB
-			if txDB == nil {
-				txDB = r.db
-			}
-			repo = &AddressRepository{tx: r.tx, txDB: txDB}
-		} else if r.db != nil {
-			repo = r.db.Address
-		} else if r.txDB != nil {
-			repo = r.txDB.Address
-		} else {
-			return nil, fmt.Errorf("no database connection available for addresses hydration")
-		}
-
-		resultID, ok := customerUUIDValue(result.Id)
-		if !ok {
-			return nil, fmt.Errorf("missing id for Customer.addresses hydration")
-		}
-
-		childFilter := &AddressFilter{}
-		childFilterValue := reflect.ValueOf(childFilter).Elem()
-		filterFieldCandidates := []string{
-			"CustomerID",
-			"AddressesID",
-		}
-		var selectedFilterField string
-		filterSet := false
-		for _, candidate := range filterFieldCandidates {
-			field := childFilterValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() {
-				continue
-			}
-			field.Set(reflect.ValueOf(&UUIDFilter{
-				In: []types.IdentityUUID{resultID},
-			}))
-			selectedFilterField = candidate
-			filterSet = true
-			break
-		}
-		if !filterSet {
-			return nil, fmt.Errorf("failed to locate hasMany FK filter for Customer.addresses")
-		}
-
-		// The other recursion point: these children hydrate their own relations.
-		// This block only runs on an explicit nested selection, so the cycle half
-		// of the guard does not apply and only the depth cap can refuse it.
-		children := []*types.Address{}
-		if hydrationCtx, allowed := enterRelationHydration(ctx, "Customer", "addresses", "Address", false); allowed {
-			fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &AddressFindOptions{
-				Fields: childFields,
-				Limit:  1000000,
-			})
-			if findErr != nil {
-				return nil, fmt.Errorf("failed to fetch addresses: %w", findErr)
-			}
-			children = fetched
-		}
-
-		parentFieldCandidates := []string{
-			strings.TrimSuffix(selectedFilterField, "ID"),
-			"Customer",
-			"Addresses",
-		}
-		related := make([]types.Address, 0, len(children))
-		for _, child := range children {
-			if child == nil {
-				continue
-			}
-			childValue := reflect.ValueOf(child)
-			if childValue.Kind() == reflect.Ptr {
-				if childValue.IsNil() {
-					continue
-				}
-				childValue = childValue.Elem()
-			}
-			if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-				continue
-			}
-
-			matchesParent := false
-			for _, candidate := range parentFieldCandidates {
-				parentField := childValue.FieldByName(candidate)
-				if !parentField.IsValid() {
-					continue
-				}
-				if parentField.Kind() == reflect.Ptr {
-					if parentField.IsNil() {
-						continue
-					}
-					parentField = parentField.Elem()
-				}
-				if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-					continue
-				}
-				idField := parentField.FieldByName("Id")
-				if !idField.IsValid() || !idField.CanInterface() {
-					continue
-				}
-				parentID, ok := customerUUIDValue(idField.Interface())
-				if !ok {
-					continue
-				}
-				if parentID == resultID {
-					matchesParent = true
-					break
-				}
-			}
-			if matchesParent {
-				related = append(related, *child)
-			}
-		}
-		result.Addresses = related
 	}
 
 	return result, nil
@@ -825,6 +695,9 @@ func (r *CustomerRepository) FindOne(ctx context.Context, filter *CustomerFilter
 	}
 
 	// Hydrate relationship foreign keys into nested objects from typed field selections.
+	if err := r.hydrateHasMany(ctx, []*types.Customer{result}, opts.Fields); err != nil {
+		return nil, err
+	}
 
 	return result, nil
 }
@@ -1017,166 +890,24 @@ func (r *CustomerRepository) findRows(ctx context.Context, method, query string,
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
-	if fields.AddressesNested != nil {
-		childFields := *fields.AddressesNested
-		if childFields.IsZero() {
-			childFields = AddressFields{Id: true}
-		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			"Customer",
-			"Addresses",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
-
-		parentIDSet := make(map[types.IdentityUUID]bool, len(results))
-		parentIDs := make([]types.IdentityUUID, 0, len(results))
-		for _, result := range results {
-			if result == nil {
-				continue
-			}
-			resultID, ok := customerUUIDValue(result.Id)
-			if !ok {
-				continue
-			}
-			if !parentIDSet[resultID] {
-				parentIDSet[resultID] = true
-				parentIDs = append(parentIDs, resultID)
-			}
-		}
-		if len(parentIDs) > 0 {
-			// Get repository for related type
-			var repo *AddressRepository
-			if r.tx != nil {
-				txDB := r.txDB
-				if txDB == nil {
-					txDB = r.db
-				}
-				repo = &AddressRepository{tx: r.tx, txDB: txDB}
-			} else if r.db != nil {
-				repo = r.db.Address
-			} else if r.txDB != nil {
-				repo = r.txDB.Address
-			} else {
-				return nil, fmt.Errorf("no database connection available for addresses hydration")
-			}
-
-			childFilter := &AddressFilter{}
-			childFilterValue := reflect.ValueOf(childFilter).Elem()
-			filterFieldCandidates := []string{
-				"CustomerID",
-				"AddressesID",
-			}
-			var selectedFilterField string
-			filterSet := false
-			for _, candidate := range filterFieldCandidates {
-				field := childFilterValue.FieldByName(candidate)
-				if !field.IsValid() || !field.CanSet() {
-					continue
-				}
-				field.Set(reflect.ValueOf(&UUIDFilter{
-					In: parentIDs,
-				}))
-				selectedFilterField = candidate
-				filterSet = true
-				break
-			}
-			if !filterSet {
-				return nil, fmt.Errorf("failed to locate hasMany FK filter for Customer.addresses")
-			}
-
-			// The other recursion point: these children hydrate their own relations.
-			// This block only runs on an explicit nested selection, so the cycle half
-			// of the guard does not apply and only the depth cap can refuse it.
-			children := []*types.Address{}
-			if hydrationCtx, allowed := enterRelationHydration(ctx, "Customer", "addresses", "Address", false); allowed {
-				fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &AddressFindOptions{
-					Fields: childFields,
-					Limit:  1000000,
-				})
-				if findErr != nil {
-					return nil, fmt.Errorf("failed to batch fetch addresses: %w", findErr)
-				}
-				children = fetched
-			}
-
-			parentFieldCandidates := []string{
-				strings.TrimSuffix(selectedFilterField, "ID"),
-				"Customer",
-				"Addresses",
-			}
-			childrenByParentID := make(map[types.IdentityUUID][]types.Address, len(parentIDs))
-			for _, child := range children {
-				if child == nil {
-					continue
-				}
-				childValue := reflect.ValueOf(child)
-				if childValue.Kind() == reflect.Ptr {
-					if childValue.IsNil() {
-						continue
-					}
-					childValue = childValue.Elem()
-				}
-				if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-					continue
-				}
-
-				var parentID types.IdentityUUID
-				foundParent := false
-				for _, candidate := range parentFieldCandidates {
-					parentField := childValue.FieldByName(candidate)
-					if !parentField.IsValid() {
-						continue
-					}
-					if parentField.Kind() == reflect.Ptr {
-						if parentField.IsNil() {
-							continue
-						}
-						parentField = parentField.Elem()
-					}
-					if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-						continue
-					}
-					idField := parentField.FieldByName("Id")
-					if !idField.IsValid() || !idField.CanInterface() {
-						continue
-					}
-					id, ok := customerUUIDValue(idField.Interface())
-					if !ok {
-						continue
-					}
-					parentID = id
-					foundParent = true
-					break
-				}
-				if !foundParent {
-					continue
-				}
-
-				childrenByParentID[parentID] = append(childrenByParentID[parentID], *child)
-			}
-
-			for _, result := range results {
-				if result == nil {
-					continue
-				}
-				resultID, ok := customerUUIDValue(result.Id)
-				if !ok {
-					continue
-				}
-				result.Addresses = childrenByParentID[resultID]
-			}
-		}
+	if err := r.hydrateHasMany(ctx, results, fields); err != nil {
+		return nil, err
 	}
 
 	return results, nil
+}
+
+// hydrateHasMany loads the @hasMany relations fields selects into results:
+// for each, one read of the target's rows whose relation back to this
+// table, the one sqlutil.ToMany names (D90), points at any of results,
+// grouped by that relation's key. A result whose key no row points at gets
+// an empty list, as the TypeScript repositories' include gives it. GetOne,
+// FindOne and findRows load the relations through it.
+func (r *CustomerRepository) hydrateHasMany(ctx context.Context, results []*types.Customer, fields CustomerFields) error {
+	if fields.AddressesNested != nil {
+		return fmt.Errorf("failed to locate hasMany FK filter for Customer.addresses: Address has no relation to Customer")
+	}
+	return nil
 }
 
 // FindPage reads a page of the Customer rows filter finds (D60, amended), in

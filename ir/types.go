@@ -569,13 +569,9 @@ type FieldDef struct {
 	// declared dependency.
 	PlatformDefault string `json:"platformDefault,omitempty" yaml:"platformDefault,omitempty"`
 
-	// ValidateMin is the minimum numeric value allowed for this field
-	// (@validateMin). Nil means no minimum.
-	ValidateMin *float64 `json:"validateMin,omitempty" yaml:"validateMin,omitempty"`
-
-	// ValidateMax is the maximum numeric value allowed for this field
-	// (@validateMax). Nil means no maximum.
-	ValidateMax *float64 `json:"validateMax,omitempty" yaml:"validateMax,omitempty"`
+	// ValueRules are the field's Validate rules: min, max, minLength,
+	// maxLength, listMin, listMax and pattern.
+	ValueRules `yaml:",inline"`
 
 	// ValidateUploadMaxBytes is the largest multipart upload, in bytes, the
 	// generated API accepts for this field (Validate<T, { uploadMaxBytes }>).
@@ -590,26 +586,6 @@ type FieldDef struct {
 	// type; nil for every other field. A field of a file-upload scalar
 	// takes the scalar's FileUpload instead.
 	FileUpload *FileUploadConfig `json:"fileUpload,omitempty" yaml:"fileUpload,omitempty"`
-
-	// ValidateMinLength is the minimum character length for string-like fields
-	// (@validateMinLength). Nil means no minimum.
-	ValidateMinLength *int `json:"validateMinLength,omitempty" yaml:"validateMinLength,omitempty"`
-
-	// ValidateMaxLength is the maximum character length for string-like fields
-	// (@validateMaxLength). Nil means no maximum.
-	ValidateMaxLength *int `json:"validateMaxLength,omitempty" yaml:"validateMaxLength,omitempty"`
-
-	// ValidateListMin is the minimum list cardinality (item count)
-	// (@validateListMin). Nil means no minimum.
-	ValidateListMin *int `json:"validateListMin,omitempty" yaml:"validateListMin,omitempty"`
-
-	// ValidateListMax is the maximum list cardinality (item count)
-	// (@validateListMax). Nil means no maximum.
-	ValidateListMax *int `json:"validateListMax,omitempty" yaml:"validateListMax,omitempty"`
-
-	// ValidatePattern is the regex pattern enforced for this field
-	// (@validatePattern). Empty string means no pattern.
-	ValidatePattern string `json:"validatePattern,omitempty" yaml:"validatePattern,omitempty"`
 
 	// ValidatePrecision and ValidateScale bound a Generic.Decimal field
 	// (Validate<Generic.Decimal, { precision, scale }>, D84): its value has at
@@ -1085,33 +1061,9 @@ type ArgumentDef struct {
 	// Default is the default value (nil means no default).
 	Default *string `json:"default,omitempty" yaml:"default,omitempty"`
 
-	// ValidateMin is the minimum numeric value allowed for this argument
-	// (@validateMin). Nil means no minimum.
-	ValidateMin *float64 `json:"validateMin,omitempty" yaml:"validateMin,omitempty"`
-
-	// ValidateMax is the maximum numeric value allowed for this argument
-	// (@validateMax). Nil means no maximum.
-	ValidateMax *float64 `json:"validateMax,omitempty" yaml:"validateMax,omitempty"`
-
-	// ValidateMinLength is the minimum character length for string-like
-	// arguments (@validateMinLength). Nil means no minimum.
-	ValidateMinLength *int `json:"validateMinLength,omitempty" yaml:"validateMinLength,omitempty"`
-
-	// ValidateMaxLength is the maximum character length for string-like
-	// arguments (@validateMaxLength). Nil means no maximum.
-	ValidateMaxLength *int `json:"validateMaxLength,omitempty" yaml:"validateMaxLength,omitempty"`
-
-	// ValidateListMin is the minimum list cardinality (item count) for array
-	// arguments (@validateListMin). Nil means no minimum.
-	ValidateListMin *int `json:"validateListMin,omitempty" yaml:"validateListMin,omitempty"`
-
-	// ValidateListMax is the maximum list cardinality (item count) for array
-	// arguments (@validateListMax). Nil means no maximum.
-	ValidateListMax *int `json:"validateListMax,omitempty" yaml:"validateListMax,omitempty"`
-
-	// ValidatePattern is the regex pattern enforced for this argument
-	// (@validatePattern). Empty string means no pattern.
-	ValidatePattern string `json:"validatePattern,omitempty" yaml:"validatePattern,omitempty"`
+	// ValueRules are the argument's Validate rules: min, max, minLength,
+	// maxLength, listMin, listMax and pattern.
+	ValueRules `yaml:",inline"`
 
 	// IsQuery indicates this argument should be a URL query parameter instead
 	// of a path parameter (@query).

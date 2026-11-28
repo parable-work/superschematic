@@ -410,7 +410,7 @@ export class {{.ClassName}} {
    * @param input - Request payload
    {{- else if .ScalarArgs}}
    {{- range .ScalarArgs}}
-   * @param {{toCamelCase .Name}} - {{.Name}} argument
+   * @param {{joinCamelCase .Name}} - {{.Name}} argument
    {{- end}}
    {{- end}}
    {{- if .Page}}
@@ -453,7 +453,7 @@ export class {{.ClassName}} {
     input: {{type_ref .InputType}},
     {{- else if .ScalarArgs}}
     {{- range .ScalarArgs}}
-    {{toCamelCase .Name}}{{if not .Required}}?{{end}}: any,
+    {{joinCamelCase .Name}}{{if not .Required}}?{{end}}: any,
     {{- end}}
     {{- end}}
     {{- if .HasQuery}}
@@ -471,14 +471,14 @@ export class {{.ClassName}} {
     {{- end}}
     {{- if and .ScalarArgs (not .HasInput)}}
     {{- $firstArg := index .ScalarArgs 0}}
-    {{- $firstName := toCamelCase $firstArg.Name}}
+    {{- $firstName := joinCamelCase $firstArg.Name}}
     let requestSignal = {{if has_encrypted_body .Method .Encrypted}}options?.signal{{else}}signal{{end}};
     {{- if .HasQuery}}
     let requestParams = params;
     {{- end}}
     let scalarInput = {
       {{- range .ScalarArgs}}
-      {{toCamelCase .Name}},
+      {{joinCamelCase .Name}},
       {{- end}}
     };
     if (typeof {{$firstName}} === 'object' && {{$firstName}} !== null && !Array.isArray({{$firstName}})) {
@@ -486,12 +486,12 @@ export class {{.ClassName}} {
       {{- if .HasQuery}}
       {{- if gt (len .ScalarArgs) 1}}
       {{- $secondArg := index .ScalarArgs 1}}
-      requestParams = {{toCamelCase $secondArg.Name}};
+      requestParams = {{joinCamelCase $secondArg.Name}};
       requestSignal = params;
       {{- end}}
       {{- else if gt (len .ScalarArgs) 1}}
       {{- $secondArg := index .ScalarArgs 1}}
-      requestSignal = {{toCamelCase $secondArg.Name}};
+      requestSignal = {{joinCamelCase $secondArg.Name}};
       {{- end}}
     }
     {{- end}}
@@ -516,13 +516,13 @@ export class {{.ClassName}} {
       // union picks ({{.Validator}}), its errors under the value's path, as the
       // route reports them. A value no member reads is sent, for the
       // route to refuse it.
-      const unionValue: unknown = scalarInput.{{toCamelCase .Name}};
+      const unionValue: unknown = scalarInput.{{joinCamelCase .Name}};
       if (unionValue === undefined || unionValue === null) {
         {{- if .Required}}
-        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
         {{- end}}
       } else {
-        validateUnionArgument(errors, "{{toCamelCase .Name}}", unionValue, {{.ArrayDepth}}, {{.IsMap}}, (member: unknown) =>
+        validateUnionArgument(errors, "{{joinCamelCase .Name}}", unionValue, {{.ArrayDepth}}, {{.IsMap}}, (member: unknown) =>
           {{.Validator}}(member as {{type_ref .Type}})
         );
       }
@@ -530,20 +530,20 @@ export class {{.ClassName}} {
     {{- else if .IsMap}}
     {
       // {{.Name}} is a map, sent as a JSON object; {} is a value. Each
-      // {{if .IsArray}}element of a list value{{else}}value{{end}} is checked at {{toCamelCase .Name}}[key]{{if .IsArray}}[i]{{end}}
+      // {{if .IsArray}}element of a list value{{else}}value{{end}} is checked at {{joinCamelCase .Name}}[key]{{if .IsArray}}[i]{{end}}
       {{- if .ValueIsObject}}, an object's fields at
-      // {{toCamelCase .Name}}[key]{{if .IsArray}}[i]{{end}}.field, as the route reports them
+      // {{joinCamelCase .Name}}[key]{{if .IsArray}}[i]{{end}}.field, as the route reports them
       {{- end}}.
-      const mapValue: unknown = scalarInput.{{toCamelCase .Name}};
+      const mapValue: unknown = scalarInput.{{joinCamelCase .Name}};
       {{- if .Required}}
       if (mapValue === undefined || mapValue === null) {
-        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
       } else {
       {{- else}}
       if (mapValue !== undefined && mapValue !== null) {
       {{- end}}
         {{- if .ValueIsObject}}
-        validateMapArgument(errors, "{{toCamelCase .Name}}", mapValue, {{.IsArray}}, (item: unknown, path: string) => {
+        validateMapArgument(errors, "{{joinCamelCase .Name}}", mapValue, {{.IsArray}}, (item: unknown, path: string) => {
           if (typeof item !== 'object' || Array.isArray(item)) {
             setFieldErrors(errors, path, [{ validator: "type", message: "expected an object" }]);
             return;
@@ -554,14 +554,14 @@ export class {{.ClassName}} {
           }
         });
         {{- else if .Validator}}
-        validateMapArgument(errors, "{{toCamelCase .Name}}", mapValue, {{.IsArray}}, (item: unknown, path: string) => {
+        validateMapArgument(errors, "{{joinCamelCase .Name}}", mapValue, {{.IsArray}}, (item: unknown, path: string) => {
           const [valid, fieldErrors] = {{.Validator}}(item as {{type_ref .Type}});
           if (!valid && fieldErrors) {
             setFieldErrors(errors, path, fieldErrors);
           }
         });
         {{- else}}
-        validateMapArgument(errors, "{{toCamelCase .Name}}", mapValue, {{.IsArray}});
+        validateMapArgument(errors, "{{joinCamelCase .Name}}", mapValue, {{.IsArray}});
         {{- end}}
       }
     }
@@ -569,11 +569,11 @@ export class {{.ClassName}} {
     {
       // An array of arrays: each inner list must be an array (an empty one
       // is valid){{if .Validator}} and each element runs its own validation{{end}}.
-      const rows: unknown = scalarInput.{{toCamelCase .Name}};
+      const rows: unknown = scalarInput.{{joinCamelCase .Name}};
       if (Array.isArray(rows)) {
         rows.forEach((row: unknown, rowIndex: number) => {
           if (!Array.isArray(row)) {
-            setFieldErrors(errors, `{{toCamelCase .Name}}[${rowIndex}]`, [{ validator: "required", message: "inner list must be an array" }]);
+            setFieldErrors(errors, `{{joinCamelCase .Name}}[${rowIndex}]`, [{ validator: "required", message: "inner list must be an array" }]);
             {{- if .Validator}}
             return;
             {{- end}}
@@ -582,21 +582,21 @@ export class {{.ClassName}} {
           row.forEach((elem: unknown, index: number) => {
             const [valid, fieldErrors] = {{.Validator}}(elem as {{type_ref .Type}});
             if (!valid && fieldErrors) {
-              setFieldErrors(errors, `{{toCamelCase .Name}}[${rowIndex}][${index}]`, fieldErrors);
+              setFieldErrors(errors, `{{joinCamelCase .Name}}[${rowIndex}][${index}]`, fieldErrors);
             }
           });
           {{- end}}
         });
       }{{if .Required}} else {
-        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
       }{{end}}
     }
     {{- else if not .Validator}}
     {{- if .Required}}
     {
       // Bare-primitive argument: presence check only, no scalar validator.
-      if (scalarInput.{{toCamelCase .Name}} === undefined || scalarInput.{{toCamelCase .Name}} === null) {
-        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+      if (scalarInput.{{joinCamelCase .Name}} === undefined || scalarInput.{{joinCamelCase .Name}} === null) {
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
       }
     }
     {{- end}}
@@ -605,33 +605,33 @@ export class {{.ClassName}} {
       // Accumulate errors from all elements before calling setFieldErrors once.
       // Calling setFieldErrors per iteration would overwrite previous element errors.
       const elemErrors: { validator: string; message: string }[] = [];
-      for (const elem of (scalarInput.{{toCamelCase .Name}} || [])) {
+      for (const elem of (scalarInput.{{joinCamelCase .Name}} || [])) {
         const [valid, fieldErrors] = {{.Validator}}(elem);
         if (!valid && fieldErrors) {
           elemErrors.push(...fieldErrors);
         }
       }
       if (elemErrors.length > 0) {
-        setFieldErrors(errors, "{{toCamelCase .Name}}", elemErrors);
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", elemErrors);
       }
       {{- if .Required}}
-      if ((scalarInput.{{toCamelCase .Name}} || []).length === 0) {
-        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+      if ((scalarInput.{{joinCamelCase .Name}} || []).length === 0) {
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
       }
       {{- end}}
     }
     {{- else if .Required}}
     {
-      const [valid, fieldErrors] = {{.Validator}}(scalarInput.{{toCamelCase .Name}});
+      const [valid, fieldErrors] = {{.Validator}}(scalarInput.{{joinCamelCase .Name}});
       if (!valid && fieldErrors) {
-        setFieldErrors(errors, "{{toCamelCase .Name}}", fieldErrors);
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", fieldErrors);
       }
     }
     {{- else}}
     {
-      const [valid, fieldErrors] = {{.Validator}}(scalarInput.{{toCamelCase .Name}});
+      const [valid, fieldErrors] = {{.Validator}}(scalarInput.{{joinCamelCase .Name}});
       if (!valid && fieldErrors) {
-        setFieldErrors(errors, "{{toCamelCase .Name}}", fieldErrors);
+        setFieldErrors(errors, "{{joinCamelCase .Name}}", fieldErrors);
       }
     }
     {{- end}}
@@ -954,7 +954,7 @@ export class {{.ClassName}} {
    * @param input - Request payload
    {{- else if .ScalarArgs}}
    {{- range .ScalarArgs}}
-   * @param {{toCamelCase .Name}} - {{.Name}} argument
+   * @param {{joinCamelCase .Name}} - {{.Name}} argument
    {{- end}}
    {{- end}}
    * @param params - Optional query parameters, as {{.Name}} takes them{{if .Filter}}, its {{.FilterParam}} sent with every page{{end}}
@@ -971,7 +971,7 @@ export class {{.ClassName}} {
     input: {{type_ref .InputType}},
     {{- else if .ScalarArgs}}
     {{- range .ScalarArgs}}
-    {{toCamelCase .Name}}{{if not .Required}}?{{end}}: any,
+    {{joinCamelCase .Name}}{{if not .Required}}?{{end}}: any,
     {{- end}}
     {{- end}}
     params?: {{.QueryType}},
@@ -984,15 +984,15 @@ export class {{.ClassName}} {
     {{- end}}
     {{- end}}
     {{- if and .ScalarArgs (not .HasInput) (gt (len .ScalarArgs) 1)}}
-    {{- $first := toCamelCase (index .ScalarArgs 0).Name}}
-    {{- $second := toCamelCase (index .ScalarArgs 1).Name}}
+    {{- $first := joinCamelCase (index .ScalarArgs 0).Name}}
+    {{- $second := joinCamelCase (index .ScalarArgs 1).Name}}
     {{- $rest := ""}}
     {{- range $i, $arg := .ScalarArgs}}
     {{- if gt $i 1}}
-    {{- $rest = printf "%s%s, " $rest (toCamelCase $arg.Name)}}
+    {{- $rest = printf "%s%s, " $rest (joinCamelCase $arg.Name)}}
     {{- end}}
     {{- end}}
-    // The object call, {{.AllName}}({ {{range $i, $arg := .ScalarArgs}}{{if $i}}, {{end}}{{toCamelCase $arg.Name}}{{end}} }, params, signal), takes the
+    // The object call, {{.AllName}}({ {{range $i, $arg := .ScalarArgs}}{{if $i}}, {{end}}{{joinCamelCase $arg.Name}}{{end}} }, params, signal), takes the
     // query parameters second, as {{.Name}} does.
     if (typeof {{$first}} === 'object' && {{$first}} !== null && !Array.isArray({{$first}})) {
       const query: any = {{$second}};
@@ -1002,7 +1002,7 @@ export class {{.ClassName}} {
     }
     {{- end}}
     return pageItems('{{.Page.Operation}}', params?.cursor, (cursor) =>
-      this.{{.Name}}({{$pathArgs}}{{if .HasInput}}input, {{else}}{{range .ScalarArgs}}{{toCamelCase .Name}}, {{end}}{{end}}{ ...params, cursor }, signal)
+      this.{{.Name}}({{$pathArgs}}{{if .HasInput}}input, {{else}}{{range .ScalarArgs}}{{joinCamelCase .Name}}, {{end}}{{end}}{ ...params, cursor }, signal)
     );
   }
   {{- end}}

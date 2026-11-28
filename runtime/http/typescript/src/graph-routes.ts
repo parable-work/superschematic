@@ -1,5 +1,6 @@
 import { covers } from './auth.js';
 import type { RequestContext } from './operation.js';
+import type { PlainRepository } from './orm.js';
 import { HttpProblem, notFound } from './problem.js';
 import { uuidValue } from './uuid.js';
 
@@ -149,10 +150,8 @@ export interface GraphFacade {
   discard(ref: string, version: number): Promise<void>;
 }
 
-/** A table's repository, as the handlers read it (orm.ts's Repository). */
-interface RepositoryShape {
-  findOne(filter: Values): Promise<Row | null>;
-}
+/** A table's repository, as the handlers read it. */
+type RepositoryShape = Pick<PlainRepository<Row>, 'findOne'>;
 
 /** The name of the primary line branch creates for a root that has none. */
 export const GRAPH_PRIMARY_NAME = 'main';

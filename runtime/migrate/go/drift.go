@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -130,7 +131,7 @@ func drift(m driftModel, live *liveSchema, dialect Dialect) []string {
 				add("column %s.%s: the model's default is %s, and the database's %s", t.Name, c.Name, orNone(c.Default), orNone(lc.def))
 			}
 		}
-		for _, name := range sortedNames(columns) {
+		for _, name := range slices.Sorted(maps.Keys(columns)) {
 			if !names[name] {
 				add("column %s.%s: the database holds it, and the model does not", t.Name, name)
 			}
@@ -154,18 +155,18 @@ func drift(m driftModel, live *liveSchema, dialect Dialect) []string {
 				want[c.Name] = true
 			}
 		}
-		for _, name := range sortedNames(want) {
+		for _, name := range slices.Sorted(maps.Keys(want)) {
 			if !live.constraints[t.Name][name] {
 				add("constraint %s on %s: the model holds it, and the database does not", name, t.Name)
 			}
 		}
-		for _, name := range sortedNames(live.constraints[t.Name]) {
+		for _, name := range slices.Sorted(maps.Keys(live.constraints[t.Name])) {
 			if !want[name] {
 				add("constraint %s on %s: the database holds it, and the model does not", name, t.Name)
 			}
 		}
 	}
-	for _, name := range sortedNames(live.tables) {
+	for _, name := range slices.Sorted(maps.Keys(live.tables)) {
 		if !modelTables[name] {
 			add("table %s: the database holds it, and the model does not", name)
 		}
@@ -198,25 +199,16 @@ func drift(m driftModel, live *liveSchema, dialect Dialect) []string {
 }
 
 func compareNames[V any](add func(string, ...any), what string, model map[string]bool, live map[string]V) {
-	for _, name := range sortedNames(model) {
+	for _, name := range slices.Sorted(maps.Keys(model)) {
 		if _, ok := live[name]; !ok {
 			add("%s %s: the model holds it, and the database does not", what, name)
 		}
 	}
-	for _, name := range sortedNames(live) {
+	for _, name := range slices.Sorted(maps.Keys(live)) {
 		if !model[name] {
 			add("%s %s: the database holds it, and the model does not", what, name)
 		}
 	}
-}
-
-func sortedNames[V any](m map[string]V) []string {
-	names := make([]string, 0, len(m))
-	for name := range m {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
 }
 
 func allows(nullable bool) string {
@@ -393,7 +385,7 @@ func readPostgres(ctx context.Context, conn Conn, m driftModel) (*liveSchema, er
 	for _, v := range m.Views {
 		schemas[v.Schema] = true
 	}
-	for _, schema := range sortedNames(schemas) {
+	for _, schema := range slices.Sorted(maps.Keys(schemas)) {
 		steps = append(steps, step{1, `SELECT viewname FROM pg_views WHERE schemaname = $1`, []any{schema},
 			func(cols []string) { live.views[schema+"."+cols[0]] = true }})
 	}

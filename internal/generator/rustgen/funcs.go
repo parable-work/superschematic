@@ -17,7 +17,7 @@ func customTemplateFuncs() template.FuncMap {
 		"formatFeatures":  formatFeatures,
 		"isStructDef":     isStructDef,
 		"formatStructDef": formatStructDef,
-		"rustString":      rustString,
+		"rustString":      rustutil.Quote,
 		"rustStrings":     rustStrings,
 		"fieldNames":      fieldNames,
 		"fieldData":       fieldData,

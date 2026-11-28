@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 )
 
@@ -215,7 +216,7 @@ func (s *Schema) FindBehavior() (typeName, behavior string, found bool) {
 		return "", "", false
 	}
 	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
-		for _, name := range sortedStringMapKeys(types) {
+		for _, name := range slices.Sorted(maps.Keys(types)) {
 			if td := types[name]; td != nil && len(td.Behaviors) > 0 {
 				return td.Name, td.Behaviors[0].Name, true
 			}
@@ -233,7 +234,7 @@ func (s *Schema) FindTableBehavior() (typeName string, use BehaviorRef, found bo
 		return "", BehaviorRef{}, false
 	}
 	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
-		for _, name := range sortedStringMapKeys(types) {
+		for _, name := range slices.Sorted(maps.Keys(types)) {
 			if uses := types[name].TableBehaviors(); len(uses) > 0 {
 				return types[name].Name, uses[0], true
 			}
@@ -325,7 +326,7 @@ func (s *Schema) BehaviorQueueOf(row, kind string) *TypeDef {
 	if s == nil {
 		return nil
 	}
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		if td := s.Types[name]; td != nil && td.BehaviorQueue != nil && td.BehaviorQueue.Row == row && td.BehaviorQueue.Kind == kind {
 			return td
 		}
@@ -343,7 +344,7 @@ func (s *Schema) FindFieldBehavior() (typeName, field, behavior string, found bo
 		return "", "", "", false
 	}
 	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
-		for _, name := range sortedStringMapKeys(types) {
+		for _, name := range slices.Sorted(maps.Keys(types)) {
 			if uses := types[name].FieldBehaviors(); len(uses) > 0 {
 				return types[name].Name, uses[0].Field, uses[0].Name, true
 			}

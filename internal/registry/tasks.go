@@ -10,6 +10,7 @@ import (
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	"github.com/parable-work/superschematic/tasks"
 )
 
@@ -207,7 +208,7 @@ func (r *Registry) CheckTaskInput(kind string, spec json.RawMessage) error {
 	if len(bytes.TrimSpace(spec)) == 0 {
 		spec = json.RawMessage("null")
 	}
-	if err := validateRaw(resolver.compiledSpec, spec); err != nil {
+	if err := jsonschemas.Validate(resolver.compiledSpec, spec); err != nil {
 		return fmt.Errorf("input kind %q spec: %w", kind, err)
 	}
 	return nil
@@ -282,19 +283,10 @@ func (r *Registry) checkTaskSection(name, part string, value json.RawMessage) er
 	if compiled == nil {
 		return fmt.Errorf("section %q has no part %s", name, where)
 	}
-	if err := validateRaw(compiled, value); err != nil {
+	if err := jsonschemas.Validate(compiled, value); err != nil {
 		return fmt.Errorf("section %q: %w", name, err)
 	}
 	return nil
-}
-
-// validateRaw checks a JSON value against a compiled schema.
-func validateRaw(schema *validator.Schema, value json.RawMessage) error {
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(value))
-	if err != nil {
-		return err
-	}
-	return schema.Validate(instance)
 }
 
 // TaskEntriesUnder returns the entries of a tree's sorted list that are

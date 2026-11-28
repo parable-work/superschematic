@@ -544,14 +544,10 @@ func (s schemaSet) argField(arg *ir.ArgumentDef, param registry.RustParam, locat
 	// A list's control is its element's: no list rule has an attribute,
 	// and an element is never required.
 	field := &ir.FieldDef{
-		Name:              arg.Name,
-		TypeRef:           ir.TypeRef{Name: ref.Name},
-		Required:          f.Required,
-		ValidateMin:       arg.ValidateMin,
-		ValidateMax:       arg.ValidateMax,
-		ValidateMinLength: arg.ValidateMinLength,
-		ValidateMaxLength: arg.ValidateMaxLength,
-		ValidatePattern:   arg.ValidatePattern,
+		Name:       arg.Name,
+		TypeRef:    ir.TypeRef{Name: ref.Name},
+		Required:   f.Required,
+		ValueRules: arg.Element(),
 	}
 	enum := s.enum(ref.Name)
 	switch {

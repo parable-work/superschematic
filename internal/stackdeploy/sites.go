@@ -260,7 +260,7 @@ func (s *session) fetchSites(ctx context.Context, p *sitePlan) error {
 	if !s.placesSites() {
 		return nil
 	}
-	for _, site := range sortedKeys(p.digests) {
+	for _, site := range slices.Sorted(maps.Keys(p.digests)) {
 		if p.files[site] != nil {
 			continue
 		}
@@ -465,7 +465,7 @@ func PinSites(env *ir.ResolvedEnvironment, digests map[string]string) (*ir.Resol
 	if err != nil {
 		return nil, err
 	}
-	for _, site := range sortedKeys(digests) {
+	for _, site := range slices.Sorted(maps.Keys(digests)) {
 		hex, ok := strings.CutPrefix(digests[site], "sha256:")
 		if !ok || !digestPattern.MatchString(digests[site]) {
 			return nil, fmt.Errorf("site %s: digest %q is not sha256:<64 hex digits>", site, digests[site])

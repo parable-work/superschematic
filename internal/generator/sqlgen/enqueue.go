@@ -212,7 +212,7 @@ func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queu
 		// enqueue writes it; any other column its own default, which
 		// verification made sure every required one has.
 		if f.Default != nil && schema.Enums[f.TypeRef.Name] != nil && f.Required && !f.TypeRef.IsArray {
-			t.Columns, t.Values, t.Literal = append(t.Columns, qc.QuotedName), append(t.Values, stringLiteral(*f.Default)), append(t.Literal, true)
+			t.Columns, t.Values, t.Literal = append(t.Columns, qc.QuotedName), append(t.Values, sqlutil.QuoteLiteral(*f.Default)), append(t.Literal, true)
 			continue
 		}
 		if !qc.Nullable && qc.DefaultValue == "" {
@@ -281,7 +281,7 @@ func (t EnqueueTrigger) BackfillSQL() string {
 // select always has a WHERE, which SQLite needs to read the ON CONFLICT
 // that follows it as the upsert's.
 func (t EnqueueTrigger) SQLiteBackfillSQL(quote func(string) string) string {
-	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
+	unquote := func(c string) string { return quote(sqlutil.Unquote(c)) }
 	return t.backfillSQL(unquote, quote(t.Table), quote(t.QueueTable), "1", "0", t.SQLiteConflict, perKeyAll)
 }
 
@@ -293,7 +293,7 @@ func (t EnqueueTrigger) SQLiteBackfillSQL(quote func(string) string) string {
 // The plan's backfill keeps SQLiteBackfillSQL, which the SQLite model
 // holds.
 func (t EnqueueTrigger) SQLiteQueueBackfillSQL(quote func(string) string) string {
-	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
+	unquote := func(c string) string { return quote(sqlutil.Unquote(c)) }
 	return t.backfillSQL(unquote, quote(t.Table), quote(t.QueueTable), "1", "0", t.SQLiteConflict, perKeyWindow)
 }
 
@@ -502,14 +502,9 @@ func (w EnqueueWhen) sql(col, yes, no string) string {
 	case float64:
 		return col + " = " + strconv.FormatFloat(v, 'f', -1, 64)
 	case string:
-		return col + " = " + stringLiteral(v)
+		return col + " = " + sqlutil.QuoteLiteral(v)
 	}
-	return col + " = " + stringLiteral(fmt.Sprint(w.Equals))
-}
-
-// stringLiteral is s as a SQL string literal.
-func stringLiteral(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	return col + " = " + sqlutil.QuoteLiteral(fmt.Sprint(w.Equals))
 }
 
 // SQLiteTrigger is a trigger on SQLite, which holds its statements: one of
@@ -529,7 +524,7 @@ type SQLiteTrigger struct {
 // SQLite's null-safe inequality. quote quotes an identifier as the SQLite
 // dialect does.
 func (t EnqueueTrigger) SQLiteTriggers(quote func(string) string) []SQLiteTrigger {
-	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
+	unquote := func(c string) string { return quote(sqlutil.Unquote(c)) }
 	var out []SQLiteTrigger
 	for _, event := range t.On {
 		row := "NEW"

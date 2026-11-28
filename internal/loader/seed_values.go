@@ -58,7 +58,7 @@ func validateSeedRowValues(schema *ir.Schema, externalEnums map[string]*ir.EnumD
 				default:
 					v := jsonNumbers(value)
 					if err = validateCompositeValue(schema, externalEnums, fd.TypeRef, v, field); err == nil {
-						err = validateCompositeFieldConstraints(fieldValueRules(fd), fd.TypeRef, v, field)
+						err = validateCompositeFieldConstraints(fd.ValueRules, fd.TypeRef, v, field)
 					}
 				}
 				if err != nil {

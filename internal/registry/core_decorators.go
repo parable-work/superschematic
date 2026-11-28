@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -253,7 +254,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 			if len(args) != 1 || !ok {
 				return ArgErrorf(0, "@decrypted takes no argument, or { permission }: the permission a caller holds to see the value")
 			}
-			for _, key := range sortedKeys(obj) {
+			for _, key := range slices.Sorted(maps.Keys(obj)) {
 				if key != "permission" {
 					return ArgErrorf(0, "@decrypted has no option %q; it takes permission", key)
 				}
@@ -855,7 +856,7 @@ func httpBinaryStreamDef(args []any) (*ir.HTTPBinaryStreamDef, error) {
 		return nil, fmt.Errorf("@httpBinaryStream config must be an object literal")
 	}
 	stream := &ir.HTTPBinaryStreamDef{}
-	for _, key := range sortedKeys(cfg) {
+	for _, key := range slices.Sorted(maps.Keys(cfg)) {
 		switch value := cfg[key]; key {
 		case "contentType":
 			contentType, ok := value.(string)

@@ -110,7 +110,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <service-dir>/../../dist)")
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.apiLanguage, "api-language", "", "build the target's API server in this language (GO, RUST or TYPESCRIPT) instead of its config's outputs.api.language")
 	cmd.Flags().StringArrayVar(&flags.rewriteMigrations, "rewrite-migration", nil, "write this projection migration stamp's files again and record them in projections.lock, for a stamp no database has applied; repeatable")
 	return cmd
@@ -211,11 +211,7 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 	}
 	repoRoot := filepath.Dir(schemasRoot)
 	buildcache.SetSchemasRoot(schemasRoot)
-	names, err := resolveNaming(flags.namingPath, schemasRoot)
-	if err != nil {
-		return err
-	}
-	reg, err := a.resolveRegistry(names)
+	names, reg, err := a.openNaming(flags.namingPath, schemasRoot)
 	if err != nil {
 		return err
 	}

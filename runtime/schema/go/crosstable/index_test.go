@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -38,7 +39,7 @@ func (h *indexHost) Query(_ context.Context, sql string, args ...any) ([]Row, er
 	h.statements = append(h.statements, sql)
 	switch {
 	case strings.HasPrefix(sql, "SELECT id::text AS key FROM note"):
-		keys := sortedKeys(h.notes)
+		keys := slices.Sorted(maps.Keys(h.notes))
 		if len(args) == 1 {
 			keys = slices.DeleteFunc(keys, func(k string) bool { return k <= args[0].(string) })
 		}

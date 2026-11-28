@@ -69,7 +69,9 @@ fn js_key_order(map: &Map<String, Value>) -> Vec<&str> {
         .collect()
 }
 
-fn array_index(key: &str) -> Option<u32> {
+/// The index a key names when it is an array index to JavaScript: the
+/// canonical decimal text of an integer below 2^32 - 1.
+pub(crate) fn array_index(key: &str) -> Option<u32> {
     if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -219,6 +221,21 @@ mod tests {
             stringify(&json!({"lat": 1.5, "lon": -0.0})),
             r#"{"lat":1.5,"lon":0}"#
         );
+    }
+
+    #[test]
+    fn stringify_writes_the_shared_cases_as_javascript_does() {
+        // The cases every Rust copy of JSON.stringify shares, recorded from
+        // Node.js (runtime/schema/testdata/js_stringify.json).
+        let corpus: Value = serde_json::from_str(include_str!("../../testdata/js_stringify.json"))
+            .expect("the cases are JSON");
+        let cases = corpus["cases"].as_array().expect("cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let input = case["input"].as_str().expect("an input");
+            let value: Value = serde_json::from_str(input).expect("an input is JSON");
+            assert_eq!(Value::String(stringify(&value)), case["output"], "{input}");
+        }
     }
 
     #[test]

@@ -452,9 +452,9 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		}
 		addSetting(pred.Setting, pred.Optional)
 		if pred.Optional {
-			return fmt.Sprintf("%s = NULLIF(current_setting(%s, true), '')%s", expr, sqlLiteral(pred.Setting), cast), nil
+			return fmt.Sprintf("%s = NULLIF(current_setting(%s, true), '')%s", expr, sqlutil.QuoteLiteral(pred.Setting), cast), nil
 		}
-		return fmt.Sprintf("%s = current_setting(%s)%s", expr, sqlLiteral(pred.Setting), cast), nil
+		return fmt.Sprintf("%s = current_setting(%s)%s", expr, sqlutil.QuoteLiteral(pred.Setting), cast), nil
 	}
 	renderPredicate := func(pred *ir.ProjectionPredicate) (string, error) {
 		var sql string
@@ -506,7 +506,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 					return "", fmt.Errorf("required setting %q is not a dotted custom setting name", setting)
 				}
 				addSetting(setting, false)
-				guards = append(guards, fmt.Sprintf("NULLIF(current_setting(%s), '') IS NOT null", sqlLiteral(setting)))
+				guards = append(guards, fmt.Sprintf("NULLIF(current_setting(%s), '') IS NOT null", sqlutil.QuoteLiteral(setting)))
 			}
 			// An uncorrelated subquery: Postgres runs the function once per
 			// scan and matches every row against its result (D127).
@@ -527,7 +527,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 					return "", fmt.Errorf("required setting %q is not a dotted custom setting name", setting)
 				}
 				addSetting(setting, false)
-				guards = append(guards, fmt.Sprintf("NULLIF(current_setting(%s), '') IS NOT null", sqlLiteral(setting)))
+				guards = append(guards, fmt.Sprintf("NULLIF(current_setting(%s), '') IS NOT null", sqlutil.QuoteLiteral(setting)))
 			}
 			guards = append(guards, "("+call+") IS true")
 			sql = "(" + strings.Join(guards, " AND ") + ")"
@@ -559,7 +559,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			if err != nil {
 				return "", err
 			}
-			sql = fmt.Sprintf("(%s IS DISTINCT FROM %s OR %s)", guard, sqlLiteral(pred.When.Equals), sql)
+			sql = fmt.Sprintf("(%s IS DISTINCT FROM %s OR %s)", guard, sqlutil.QuoteLiteral(pred.When.Equals), sql)
 		}
 		return sql, nil
 	}
@@ -615,7 +615,7 @@ func renderOrderTerm(aliases *projectionAliases, term *ir.ProjectionOrder) (stri
 		var b strings.Builder
 		fmt.Fprintf(&b, "CASE %s", expr)
 		for i, value := range term.Rank {
-			fmt.Fprintf(&b, " WHEN %s THEN %d", sqlLiteral(value), i)
+			fmt.Fprintf(&b, " WHEN %s THEN %d", sqlutil.QuoteLiteral(value), i)
 		}
 		fmt.Fprintf(&b, " ELSE %d END ASC", len(term.Rank))
 		return b.String(), nil
@@ -665,11 +665,6 @@ func settingCast(sqlType string) (string, error) {
 	return "", fmt.Errorf("a %s column cannot be bound to a setting", sqlType)
 }
 
-// sqlLiteral renders a single-quoted SQL string literal.
-func sqlLiteral(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
 // literalString returns the string form of a literal ("" for non-strings).
 func literalString(lit *ir.ProjectionLiteral) string {
 	if lit != nil && lit.String != nil {
@@ -709,7 +704,7 @@ func literalSQL(lit *ir.ProjectionLiteral) (string, error) {
 	}
 	switch {
 	case lit.String != nil:
-		return sqlLiteral(*lit.String), nil
+		return sqlutil.QuoteLiteral(*lit.String), nil
 	case lit.Bool != nil:
 		if *lit.Bool {
 			return "true", nil

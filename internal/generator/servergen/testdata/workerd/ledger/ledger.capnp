@@ -7,7 +7,11 @@
 # WORKER_DRAIN_SECONDS. The server holds QUEUE_WAKES and a workflow binding
 # per worker's Workflow (D151), which the fixture stands in for with the
 # tester's WakeRecorder entrypoint, recording each instance the server
-# creates. workerd's hyperdrive binding is Hyperdrive's local
+# creates. Each worker wakes the other through the other's wake relay
+# (#600): QUEUE_WAKES and a service binding of the relay's Worker, which
+# runs the script the cloudflare extension embeds
+# (extensions/cloudflare/wake-relay.js) with the woken worker's Workflow as
+# WORKFLOW, the tester's WakeRecorder here too. workerd's hyperdrive binding is Hyperdrive's local
 # form: a connection string whose host workerd routes to the service the
 # binding names, here the Postgres the test reaches, $PG_ADDRESS, in a
 # database of its own. The site ts-ledger-web, whose origin serves
@@ -31,6 +35,8 @@ const config :Workerd.Config = (
     (name = "ledger", worker = .ledgerWorker),
     (name = "embed", worker = .embedWorker),
     (name = "sync", worker = .syncWorker),
+    (name = "embed-relay", worker = .embedRelayWorker),
+    (name = "sync-relay", worker = .syncRelayWorker),
     (name = "site", worker = .siteWorker),
     (name = "assets", worker = .assetsWorker),
     (name = "postgres", external = (address = "$PG_ADDRESS", tcp = ())),
@@ -64,6 +70,8 @@ const embedWorker :Workerd.Worker = (
     (name = "TS_LEDGER_DB_DATABASE", hyperdrive = (designator = "postgres", database = "$PG_DATABASE", user = "$PG_USER", password = "$PG_PASSWORD", scheme = "postgresql")),
     (name = "TS_LEDGER_DB_DATABASE_HYPERDRIVE_BINDING", text = "TS_LEDGER_DB_DATABASE"),
     (name = "TS_LEDGER_DB_DATABASE_HYPERDRIVE_CONFIG", text = "a76a99bc342644deb02c38d66082262a"),
+    (name = "QUEUE_WAKES", text = "{\"SyncRequested\":[{\"binding\":\"WAKE_TS_LEDGER_SYNC_ITEMS\"}]}"),
+    (name = "WAKE_TS_LEDGER_SYNC_ITEMS", service = "sync-relay"),
     (name = "WORKER_CONCURRENCY", text = "2"),
     (name = "WORKER_DRAIN_SECONDS", text = "3"),
   ],
@@ -80,11 +88,29 @@ const syncWorker :Workerd.Worker = (
     (name = "TS_LEDGER_DB_DATABASE", hyperdrive = (designator = "postgres", database = "$PG_DATABASE", user = "$PG_USER", password = "$PG_PASSWORD", scheme = "postgresql")),
     (name = "TS_LEDGER_DB_DATABASE_HYPERDRIVE_BINDING", text = "TS_LEDGER_DB_DATABASE"),
     (name = "TS_LEDGER_DB_DATABASE_HYPERDRIVE_CONFIG", text = "a76a99bc342644deb02c38d66082262a"),
+    (name = "QUEUE_WAKES", text = "{\"EmbedLineItem\":[{\"binding\":\"WAKE_TS_LEDGER_EMBED_LINE_ITEMS\"}]}"),
+    (name = "WAKE_TS_LEDGER_EMBED_LINE_ITEMS", service = "embed-relay"),
     (name = "WORKER_CONCURRENCY", text = "2"),
     (name = "WORKER_DRAIN_SECONDS", text = "6"),
   ],
   compatibilityDate = "2026-09-15",
   compatibilityFlags = ["nodejs_als"],
+);
+
+const embedRelayWorker :Workerd.Worker = (
+  modules = [(name = "wake-relay.js", esModule = embed "wake-relay.js")],
+  bindings = [
+    (name = "WORKFLOW", service = (name = "tester", entrypoint = "WakeRecorder")),
+  ],
+  compatibilityDate = "2026-09-15",
+);
+
+const syncRelayWorker :Workerd.Worker = (
+  modules = [(name = "wake-relay.js", esModule = embed "wake-relay.js")],
+  bindings = [
+    (name = "WORKFLOW", service = (name = "tester", entrypoint = "WakeRecorder")),
+  ],
+  compatibilityDate = "2026-09-15",
 );
 
 const siteWorker :Workerd.Worker = (

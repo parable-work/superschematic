@@ -3,6 +3,7 @@ package stackdeploy
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -237,7 +238,7 @@ func checkExpected(plans []*DatabasePlan, expected map[string]string) error {
 			problems = append(problems, fmt.Sprintf("%s has plan %s, not the expected %s", plan.Service, plan.Hash, want))
 		}
 	}
-	for _, service := range sortedKeys(expected) {
+	for _, service := range slices.Sorted(maps.Keys(expected)) {
 		if !seen[service] {
 			problems = append(problems, fmt.Sprintf("the expected plans have %s, which this deploy does not migrate", service))
 		}

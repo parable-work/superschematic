@@ -22,7 +22,7 @@
 #   LICENSE
 #
 # The four archives are built with tools.env's RUST_VERSION, so they link
-# into one binary (scripts/superscalar-dep.sh says why;
+# into one binary (scripts/lib/archive.sh says why;
 # scripts/engine-link-check.sh checks it). A server whose module comes from
 # the module proxy finds none of them in the module cache, and links them
 # with CGO_LDFLAGS=-L<dir>/lib. internal/release names the file

@@ -48,6 +48,9 @@ describe('search across tables', () => {
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ data: { items: [], total: 0, more: false, reranked: false } });
     expect((await route(new Request('http://api.test/api/search', { method: 'POST' })))!.status).toBe(405);
+    const refused = (await route(new Request('http://api.test/api/search?q=walnut', { headers: { 'x-request-id': 'req-9' } })))!;
+    expect(refused.headers.get('content-type')).toBe('application/problem+json');
+    expect(await refused.json()).toEqual({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Authentication required', code: 'unauthorized', requestId: 'req-9' });
   });
 
   test('the MCP tool reads only, and refuses a call without q', async () => {

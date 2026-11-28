@@ -2,10 +2,12 @@ package tsrestgen
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,7 +133,7 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 	}
 	var typesCases []typesCase
 	depPackages := map[string]string{}
-	for _, name := range sortedKeys(fixture.deps) {
+	for _, name := range slices.Sorted(maps.Keys(fixture.deps)) {
 		typesCases = append(typesCases, typesCase{name: name, schema: fixture.deps[name], sqlite: fixture.sqlite})
 		depPackages[name] = names.NpmTypesPackage(name)
 	}

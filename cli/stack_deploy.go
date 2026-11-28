@@ -81,7 +81,7 @@ type stackFlags struct {
 // environment takes --param too.
 func (f *stackFlags) register(cmd *cobra.Command, run bool) {
 	cmd.Flags().StringVar(&f.stackDir, "stack", "", "the Stack service directory (default: the working directory when it is one, else the one Stack service under ./schemas/services)")
-	cmd.Flags().StringVar(&f.namingPath, "naming", "", "naming config file (default <stack>/../../superschematic.toml)")
+	addNamingFlag(cmd, &f.namingPath, "(default <stack>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&f.programDir, "program-dir", "", "render the provisioner's program here (default <schemas-root>/dist/program/<stack>/<environment>)")
 	if run {
 		cmd.Flags().StringArrayVar(&f.params, "param", nil, "a parameter's value for this run of a parameterized environment: <name>=<value> (repeatable)")

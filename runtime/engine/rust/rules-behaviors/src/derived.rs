@@ -1977,6 +1977,23 @@ mod tests {
     }
 
     #[test]
+    fn stringify_writes_the_shared_cases_as_javascript_does() {
+        // The cases every Rust copy of JSON.stringify shares, recorded from
+        // Node.js (runtime/schema/testdata/js_stringify.json).
+        let corpus: Value = serde_json::from_str(include_str!(
+            "../../../../schema/testdata/js_stringify.json"
+        ))
+        .expect("the cases are JSON");
+        let cases = corpus["cases"].as_array().expect("cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let input = case["input"].as_str().expect("an input");
+            let value: Value = serde_json::from_str(input).expect("an input is JSON");
+            assert_eq!(Value::String(stringify(&value)), case["output"], "{input}");
+        }
+    }
+
+    #[test]
     fn stringify_writes_as_javascript_does() {
         assert_eq!(
             stringify(&json!({"b": 1.0, "2": [true, null, 0.5], "a": "x\n"})),

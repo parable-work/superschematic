@@ -28,9 +28,7 @@ func (postgresDialect) rebuild(*tableRebuild) (rendered, error) {
 var q = sqlutil.QuoteIdentifier
 
 // literal renders a SQL string literal.
-func literal(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
+var literal = sqlutil.QuoteLiteral
 
 // quoteList quotes each name and joins them with commas.
 func quoteList(names []string) string {
