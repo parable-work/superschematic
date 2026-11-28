@@ -10,7 +10,7 @@ import (
 {{- end }}
 	"fmt"
 	"strings"
-{{- if or (and .Versioned .SQLite.Refusal) (and .HasBehaviors .HasSoftDelete (not .SQLite.Refusal)) }}
+{{- if or .Versioned (and .HasBehaviors .HasSoftDelete (not .SQLite.Refusal)) }}
 	"time"
 {{- end }}
 
@@ -58,9 +58,15 @@ func (f *{{ .TypeName }}Filter) sqliteConditions(args *[]any) []string {
 	{{- end }}
 	{{- range .PathRelations }}
 	if f.{{ .GoField }} != nil {
+		{{- if $.HeldByAccess }}
+		f.{{ .GoField }}.scope = f.scope
+		{{- end }}
 		through := f.{{ .GoField }}.sqliteConditions(args)
 		{{- if .TargetLive }}
 		through = append(through, {{ goRawString .TargetLive }})
+		{{- end }}
+		{{- if $.HeldByAccess }}
+		through = append(through, f.scope.conditions({{ printf "%q" .Target }}, args, new(int))...)
 		{{- end }}
 		where := ""
 		if len(through) > 0 {
@@ -72,9 +78,15 @@ func (f *{{ .TypeName }}Filter) sqliteConditions(args *[]any) []string {
 	{{- range .ManyRelations }}
 	// Through a one-to-many relation (D108, D180), as on Postgres.
 	if f.{{ .GoField }} != nil {
+		{{- if $.HeldByAccess }}
+		f.{{ .GoField }}.scope = f.scope
+		{{- end }}
 		through := f.{{ .GoField }}.sqliteConditions(args)
 		{{- if .SourceLive }}
 		through = append(through, {{ goRawString .SourceLive }})
+		{{- end }}
+		{{- if $.HeldByAccess }}
+		through = append(through, f.scope.conditions({{ printf "%q" .Source }}, args, new(int))...)
 		{{- end }}
 		where := ""
 		if len(through) > 0 {
@@ -108,6 +120,9 @@ func (f *{{ .TypeName }}Filter) sqliteConditions(args *[]any) []string {
 	{{- end }}
 	// AllOf's filters' conditions are the filter's own, ANDed (D99).
 	for i := range f.AllOf {
+		{{- if $.HeldByAccess }}
+		f.AllOf[i].scope = f.scope
+		{{- end }}
 		conditions = append(conditions, f.AllOf[i].sqliteConditions(args)...)
 	}
 	if len(f.AnyOf) > 0 {
@@ -115,6 +130,9 @@ func (f *{{ .TypeName }}Filter) sqliteConditions(args *[]any) []string {
 		branches := make([]string, 0, len(f.AnyOf))
 		every := false
 		for i := range f.AnyOf {
+			{{- if $.HeldByAccess }}
+			f.AnyOf[i].scope = f.scope
+			{{- end }}
 			branch := f.AnyOf[i].sqliteConditions(args)
 			if len(branch) == 0 {
 				every = true
@@ -348,6 +366,11 @@ func (r *{{ $repo }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 	if err != nil {
 		return nil, err
 	}
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, key, false); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	record, err := {{ $v }}.one(ctx, r.q(), {{ $v }}.st.getOne+{{ $v }}.st.live, key)
 	if err != nil {
 		return nil, err
@@ -385,13 +408,35 @@ func (r *{{ $repo }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 		keys = append(keys, key)
 	}
 	var records []sqliteRecord
-	for start := 0; start < len(keys); start += {{ sqliteMaxParameters }} {
-		args := keys[start:min(start+{{ sqliteMaxParameters }}, len(keys))]
+	{{- if $.HeldByAccess }}
+	// The access conditions bind their own parameters after the keys
+	// (D156): as many as the caller's audience and grants take.
+	var held []any
+	sqliteAccessConditions(ctx, {{ printf "%q" .TypeName }}, &held, false)
+	most := max(1, {{ sqliteMaxParameters }}-len(held))
+	{{- else }}
+	most := {{ sqliteMaxParameters }}
+	{{- end }}
+	for start := 0; start < len(keys); start += most {
+		{{- if $.HeldByAccess }}
+		// A copy of the batch's keys, which the conditions' values follow.
+		args := append([]any(nil), keys[start:min(start+most, len(keys))]...)
+		{{- else }}
+		args := keys[start:min(start+most, len(keys))]
+		{{- end }}
 		placeholders := make([]string, len(args))
 		for i := range args {
 			placeholders[i] = fmt.Sprintf("?%d", i+1)
 		}
-		read, err := {{ $v }}.query(ctx, r.q(), fmt.Sprintf({{ $v }}.st.getMany, strings.Join(placeholders, ", "))+{{ $v }}.st.live, args...)
+		query := fmt.Sprintf({{ $v }}.st.getMany, strings.Join(placeholders, ", ")) + {{ $v }}.st.live
+		{{- if $.HeldByAccess }}
+		// The rows the caller sees alone, in the same statement: a row the
+		// caller does not see is one that is not there (D156).
+		if conditions := sqliteAccessConditions(ctx, {{ printf "%q" .TypeName }}, &args, false); len(conditions) > 0 {
+			query += " AND " + strings.Join(conditions, " AND ")
+		}
+		{{- end }}
+		read, err := {{ $v }}.query(ctx, r.q(), query, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -418,6 +463,59 @@ func (r *{{ $repo }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 func (r *{{ $repo }}) where(filter *{{ .TypeName }}Filter, args *[]any, includeDeleted bool) string {
 	return {{ $v }}.where(filter.sqliteConditions(args), includeDeleted)
 }
+{{- if $.HeldByAccess }}
+
+// accessConditions are the filter's conditions, each value appended to
+// args, then those that keep the rows to what the operation's caller sees,
+// or with write may write (D156, D182): a condition through a relation
+// holds the rows it reads to the caller too.
+func (r *{{ $repo }}) accessConditions(ctx context.Context, filter *{{ .TypeName }}Filter, args *[]any, write bool) []string {
+	var conditions []string
+	if filter != nil {
+		filter.scope = sqliteAccessScopeOf(ctx)
+		conditions = filter.sqliteConditions(args)
+	}
+	return append(conditions, sqliteAccessConditions(ctx, {{ printf "%q" .TypeName }}, args, write)...)
+}
+
+// accessWhere is where, kept to what the operation's caller sees, or with
+// write may write.
+func (r *{{ $repo }}) accessWhere(ctx context.Context, filter *{{ .TypeName }}Filter, args *[]any, includeDeleted, write bool) string {
+	return {{ $v }}.where(r.accessConditions(ctx, filter, args, write), includeDeleted)
+}
+
+// requireReach returns ErrNotFound unless the row whose key binds as key
+// is one the operation's caller sees, or with write may write (D156).
+func (r *{{ $repo }}) requireReach(ctx context.Context, key any, write bool) error {
+	return sqliteRequireReach(ctx, r.q(), {{ printf "%q" .TypeName }}, {{ $v }}.quoted, key, write)
+}
+{{- if not .Released }}
+
+// requireCreated returns ErrAccessRefused unless a party's or an agent
+// run's grants reach every one of rows, the rows a create made (D156).
+func (r *{{ $repo }}) requireCreated(ctx context.Context, q sqliteQuerier, rows []*types.{{ .TypeName }}) error {
+	if !accessGranted(ctx) {
+		return nil
+	}
+	keys := make([]any, 0, len(rows))
+	for _, row := range rows {
+		{{- if .PrimaryKeyIsPointer }}
+		if row.{{ toGoName .PrimaryKeyField }} == nil {
+			return fmt.Errorf("{{ .TypeName }}: %w", ErrAccessRefused)
+		}
+		key, err := {{ $v }}.keyArg(*row.{{ toGoName .PrimaryKeyField }})
+		{{- else }}
+		key, err := {{ $v }}.keyArg(row.{{ toGoName .PrimaryKeyField }})
+		{{- end }}
+		if err != nil {
+			return err
+		}
+		keys = append(keys, key)
+	}
+	return sqliteRequireCreated(ctx, q, {{ printf "%q" .TypeName }}, {{ $v }}.quoted, keys)
+}
+{{- end }}
+{{- end }}
 
 // orderBy is the ORDER BY of orderBy.
 func (r *{{ $repo }}) orderBy(orderBy []{{ .TypeName }}OrderBy) string {
@@ -435,7 +533,7 @@ func (r *{{ $repo }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 		opts = &{{ .TypeName }}FindOptions{}
 	}
 	var args []any
-	where := r.where(filter, &args, opts.IncludeDeleted)
+	where := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, opts.IncludeDeleted, false){{ else }}r.where(filter, &args, opts.IncludeDeleted){{ end }}
 	record, err := {{ $v }}.findOne(ctx, r.q(), where, r.orderBy(opts.OrderBy), args)
 	if err != nil {
 		return nil, err
@@ -454,7 +552,7 @@ func (r *{{ $repo }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
 	}
 	var args []any
-	where := r.where(filter, &args, opts.IncludeDeleted)
+	where := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, opts.IncludeDeleted, false){{ else }}r.where(filter, &args, opts.IncludeDeleted){{ end }}
 	records, total, err := {{ $v }}.findMany(ctx, r.q(), where, r.orderBy(opts.OrderBy), args, opts.Limit, opts.Offset, opts.SkipCount)
 	if err != nil {
 		return nil, 0, err
@@ -508,7 +606,7 @@ func (r *{{ $repo }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 		after = key
 	}
 	var args []any
-	conditions := filter.sqliteConditions(&args)
+	conditions := {{ if $.HeldByAccess }}r.accessConditions(ctx, filter, &args, false){{ else }}filter.sqliteConditions(&args){{ end }}
 	records, err := {{ $v }}.page(ctx, r.q(), conditions, args, sqliteSort{sql: column.sql, key: column.key, nulls: column.nulls}, field == {{ .TypeName }}SortBy{{ toGoName .PrimaryKeySortField.Name }}, opts.Sort.Desc, after, limit, opts.IncludeDeleted)
 	if err != nil {
 		return nil, err
@@ -528,16 +626,59 @@ func (r *{{ $repo }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	}
 	return page, nil
 }
+{{- if .Versioned }}
+{{- $history := printf "sqliteRefused(%q, %q)" .TypeName "has its history read on Postgres alone: on SQLite the DDL's triggers keep it (D189), and the Go repositories read the row and its version, and no history, as the TypeScript ones do (#618)" }}
+
+// The history of {{ .TypeName }}, a @versioned table, on SQLite: the SQLite
+// DDL's triggers keep it as Postgres's do (D189), and the repository reads
+// the row and its version, as the TypeScript repository does there, and no
+// history (#618), whose reads are refused with ErrSQLiteUnsupported.
+
+func (r *{{ $repo }}) GetVersion(context.Context, {{ .PrimaryKeyType }}, int64) (*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) GetVersions(context.Context, []VersionKey[{{ .PrimaryKeyType }}]) ([]*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) GetVersionsWithFields(context.Context, []VersionKey[{{ .PrimaryKeyType }}], {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) ListVersions(context.Context, {{ .PrimaryKeyType }}, *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) GetAsOf(context.Context, {{ .PrimaryKeyType }}, time.Time) (*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+{{- range .Relationships }}
+{{- if not .IsArray }}
+
+func (r *{{ $repo }}) ListAsOfBy{{ toGoName .FieldName }}ID(context.Context, {{ $.UUIDGoType }}, time.Time, *{{ $.TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ $.TypeName }}], error) {
+	return nil, {{ $history }}
+}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if not .Released }}
 
 // stampCreate sets the audit fields of who wrote input, as the Postgres
 // repository's CreateOne does.
 func (r *{{ $repo }}) stampCreate(ctx context.Context, input *types.{{ .TypeName }}) error {
 	{{- with .SQLite.CreatedBy }}
+	{{- if .GoPointer }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		input.CreatedBy = &userID
+	}
+	{{- else }}
 	if !HasUserID(ctx) {
 		return ErrNoUserInContext
 	}
 	input.CreatedBy = GetUserID(ctx)
+	{{- end }}
 	{{- end }}
 	{{- with .SQLite.UpdatedBy }}
 	{{- if .IsRequired }}
@@ -578,6 +719,11 @@ func (r *{{ $repo }}) CreateOne(ctx context.Context, input *{{ .CreateInput }}) 
 	if err != nil {
 		return nil, err
 	}
+	{{- if $.HeldByAccess }}
+	if err := r.requireCreated(ctx, r.q(), rows); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	return rows[0], nil
 }
 {{- end }}
@@ -638,6 +784,13 @@ func (r *{{ $repo }}) CreateMany(ctx context.Context, inputs []*{{ .CreateInput 
 		if err != nil {
 			return err
 		}
+		{{- if $.HeldByAccess }}
+		// A row the caller's grants do not reach rolls the whole create
+		// back (D156).
+		if err := r.requireCreated(ctx, q, rows); err != nil {
+			return err
+		}
+		{{- end }}
 		out = append(out, rows...)
 		return nil
 	})
@@ -740,6 +893,11 @@ func (r *{{ $repo }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	if err != nil {
 		return nil, err
 	}
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, key, true); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	record, err := {{ $v }}.update(ctx, r.q(), key, sets, args, version)
 	if err != nil {
 		return nil, err
@@ -766,7 +924,7 @@ func (r *{{ $repo }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if len(sets) == 0 {
 		return 0, fmt.Errorf("no fields to update")
 	}
-	where := r.where(filter, &args, false)
+	where := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, false, true){{ else }}r.where(filter, &args, false){{ end }}
 	n, err := {{ $v }}.exec(ctx, r.q(), fmt.Sprintf({{ $v }}.st.updateMany, strings.Join(sets, ", "), where), args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute update: %w", err)
@@ -810,6 +968,11 @@ func (r *{{ $repo }}) deleteOne(ctx context.Context, id {{ .PrimaryKeyType }}, v
 	if err != nil {
 		return err
 	}
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, key, true); err != nil {
+		return err
+	}
+	{{- end }}
 	return {{ $v }}.deleteOne(ctx, r.q(), key, by, version)
 }
 {{- end }}
@@ -821,7 +984,11 @@ func (r *{{ $repo }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if err != nil {
 		return 0, err
 	}
+	{{- if $.HeldByAccess }}
+	return {{ $v }}.deleteMany(ctx, r.q(), func(args *[]any) []string { return r.accessConditions(ctx, filter, args, true) }, by)
+	{{- else }}
 	return {{ $v }}.deleteMany(ctx, r.q(), filter.sqliteConditions, by)
+	{{- end }}
 }
 {{- if .HasSoftDelete }}
 
@@ -831,6 +998,11 @@ func (r *{{ $repo }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 	if err != nil {
 		return err
 	}
+	{{- if $.HeldByAccess }}
+	if err := r.requireReach(ctx, key, true); err != nil {
+		return err
+	}
+	{{- end }}
 	return {{ $v }}.hardDelete(ctx, r.q(), key)
 }
 {{- end }}
@@ -848,6 +1020,11 @@ func (r *{{ $repo }}) UpsertOne(ctx context.Context, input *{{ .CreateInput }}, 
 
 // UpsertOneResult is UpsertOne, and what it did with its row (D89).
 func (r *{{ $repo }}) UpsertOneResult(ctx context.Context, input *{{ .CreateInput }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, opts *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error) {
+	{{- if $.HeldByAccess }}
+	if err := refuseHeldUpsert(ctx, "UpsertOne", {{ printf "%q" .TypeName }}); err != nil {
+		return UpsertResult[*types.{{ .TypeName }}]{}, err
+	}
+	{{- end }}
 	key, ok := {{ $v }}UniqueKeys[on]
 	if !ok {
 		return UpsertResult[*types.{{ .TypeName }}]{}, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
@@ -898,6 +1075,11 @@ func (r *{{ $repo }}) UpsertOneResult(ctx context.Context, input *{{ .CreateInpu
 // returns ErrNotFound.{{ end }} Two inputs of one batch that hold one key are refused,
 // with Postgres's SQLSTATE 21000, and a key over an expression is refused.
 func (r *{{ $repo }}) UpsertMany(ctx context.Context, inputs []*{{ .CreateInput }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	{{- if $.HeldByAccess }}
+	if err := refuseHeldUpsert(ctx, "UpsertMany", {{ printf "%q" .TypeName }}); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	key, ok := {{ $v }}UniqueKeys[on]
 	if !ok {
 		return nil, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
@@ -1253,6 +1435,19 @@ func (r *{{ $repo }}) CreateOne(ctx context.Context, input *{{ .CreateInput }}) 
 		{{- else }}
 		id := row.{{ toGoName .PrimaryKeyField }}
 		{{- end }}
+		{{- if $.HeldByAccess }}
+		// A row a party's or an agent run's grants do not reach rolls the
+		// create back (D156).
+		created, err := {{ $v }}.keyArg(id)
+		if err != nil {
+			return err
+		}
+		if accessGranted(ctx) {
+			if err := sqliteRequireCreated(ctx, tx, {{ printf "%q" .TypeName }}, {{ $v }}.quoted, []any{created}); err != nil {
+				return err
+			}
+		}
+		{{- end }}
 		out, err = (&{{ $repo }}{db: r.db, tx: tx}).GetOne(ctx, id, nil)
 		return err
 	})
@@ -1267,8 +1462,17 @@ func (r *{{ $repo }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	if update == nil {
 		update = &{{ .TypeName }}Update{}
 	}
+	{{- if $.HeldByAccess }}
+	key, err := {{ $v }}.keyArg(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.requireReach(ctx, key, true); err != nil {
+		return nil, err
+	}
+	{{- end }}
 	var out *types.{{ .TypeName }}
-	err := r.inTx(ctx, func(tx *sql.Tx) error {
+	err {{ if not $.HeldByAccess }}:{{ end }}= r.inTx(ctx, func(tx *sql.Tx) error {
 		pg := r.pg()
 		patch := pg.corePatch(update)
 		columns, err := pg.updateColumns(ctx, update)
@@ -1303,6 +1507,15 @@ func (r *{{ $repo }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 	{{- if .HasSoftDelete }}
 	if !HasUserID(ctx) {
 		return ErrNoUserInContext
+	}
+	{{- end }}
+	{{- if $.HeldByAccess }}
+	key, err := {{ $v }}.keyArg(id)
+	if err != nil {
+		return err
+	}
+	if err := r.requireReach(ctx, key, true); err != nil {
+		return err
 	}
 	{{- end }}
 	return r.inTx(ctx, func(tx *sql.Tx) error {
@@ -1360,6 +1573,16 @@ type {{ $ops }} struct{ r *{{ $repo }} }
 func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 {{- else }}
 func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, id {{ $r.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if $.HeldByAccess }}
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := {{ $v }}.keyArg(id); err != nil {
+		var none {{ .ResultReturn }}
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, {{ .Writes }}); err != nil {
+		var none {{ .ResultReturn }}
+		return none, behaviorOutOfReach(err, {{ printf "%q" $r.TypeName }}, {{ $r.WireKey "id" }}, id)
+	}
+	{{- end }}
 {{- end }}
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -1374,6 +1597,12 @@ func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, id {{ $r.PrimaryKeyType }
 		if err != nil {
 			return err
 		}
+		{{- if and $.HeldByAccess .AnswersRow }}
+		// The core reads every row; its answer keeps to the caller (D156).
+		if raw, err = sqliteKeepAnsweredRow(ctx, tx, {{ printf "%q" $r.TypeName }}, {{ $v }}.quoted, raw, {{ printf "%q" .AnswersRow }}); err != nil {
+			return err
+		}
+		{{- end }}
 		{{- else }}
 		opts, err := o.r.operationOptions(ctx)
 		if err != nil {

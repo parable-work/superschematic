@@ -9,7 +9,7 @@ guide covers it in full.
 |---|---|
 | `schemas/services/tickets-db` | DB, Postgres: `Ticket` raises `ticket.assigned`, `ticket.overdue` (urgent), `ticket.summary` (digest) and `reference.cleared` (record), and its owner sees it with those it names; `Duty` implements Recurrence, whose `recurrence.missed` is urgent; the notifier's tables (`Notice`, `Delivery`, `NoticeRoute`, `NoticePreference`, `Subscription`, `ChannelTrust`, `Reply`) and its queue `NoticeWork`; `ChannelIdentity`, the addresses people are reached at and reply from |
 | `schemas/services/tickets-api` | API over `tickets-db`: `TicketsApiConfig` names two channel slots, `SMS` and `MAIL`; `Routes` lists and creates routes behind `notifications.routes`; `Notify` drains the notifier's queue, `HearCleared` the queue a deleted ticket's references enqueue on, and `DutyDeadlines` fires each duty's deadlines |
-| `server/server.ts` | The wiring: the notifier over the providers the config names, the relay's callbacks, the inbox, password reset, and the workers' handlers |
+| `server/server.ts` | What the implementation adds to the generated server: the reply `done 142` (`createRuntimeOptions`), the seed rows, password reset's handlers, and the workers of its own |
 
 The channels are the SMS relay and the mail relay of
 `examples/runtime-providers`. Swapping either for another adapter is the
@@ -46,6 +46,10 @@ these schemas. The same scenario, under the fixture name
 `TestNotificationsEndToEnd` (`internal/generator/tsgen`), through the two
 relays over stand-in services.
 
-The notifier is the TypeScript runtime's, on Postgres: the Go and Rust
-servers have none yet, and the generated server does not build one into
-its `Deps`, which `server/server.ts` wires.
+The notifier is the TypeScript runtime's. The generated TypeScript server
+of an API over a Postgres database with a notifier builds it into `Deps`
+with the channel adapters its config's slots name, mounts the relays'
+callbacks at `/webhooks/<slot>/inbound` and `/webhooks/<slot>/status` and
+the inbox at `/api/inbox`, and hands each message of the dispatch queue to
+`notifier.handle`, so `Notify` has no method of the implementation's. On
+SQLite and D1 an app builds it over the runtime's `./d1` entry (D189).

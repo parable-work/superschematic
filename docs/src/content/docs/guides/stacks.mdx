@@ -1043,7 +1043,10 @@ deployable's name, and what it pulls from depends on its schemas:
   on; one the core refuses for good, a caller without the permission
   among them, ends the deriver with the error. The database lists
   `postgres` first, since the repositories a deriver runs over are
-  Postgres's.
+  Postgres's. A TypeScript or Go deriver of a table with `@audience`
+  reads and settles every row, as a job does, and the rows keep to their
+  audience for every other caller
+  ([A table's audience](/superschematic/guides/api-routes/#a-tables-audience)).
 - **Engine types** (D74). A TypeScript or a Rust API's deriver opens the
   engine and holds each derived type's name and its Derived `permission`,
   so a `{ rules }` policy needs a rule for it, which the build checks. A

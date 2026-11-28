@@ -119,7 +119,7 @@ impl<C: Client> Runner<'_, C> {
     /// Refuses, as not found, a write of the row whose key is `key` that
     /// the caller may not write (D156): a row the caller may not write is
     /// not there.
-    async fn require_reach(&self, key: &Value, write: bool) -> Result<(), Error> {
+    pub(crate) async fn require_reach(&self, key: &Value, write: bool) -> Result<(), Error> {
         if !self.plan.kept(self.table) {
             return Ok(());
         }
@@ -582,6 +582,10 @@ impl<C: Client> Runner<'_, C> {
 
     /// Runs `operation` of the behavior under `member` on the row whose
     /// key is `key`, through the core (D103), and answers its result.
+    /// Opened for a caller (D156), it runs only on a row the caller may
+    /// write, or for an operation that writes nothing, a row the caller
+    /// sees, as an update and a read are held: any other row is not found
+    /// before the core runs.
     pub(crate) async fn operation(
         &self,
         member: &str,
@@ -590,6 +594,12 @@ impl<C: Client> Runner<'_, C> {
         params: &Value,
         options: &WriteOptions,
     ) -> Result<Value, Error> {
+        let writes = self
+            .table
+            .behaviors
+            .as_ref()
+            .is_none_or(|behaviors| behaviors.writes(member, operation));
+        self.require_reach(key, writes).await?;
         let command = self
             .plan
             .core_operation(member, operation, key, params, options)?;
@@ -619,7 +629,10 @@ impl<C: Client> Runner<'_, C> {
     }
 
     /// Runs `operation` of the behavior under `member` on the table as a
-    /// whole, through the core (D104), and answers its result.
+    /// whole, through the core (D104), and answers its result. The core
+    /// reads every row, so an answer that names one of the table's rows
+    /// (Aliased's `resolve`) keeps to the caller (D156): a row the caller
+    /// does not see is null, as for an answer of no row.
     pub(crate) async fn table_operation(
         &self,
         member: &str,
@@ -627,7 +640,55 @@ impl<C: Client> Runner<'_, C> {
         params: &Value,
     ) -> Result<Value, Error> {
         let command = self.plan.core_table_operation(member, operation, params)?;
-        self.client.core_table_operation(command).await
+        let mut answer = self.client.core_table_operation(command).await?;
+        self.keep_answer(member, operation, &mut answer).await?;
+        Ok(answer)
+    }
+
+    /// Holds `answer`, the core's answer of `operation` of the behavior
+    /// under `member` on the table as a whole, to the caller (D156): the row
+    /// it names, when the definition says its answer names one (Aliased's
+    /// `resolve`, Pool's `pick`), is null for a caller who does not see it.
+    /// Any other answer is left as it is.
+    pub(crate) async fn keep_answer(
+        &self,
+        member: &str,
+        operation: &str,
+        answer: &mut Value,
+    ) -> Result<(), Error> {
+        let answered = self.table.behaviors.as_ref().and_then(|behaviors| {
+            behaviors
+                .answers
+                .iter()
+                .find(|answers| answers.member == member && answers.operation == operation)
+        });
+        match answered {
+            Some(answered) => self.keep_answered_row(answer, &answered.row).await,
+            None => Ok(()),
+        }
+    }
+
+    // keep_answered_row sets the row an answer names under `row` null when
+    // the caller does not see it (D156).
+    async fn keep_answered_row(&self, answer: &mut Value, row: &str) -> Result<(), Error> {
+        if !self.plan.kept(self.table) {
+            return Ok(());
+        }
+        let Some(named) = answer.get_mut(row) else {
+            return Ok(());
+        };
+        if named.is_null() {
+            return Ok(());
+        }
+        let key = named.get("key").cloned().unwrap_or(Value::Null);
+        match self.require_reach(&key, false).await {
+            Ok(()) => Ok(()),
+            Err(Error::NotFound(_)) => {
+                *named = Value::Null;
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// Folds the row `from` into the row `into` (D147), as the Go ORM's and
@@ -640,7 +701,10 @@ impl<C: Client> Runner<'_, C> {
     /// client outside a transaction is refused; on SQLite the savepoint is
     /// the merge's own transaction when the caller opened none. Opened for
     /// a caller (D156), it finds only the rows the caller may write: either
-    /// of the two beyond the caller's audience or grants is not found.
+    /// of the two beyond the caller's audience or grants is not found, and
+    /// a row of another table a step would repoint or delete that the
+    /// caller may not write refuses the merge, `out_of_reach`, naming the
+    /// table, before a statement writes.
     pub(crate) async fn merge_into(
         &self,
         from: &Value,
@@ -733,6 +797,27 @@ impl<C: Client> Runner<'_, C> {
         }
         if !found.contains(&false) {
             return Err(self.not_found(into));
+        }
+        // Every row a step would repoint or delete is one the caller may
+        // write (D156, D181), read with both rows locked: one the caller may
+        // not write refuses the merge, naming its table, before a statement
+        // writes.
+        for step in &merge.steps {
+            let Some(reach) = &step.reach else {
+                continue;
+            };
+            let Some(read) = self.plan.merge_reach(reach, from)? else {
+                continue;
+            };
+            if self.scalar(&read).await?.is_some() {
+                return Err(Error::Merge {
+                    code: super::MERGE_OUT_OF_REACH,
+                    message: format!(
+                        "{} {from} cannot be merged away: {} holds a row that references it, which the caller may not write",
+                        self.table.name, reach.table
+                    ),
+                });
+            }
         }
         if merge.history_actor {
             self.execute(&self.plan.merge_history_actor()).await?;

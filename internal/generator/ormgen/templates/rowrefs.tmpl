@@ -180,6 +180,24 @@ func rowKey[K any](key string, number bool) (K, bool) {
 }
 
 func (h rowFeaturesHost) Visible(ctx context.Context, typeName string, keys []string) (map[string]bool, error) {
+	if h.tx != nil {
+		return visibleRows(ctx, h.tx, typeName, keys)
+	}
+	return visibleRows(ctx, h.db, typeName, keys)
+}
+
+// rowFeatureReaders are the repositories the references and attachments
+// read rows through: a database's or a transaction's, on either dialect.
+type rowFeatureReaders interface {
+{{- range .RowFeatures.Tables }}
+	Get{{ .Type }}ReadOnlyRepository() ReadOnly{{ .Type }}RepositoryInterface
+{{- end }}
+}
+
+// visibleRows is which of keys, of a row of typeName in their wire form,
+// the caller of ctx reads through the table's repository of readers, which
+// keeps its reads to the caller (D156, D180).
+func visibleRows(ctx context.Context, readers rowFeatureReaders, typeName string, keys []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	switch typeName {
 {{- range .RowFeatures.Tables }}
@@ -192,13 +210,7 @@ func (h rowFeaturesHost) Visible(ctx context.Context, typeName string, keys []st
 				ids = append(ids, id)
 			}
 		}
-		var repository ReadOnly{{ .Type }}RepositoryInterface
-		if h.tx != nil {
-			repository = h.tx.Get{{ .Type }}ReadOnlyRepository()
-		} else {
-			repository = h.db.Get{{ .Type }}ReadOnlyRepository()
-		}
-		found, err := repository.GetManyByIDs(ctx, ids)
+		found, err := readers.Get{{ .Type }}ReadOnlyRepository().GetManyByIDs(ctx, ids)
 		if err != nil {
 			return nil, err
 		}
@@ -213,67 +225,121 @@ func (h rowFeaturesHost) Visible(ctx context.Context, typeName string, keys []st
 }
 {{- if .SQLite }}
 
-// sqliteRowFeaturesHost is the host the references and attachments run
-// through on SQLite, which refuses every statement: the Go ORM serves them
-// on Postgres alone (D184), and the loader refuses a sqlite service's Go
-// types for @references and @attachments (D182), so on SQLite each call
-// of References and Attachments answers ErrSQLiteUnsupported, naming why,
-// as a repository SQLite does not hold does.
-type sqliteRowFeaturesHost struct{}
-
-func (sqliteRowFeaturesHost) refused() error {
-	return fmt.Errorf("%w: references and attachments, which the Go repositories run on Postgres alone (D184)", ErrSQLiteUnsupported)
+// sqliteRowFeaturesHost is the SQLite database, or a transaction of it, as
+// rowrefs runs through it (D182, #611): a rowrefs.DialectHost of SQLite,
+// whose statements rowrefs writes in SQLite's words, and whose reads of a
+// table's rows go through the table's repository on SQLite, which keeps
+// them to the caller as the Postgres one does. A target's delete clears
+// its references and a file's delete releases its object by the SQLite
+// DDL's row triggers, whichever ORM deletes the row.
+type sqliteRowFeaturesHost struct {
+	db *SQLiteDatabase
+	tx *SQLiteTx
 }
 
-func (h sqliteRowFeaturesHost) Query(context.Context, string, ...any) ([]rowrefs.Row, error) {
-	return nil, h.refused()
+var _ rowrefs.DialectHost = sqliteRowFeaturesHost{}
+
+// Dialect is SQLite's.
+func (sqliteRowFeaturesHost) Dialect() string { return rowrefs.DialectSQLite }
+
+func (h sqliteRowFeaturesHost) q() sqliteQuerier {
+	if h.tx != nil {
+		return h.tx.tx
+	}
+	return h.db.db
 }
 
-func (h sqliteRowFeaturesHost) Exec(context.Context, string, ...any) (int64, error) {
-	return 0, h.refused()
+func (h sqliteRowFeaturesHost) Query(ctx context.Context, sql string, args ...any) ([]rowrefs.Row, error) {
+	rows, err := h.q().QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, sqliteFailure(err)
+	}
+	defer func() { _ = rows.Close() }()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var out []rowrefs.Row
+	for rows.Next() {
+		cells := make([]any, len(columns))
+		targets := make([]any, len(cells))
+		for i := range cells {
+			targets[i] = &cells[i]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			return nil, sqliteFailure(err)
+		}
+		row := make(rowrefs.Row, len(columns))
+		for i, column := range columns {
+			row[column] = cells[i]
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, sqliteFailure(err)
+	}
+	return out, nil
 }
 
-func (h sqliteRowFeaturesHost) Visible(context.Context, string, []string) (map[string]bool, error) {
-	return nil, h.refused()
+func (h sqliteRowFeaturesHost) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	result, err := h.q().ExecContext(ctx, sql, args...)
+	if err != nil {
+		return 0, sqliteFailure(err)
+	}
+	return result.RowsAffected()
 }
 
-func (h sqliteRowFeaturesHost) Transaction(context.Context, func(rowrefs.Host) error) error {
-	return h.refused()
+func (h sqliteRowFeaturesHost) Transaction(ctx context.Context, fn func(rowrefs.Host) error) error {
+	run := func(tx TxInterface) error { return fn(sqliteRowFeaturesHost{db: h.db, tx: tx.(*SQLiteTx)}) }
+	if h.tx != nil {
+		return h.tx.Transaction(ctx, run)
+	}
+	return h.db.Transaction(ctx, run)
 }
 
-func (sqliteRowFeaturesHost) ActingUser(context.Context) (string, bool) { return "", false }
+func (h sqliteRowFeaturesHost) Visible(ctx context.Context, typeName string, keys []string) (map[string]bool, error) {
+	if h.tx != nil {
+		return visibleRows(ctx, h.tx, typeName, keys)
+	}
+	return visibleRows(ctx, h.db, typeName, keys)
+}
 
-func (sqliteRowFeaturesHost) Caller(context.Context) (access.Principal, bool) {
-	return access.Principal{}, false
+func (sqliteRowFeaturesHost) ActingUser(ctx context.Context) (string, bool) {
+	return rowFeaturesHost{}.ActingUser(ctx)
+}
+
+func (sqliteRowFeaturesHost) Caller(ctx context.Context) (access.Principal, bool) {
+	return rowFeaturesHost{}.Caller(ctx)
 }
 
 func (sqliteRowFeaturesHost) NotFound(message string) error {
-	return fmt.Errorf("%w: %s", ErrNotFound, message)
+	return rowFeaturesHost{}.NotFound(message)
 }
 {{- if .RowFeatures.References }}
 
-// References is refused on SQLite: each of its members answers
-// ErrSQLiteUnsupported (sqliteRowFeaturesHost).
+// References is the references of the database's rows on SQLite (D154,
+// D182).
 func (db *SQLiteDatabase) References() *rowrefs.References {
-	return rowrefs.NewReferences(sqliteRowFeaturesHost{}, rowFeatures.References)
+	return rowrefs.NewReferences(sqliteRowFeaturesHost{db: db}, rowFeatures.References)
 }
 
-// References is refused on SQLite, in the transaction too.
+// References is the references of the database's rows on SQLite, in the
+// transaction.
 func (tx *SQLiteTx) References() *rowrefs.References {
-	return rowrefs.NewReferences(sqliteRowFeaturesHost{}, rowFeatures.References)
+	return rowrefs.NewReferences(sqliteRowFeaturesHost{db: tx.db, tx: tx}, rowFeatures.References)
 }
 {{- end }}
 {{- if .RowFeatures.Attachments }}
 
-// Attachments is refused on SQLite: each of its members answers
-// ErrSQLiteUnsupported (sqliteRowFeaturesHost).
+// Attachments is the files of the database's rows on SQLite (D154, D182).
 func (db *SQLiteDatabase) Attachments() *rowrefs.Attachments {
-	return rowrefs.NewAttachments(sqliteRowFeaturesHost{}, rowFeatures.Attachments, rowFeatures.References)
+	return rowrefs.NewAttachments(sqliteRowFeaturesHost{db: db}, rowFeatures.Attachments, rowFeatures.References)
 }
 
-// Attachments is refused on SQLite, in the transaction too.
+// Attachments is the files of the database's rows on SQLite, in the
+// transaction.
 func (tx *SQLiteTx) Attachments() *rowrefs.Attachments {
-	return rowrefs.NewAttachments(sqliteRowFeaturesHost{}, rowFeatures.Attachments, rowFeatures.References)
+	return rowrefs.NewAttachments(sqliteRowFeaturesHost{db: tx.db, tx: tx}, rowFeatures.Attachments, rowFeatures.References)
 }
 {{- end }}
 {{- end }}

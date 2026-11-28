@@ -64,13 +64,14 @@ export const create: Constructor = deps => ({
 
 /**
  * Builds the options of the agent dispatcher (D158, D183), which the
- * entrypoint builds Deps.agents with over Deps.orm and its queue. endpoint
- * is where a run's sandbox instance reaches this server's agent routes: the
- * server's own URL, which the platform knows. Name the providers of the
- * sandbox and model slots its definitions run with (D159), the notifier its
- * approvals are asked through, the inbound path a party's message runs
- * through (D157) and the tools an agent may call; until then a run's start
- * finds no sandbox, and fails.
+ * entrypoint builds Deps.agents with over Deps.orm and its queue{{ if or .HasProviders .HasNotifier .HasInbound }}, with{{ if .HasProviders }} the
+ * providers the environment's config names (D159){{ end }}{{ if .HasNotifier }}{{ if .HasProviders }},{{ end }} the notifier its approvals are
+ * asked through{{ end }}{{ if .HasInbound }} and the inbound path a party's message runs through
+ * (D157){{ end }}{{ end }}. endpoint is where a run's sandbox instance reaches this
+ * server's agent routes: the server's own URL, which the platform knows.
+ * Name the tools an agent may call{{ if not .HasProviders }}, and the providers of the sandbox and
+ * model slots its definitions run with (D159); until then a run's start
+ * finds no sandbox, and fails{{ end }}.
  */
 export const createAgentOptions: AgentOptionsConstructor = () => ({
   endpoint: 'http://localhost:8080/api/agents',

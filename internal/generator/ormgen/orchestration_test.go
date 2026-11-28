@@ -55,23 +55,19 @@ func TestWriteORMGoldenOrchestration(t *testing.T) {
 				t.Errorf("the definitions %+v, the requests %q", defs.Tables["Agent"], defs.Requests)
 			}
 		}
-		got, err := os.ReadFile(filepath.Join(dir, "orchestration.go"))
-		if err != nil {
-			t.Fatal(err)
+		// The database lists sqlite (#618): orchestration_sqlite.go runs
+		// it there, and each column says how a SQLite column holds it.
+		if messages := defs.Parts["messages"].Columns; messages["at"].SQLite != "time" {
+			t.Errorf("%s: the messages' columns on SQLite: %+v", svc, messages)
 		}
-		golden := filepath.Join("testdata", "golden", svc, "orchestration.go")
-		if *update {
-			if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(golden, got, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			continue
+		names := []string{"orchestration.go", "orchestration_sqlite.go"}
+		if svc == "fixture-agent-runs-db" {
+			// The definitions are @versioned: on SQLite their repository
+			// serves the rows and refuses the history reads (#618).
+			names = append(names, "sqlite_agent.go")
 		}
-		want, err := os.ReadFile(golden)
-		if err != nil || string(got) != string(want) {
-			t.Errorf("orchestration.go of %s differs from its golden (run with -update to accept): %v", svc, err)
+		for _, name := range names {
+			checkGoldenFile(t, dir, svc, name)
 		}
 	}
 

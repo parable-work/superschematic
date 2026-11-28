@@ -59,8 +59,36 @@ type notifierPartDef struct {
 }
 
 type notifierColumnDef struct {
-	Name string `json:"name"`
-	UUID bool   `json:"uuid,omitempty"`
+	Name   string `json:"name"`
+	UUID   bool   `json:"uuid,omitempty"`
+	SQLite string `json:"sqlite,omitempty"`
+}
+
+// notifierColumnOf is the column c of one of the notifier's or the
+// orchestration's tables as the runtime reads it; for a database that
+// lists sqlite, with how a SQLite column holds it (notifications.Column,
+// #618): a list of UUIDs, a JSON value or another list, a date-time, a
+// boolean, or a UUID the column's type does not name, each as the SQLite
+// repositories' columns hold them (D182).
+func notifierColumnOf(c sqlutil.ColumnModel, sqlite bool) notifierColumnDef {
+	def := notifierColumnDef{Name: c.Quoted, UUID: strings.EqualFold(c.Type, "uuid")}
+	if !sqlite {
+		return def
+	}
+	switch {
+	case c.Class.List && c.Class.UUIDLike:
+		def.SQLite = "uuids"
+	case c.Class.List || c.Class.JSON || c.Class.JSONLike || c.Class.AnyJSON:
+		def.SQLite = "json"
+	case c.Class.DateTimeLike:
+		def.SQLite = "time"
+	case c.Class.BoolLike:
+		def.SQLite = "bool"
+	case c.Class.UUIDLike && !def.UUID:
+		// A to-one relation's column, which holds its target's UUID key.
+		def.SQLite = "uuid"
+	}
+	return def
 }
 
 type notifierEventDef struct {
@@ -89,7 +117,7 @@ type notifierDefinitions struct {
 
 // notificationsOf is the notifier model of schema, nil for a database
 // that does not use the notifier.
-func notificationsOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Repository) (*NotificationsModel, error) {
+func notificationsOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Repository, sqlite bool) (*NotificationsModel, error) {
 	if !schema.UsesNotifications() {
 		return nil, nil
 	}
@@ -137,7 +165,7 @@ func notificationsOf(schema *ir.Schema, tables []sqlutil.TableModel, repositorie
 				if c.Field == "" {
 					continue
 				}
-				columns[c.Field] = notifierColumnDef{Name: c.Quoted, UUID: strings.EqualFold(c.Type, "uuid")}
+				columns[c.Field] = notifierColumnOf(c, sqlite)
 			}
 			if len(columns) == 0 {
 				return nil, fmt.Errorf("ormgen: @notifier(%q) on %s: its table has no columns", part, td.Name)

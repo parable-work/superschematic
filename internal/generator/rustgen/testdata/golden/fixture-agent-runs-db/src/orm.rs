@@ -6563,7 +6563,12 @@ pub const POSTGRES: &str = r#"{
       ],
       "behaviors": {
         "owned": [],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "budget": [
+            "checkReserve"
+          ]
+        }
       },
       "many": [
         {
@@ -6808,7 +6813,12 @@ pub const POSTGRES: &str = r#"{
       ],
       "behaviors": {
         "owned": [],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "budget": [
+            "checkReserve"
+          ]
+        }
       },
       "events": [
         {
@@ -12705,7 +12715,19 @@ pub const POSTGRES: &str = r#"{
       ],
       "behaviors": {
         "owned": [],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "comments": [
+            "listMessages",
+            "getMessage",
+            "listEdits",
+            "listReactions",
+            "listPinned"
+          ],
+          "schedules": [
+            "listSchedules"
+          ]
+        }
       },
       "many": [
         {

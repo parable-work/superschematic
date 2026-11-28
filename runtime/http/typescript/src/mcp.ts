@@ -13,6 +13,7 @@ import {
   type McpConfirmationRefusal,
   type McpConfirmationStore,
 } from './mcpconfirm.js';
+import type { Principal } from './auth.js';
 import type { OperationSpec, RequestContext } from './operation.js';
 import { ErrorCode, HttpProblem, problemBody, type ProblemBody } from './problem.js';
 import type { Revealable } from './secret.js';
@@ -874,6 +875,21 @@ export interface McpRouteTool extends McpTool {
  */
 export type McpCallGate = (ctx: RequestContext, tool: McpRouteTool, args: Readonly<Record<string, unknown>>) => Promise<ProblemBody | undefined>;
 
+/**
+ * A tool the endpoint serves beside its routes' (D152, D155): the calendar
+ * and search across tables, say, which read as the caller themselves. It
+ * is offered to every caller the endpoint admits, and its call runs as the
+ * caller's principal, which it holds to what that principal reads. A
+ * refusal is its problem's status, title and detail.
+ */
+export interface McpServedTool {
+  readonly tool: McpTool;
+  call(
+    principal: Principal | null,
+    args: Readonly<Record<string, unknown>>
+  ): Promise<{ readonly result: unknown } | { readonly problem: { readonly status: number; readonly title: string; readonly detail: string } }>;
+}
+
 /** The router options of an API's MCP endpoint. */
 export interface McpOptions {
   /** The name and version initialize reports; the API's name and its served OpenAPI version by default. */
@@ -905,6 +921,12 @@ export interface McpOptions {
    * answers 428 approval_required until the call's approval is approved.
    */
   readonly callGate?: McpCallGate;
+  /**
+   * The tools served beside the routes' (McpServedTool): the generated
+   * server serves the calendar's and search's here for a database that
+   * declares them. A name a route's tool takes is refused at mount.
+   */
+  readonly tools?: readonly McpServedTool[];
   /**
    * The WWW-Authenticate value of the endpoint's 401, for an API that is
    * its own OAuth authorization server (#695): the identity runtime's
@@ -1001,6 +1023,11 @@ export function mountMcp<E extends Env>(
   options: McpOptions = {}
 ): void {
   const byName = toolOperations(operations, tools);
+  const served = new Map<string, McpServedTool>();
+  for (const extra of options.tools ?? []) {
+    if (byName.has(extra.tool.name) || served.has(extra.tool.name)) throw new Error(`mountMcp: two tools are named ${extra.tool.name}`);
+    served.set(extra.tool.name, extra);
+  }
   const confirming = tools.find(tool => tool.confirm);
   if (confirming && options.confirmationKey === undefined) {
     throw new Error(
@@ -1022,7 +1049,7 @@ export function mountMcp<E extends Env>(
   };
   // Each request is served as its caller, whom a confirmation is bound to.
   const serve = (c: Context<E>, ctx: RequestContext) =>
-    serveMcp(c.req.raw, routerTools(app, byName, runtime, mount, c, ctx, options.callGate), { ...server, caller: callerOf(ctx), requestId: ctx.requestId });
+    serveMcp(c.req.raw, withServedTools(routerTools(app, byName, runtime, mount, c, ctx, options.callGate), served, ctx), { ...server, caller: callerOf(ctx), requestId: ctx.requestId });
   // The 401 tells a client where to sign in (#695): middleware before the
   // routes, so it sees the gate's answer.
   const challenge = options.challenge;
@@ -1160,6 +1187,27 @@ function routerTools<E extends Env>(
       const gated = gate ? await gate(ctx, entry.tool, args) : undefined;
       if (gated) return { problem: gated };
       return outcomeOf(await app.fetch(request, c.env), ctx.requestId, new URL(request.url).pathname);
+    },
+  };
+}
+
+/**
+ * tools with served beside them, each called as ctx's principal: none of
+ * them confirms or is checked before its call.
+ */
+function withServedTools(tools: McpToolSet, served: ReadonlyMap<string, McpServedTool>, ctx: RequestContext): McpToolSet {
+  if (served.size === 0) return tools;
+  return {
+    list: async () => [...(await tools.list()), ...[...served.values()].map(extra => extra.tool)],
+    confirms: name => (served.has(name) ? undefined : tools.confirms?.(name)),
+    check: (name, args) => (served.has(name) ? undefined : tools.check?.(name, args)),
+    call: async (name, args) => {
+      const extra = served.get(name);
+      if (!extra) return tools.call(name, args);
+      const outcome = await extra.call(ctx.principal, args);
+      if ('result' in outcome) return { result: outcome.result };
+      const { status, title, detail } = outcome.problem;
+      return { problem: { type: 'about:blank', title, status, detail, requestId: ctx.requestId } };
     },
   };
 }

@@ -22,6 +22,12 @@ token is a grant of the database's @accessGrants table.
 Each reads through CrossTables, the crosstable.Host over the database: a
 read of a table is held to its caller by the predicate the table's
 repository applies (AccessConditions).
+
+On SQLite (D186, #615) the SQLite database's CrossTables is a
+crosstable.DialectHost of SQLite: crosstable writes the calendar and search
+in SQLite's words, search's words the FTS5 table the index's triggers
+keep, and a read of a table is held to its caller by the repositories'
+conditions on SQLite.
 */
 
 // crossTables are the definitions the reads across tables run on.
@@ -103,5 +109,113 @@ func (h crossTablesHost) Definitions() *crosstable.Definitions {
 }
 
 func (h crossTablesHost) Grants() crosstable.Grants {
+	return nil
+}
+
+// sqliteCrossTables are the definitions the reads across tables run on
+// SQLite (D186, #615): the calendar's, and the search index's in SQLite's
+// words, its words the FTS5 table beside the index.
+var sqliteCrossTables = crosstable.MustParse(`{"Contract":{"table":"contract","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"contract","kind":"renewal","title":"title","field":"ends_on"}]},"Filing":{"table":"filing","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"filing","kind":"deadline","color":"filing","title":"title","occurrences":{"table":"filing_recurrence_occurrences","row":"filing_id","key":"\"key\"","due":"due","dueAt":"due_at","state":"state"}}]}}`, ``)
+
+// CrossTables is the SQLite database as the reads across tables run
+// through it (D186, #615): its calendar and its search, in SQLite's words.
+func (db *SQLiteDatabase) CrossTables() crosstable.Host {
+	return sqliteCrossTablesHost{db: db}
+}
+
+// CrossTables is the SQLite database as the reads across tables run
+// through it, in the transaction.
+func (tx *SQLiteTx) CrossTables() crosstable.Host {
+	return sqliteCrossTablesHost{db: tx.db, tx: tx}
+}
+
+// sqliteCrossTablesHost is the SQLite database, or a transaction of it, as
+// crosstable runs through it: a crosstable.DialectHost of SQLite, whose
+// statements crosstable writes in SQLite's words, and whose read of a
+// table is held to its caller by the conditions the table's repository
+// applies on SQLite (sqliteAccessConditions).
+type sqliteCrossTablesHost struct {
+	db *SQLiteDatabase
+	tx *SQLiteTx
+}
+
+var _ crosstable.DialectHost = sqliteCrossTablesHost{}
+
+// Dialect is SQLite's.
+func (sqliteCrossTablesHost) Dialect() string { return crosstable.DialectSQLite }
+
+func (h sqliteCrossTablesHost) q() sqliteQuerier {
+	if h.tx != nil {
+		return h.tx.tx
+	}
+	return h.db.db
+}
+
+func (h sqliteCrossTablesHost) Query(ctx context.Context, sql string, args ...any) ([]crosstable.Row, error) {
+	rows, err := h.q().QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, sqliteFailure(err)
+	}
+	defer func() { _ = rows.Close() }()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var out []crosstable.Row
+	for rows.Next() {
+		cells := make([]any, len(columns))
+		targets := make([]any, len(cells))
+		for i := range cells {
+			targets[i] = &cells[i]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			return nil, sqliteFailure(err)
+		}
+		row := make(crosstable.Row, len(columns))
+		for i, column := range columns {
+			row[column] = cells[i]
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, sqliteFailure(err)
+	}
+	return out, nil
+}
+
+func (h sqliteCrossTablesHost) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	result, err := h.q().ExecContext(ctx, sql, args...)
+	if err != nil {
+		return 0, sqliteFailure(err)
+	}
+	return result.RowsAffected()
+}
+
+func (h sqliteCrossTablesHost) Transaction(ctx context.Context, fn func(crosstable.Host) error) error {
+	if h.tx != nil {
+		return fn(h)
+	}
+	return h.db.Transaction(ctx, func(tx TxInterface) error {
+		return fn(sqliteCrossTablesHost{db: h.db, tx: tx.(*SQLiteTx)})
+	})
+}
+
+func (h sqliteCrossTablesHost) As(ctx context.Context, principal access.Principal) context.Context {
+	return crossTablesHost{}.As(ctx, principal)
+}
+
+func (h sqliteCrossTablesHost) System(ctx context.Context) context.Context {
+	return AsSystem(ctx)
+}
+
+func (h sqliteCrossTablesHost) Conditions(ctx context.Context, typeName string, args *[]any, _ int) []string {
+	return nil
+}
+
+func (h sqliteCrossTablesHost) Definitions() *crosstable.Definitions {
+	return sqliteCrossTables
+}
+
+func (h sqliteCrossTablesHost) Grants() crosstable.Grants {
 	return nil
 }

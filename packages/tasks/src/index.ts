@@ -71,15 +71,41 @@ export interface InputKinds {
  * registers a section augments this interface with its type; a section the
  * naming file registers as data takes any object.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface TaskSections {}
+export interface TaskSections {
+  /**
+   * What the `github` renderer reads of one task when it writes the
+   * workflow (`outputs.tasks.ci.github`): the runner its job runs on in
+   * place of the file's, its timeout, and the condition it runs on,
+   * written as GitHub writes a job's `if`.
+   */
+  github?: {
+    readonly runsOn?: string;
+    readonly timeoutMinutes?: number;
+    readonly if?: string;
+  };
+}
 
 /**
  * The part of each section that belongs to the file, by the section's
  * name, as `TaskSections` is for a task.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface FileSections {}
+export interface FileSections {
+  /**
+   * What the `github` renderer reads of the file when it writes the
+   * workflow: its triggers, written as GitHub writes a workflow's `on`;
+   * its name, the service's unless given; its permissions, `contents:
+   * read` unless given; the runner every job runs on, the hosted runner
+   * of the task's platform unless given; and the repository the tasks'
+   * image is pulled from by its digest, as `ghcr.io/acme/ci`.
+   */
+  github?: {
+    readonly on: { readonly [event: string]: unknown };
+    readonly name?: string;
+    readonly permissions?: { readonly [scope: string]: "read" | "write" | "none" };
+    readonly runsOn?: string;
+    readonly imageRepository?: string;
+  };
+}
 
 /** One input: a path or a glob, or a kind with the spec its resolver reads. */
 export type Input = string | { readonly [K in keyof InputKinds]: { readonly kind: K; readonly spec: InputKinds[K] } }[keyof InputKinds];

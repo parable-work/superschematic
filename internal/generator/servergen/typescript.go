@@ -390,14 +390,19 @@ type TypeScriptWorker struct {
 	Behavior   *apigen.BehaviorWorkerInfo
 	QueuesFunc string
 
-	// Dispatcher is set for a @worker of the agent dispatcher's queues
-	// (D158, D183), the database's @agents("requests") queue or its
-	// @runRequests queue (D157): the entrypoint hands each message to
-	// Deps.agents.handle and calls no createWorkers. Transcripts is set
-	// for the requests queue, whose prune also deletes the transcripts
-	// past their retention (agents.prune).
-	Dispatcher  bool
-	Transcripts bool
+	// Handler is the API package's function a @worker of a runtime
+	// piece's queue hands each message to (typescript_wiring.go): the
+	// agent dispatcher's requests queue or the run requests queue
+	// (dispatchAgentMessage, D183), the notifier's dispatch queue
+	// (notifyMessage, D153), a @searchable declaration's queue
+	// (indexSearchMessage, D155), which takes the runtime options too
+	// (HandlerOptions). The entrypoint calls no createWorkers then. Empty
+	// for a worker the implementation handles. Transcripts is set for the
+	// dispatcher's requests queue, whose prune also deletes the
+	// transcripts past their retention (agents.prune).
+	Handler        string
+	HandlerOptions bool
+	Transcripts    bool
 }
 
 // Messages names what a behavior worker's messages carry, for its main's
@@ -534,15 +539,32 @@ type TypeScriptAPI struct {
 	// Database is the pool Deps.db holds, nil without one.
 	Database *TypeScriptDatabase
 
-	// Agents is true when Deps holds the agent dispatcher (D158, D183):
-	// the entrypoint builds Deps but its dispatcher as AgentsBase, asks the
-	// implementation's createAgentOptions for the dispatcher's options and
-	// builds Deps with withAgents. A server mounts the agent routes a
-	// run's sandbox instance calls (AgentRoutes) and holds its MCP
-	// endpoint's calls to a run's autonomy (agents.mcpGate).
-	Agents      bool
-	AgentsBase  string
-	AgentRoutes string
+	// Agents is true when Deps holds the agent dispatcher (D158, D183),
+	// which the implementation's createAgentOptions gives its options
+	// (AgentOptions, their variable), and a server's MCP endpoint holds
+	// its calls to a run's autonomy (agents.mcpGate).
+	Agents       bool
+	AgentOptions string
+
+	// The runtime pieces the API package's runtime.ts wires
+	// (typescript_wiring.go): Runtime is true when it has any, and the
+	// entrypoint builds Deps but them as DepsBase, asks the
+	// implementation for the runtime options (RuntimeOptions, their
+	// variable) and builds Deps with withRuntime. A server mounts their
+	// routes beside the router (RuntimeRoutes, the handler's variable) and
+	// serves their MCP tools on the API's endpoint (RuntimeMCP).
+	// Providers is true when Deps holds the runtime providers (D159),
+	// which providersOf reads from the config. Grants and AccessLog wrap
+	// the router's authenticator in grantAuthenticator and give it the
+	// access log (D156).
+	Runtime        bool
+	DepsBase       string
+	RuntimeOptions string
+	RuntimeRoutes  string
+	RuntimeMCP     bool
+	Providers      bool
+	Grants         bool
+	AccessLog      bool
 
 	// MCP is true when the server serves the API's MCP endpoint (D81).
 	MCP bool
@@ -915,12 +937,8 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			Module:       o.Deps.DatabaseTypesPackage + tsgen.QueuesEntry,
 			Package:      o.Deps.DatabaseTypesPackage,
 		}
-		if w.Dispatcher {
-			// The agent dispatcher's queue: Deps.agents.handle takes each
-			// message (D183).
-			s.Worker.Dispatcher = true
-			s.Worker.Transcripts = o.Deps.Agents != nil && w.Queue == o.Deps.Agents.Requests
-		}
+		// A runtime piece's queue: its handler takes each message.
+		s.Worker.planRuntimeHandler(o, w)
 		if w.Behavior != nil {
 			// A behavior worker runs its table's deadlines and changes
 			// through the repositories, on Postgres alone (D103).
@@ -1047,15 +1065,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.MinClientVersions = api.Config + "." + ir.MinClientVersionsSetting
 		}
 		api.MCP = o.MCP != nil && !background
-		if o.HasAgents() {
-			// Deps holds the agent dispatcher, which the implementation's
-			// createAgentOptions gives its options (D183).
-			api.Agents = true
-			api.AgentsBase = taken.take(stem + "DepsBase")
-			if !background {
-				api.AgentRoutes = taken.take(stem + "AgentRoutes")
-			}
-		}
+		// The runtime pieces its database declares (D159, D153, D157,
+		// D152, D155, D156, D158).
+		api.planRuntime(o, stem, taken, background)
 		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
 			// The MCP endpoint signs the confirmations of its tools that
 			// ask with the secret the API's config holds (D93).
@@ -1386,6 +1398,8 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// autonomy, by the tool's @autonomy (D158, D183).
 		mcp = append(mcp, "callGate: "+a.Deps+".agents.mcpGate")
 	}
+	// The runtime pieces' tools beside the routes' (D152, D155).
+	mcp = append(mcp, a.runtimeMCPOptions()...)
 	if len(mcp) > 0 {
 		out = append(out, "mcp: { "+strings.Join(mcp, ", ")+" }")
 	}
@@ -1397,6 +1411,8 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// Its @idempotent routes keep their keys in its database (D140).
 		out = append(out, "idempotencyStore: "+a.IdempotencyStore)
 	}
+	// The access log its database keeps (D156).
+	out = append(out, a.runtimeRouterOptions()...)
 	if a.Behaviors {
 		// Its behavior operations (D103) and its table operations (D106)
 		// run through the repositories Deps holds.
@@ -1515,7 +1531,18 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 			out = append(out, store)
 		}
 	}
+	if request, _ := s.routesAuthenticate(); request {
+		// The runtime's routes authenticate as the router does (D153).
+		out = append(out, "requestAuthenticator")
+	}
 	return out
+}
+
+// RoutesIdentity reports whether an API's runtime routes authenticate
+// through its identity service, which identityAuthenticator adapts.
+func (s *TypeScriptServer) RoutesIdentity() bool {
+	_, identity := s.routesAuthenticate()
+	return identity
 }
 
 // PostgresDatabases are the databases the entrypoint opens a pg Pool on.

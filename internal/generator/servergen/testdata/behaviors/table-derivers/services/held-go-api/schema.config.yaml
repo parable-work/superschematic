@@ -1,0 +1,12 @@
+# A Go API over fixture-audience-behaviors-db, whose Note keeps its rows
+# to an audience (@audience, D156) and implements Derived, that declares
+# FillNotes, a deriver of Note's summary (D146). Its deriver reads and
+# settles every row, as a job's context does (D180).
+name: held-go-api
+kind: API
+dependencies:
+  - { name: fixture-audience-behaviors-db, kind: DB }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }

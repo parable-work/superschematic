@@ -13,10 +13,11 @@
 // ambient caller, the context, and a read across tables still takes the
 // caller's principal and binds it itself (Host.As), as the Rust runtime's
 // does (D188): a feed's route reads as the feed's holder, not as the
-// request's caller. Postgres alone: a Go server serves search, Recurrence
-// and the calendar on Postgres, and the build refuses them over a database
-// that lists sqlite first (verify.GoServerSQLiteErr), whose search the
-// TypeScript repositories alone serve (D186).
+// request's caller. On SQLite (#615) the generated ORM's SQLite database
+// is a DialectHost: the calendar and search write their statements in
+// SQLite's words there, search's words an FTS5 table ranked by bm25, as
+// the TypeScript runtime's on SQLite and D1 (D186), and embeddings are
+// refused (dialect.go, search_sqlite.go).
 package crosstable
 
 import (
@@ -190,6 +191,12 @@ type Searchable struct {
 	Audience  *SearchAudience `json:"audience,omitempty"`
 	Comments  *SearchComments `json:"comments,omitempty"`
 	Files     *SearchFiles    `json:"files,omitempty"`
+	// FTS is the FTS5 table of the index's words on SQLite, quoted, which
+	// a search there matches and ranks in place of Document, and
+	// IndexAudience how the index's audience, a JSON array, is compared
+	// there (D186).
+	FTS           string               `json:"fts,omitempty"`
+	IndexAudience *SearchIndexAudience `json:"indexAudience,omitempty"`
 }
 
 // Definitions are what the generated ORM is generated with: its tables'

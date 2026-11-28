@@ -26,7 +26,7 @@ depends on none of them.
 | the same in the Rust HTTP runtime, and a provider crate whose `Cargo.toml` declares it ([In Rust](#in-rust)) | |
 | the same in the Go HTTP runtime's `providers` package, and a Go module in the provider's directory ([In Go](#in-go)) | |
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
-| `@providers` on an API's `@envVars` class, and the API config's `providers` | a generated TypeScript server that links the packages and builds `Providers` in its `Deps`; a Rust server and a Go server do |
+| `@providers` on an API's `@envVars` class, and the API config's `providers`; a generated TypeScript, Go and Rust server that links the packages and builds `Providers` in its `Deps` | |
 | the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
@@ -187,6 +187,16 @@ const providers = providersFrom({ slots: { SMS: "channel" }, config: loadEnvConf
 const sms = await providers.channel("SMS");
 await sms.send({ to: "+15550100", body: "Review moved to Thursday", reference: "142" });
 ```
+
+The generated TypeScript server does this itself. The API package of an
+API with slots holds `providers.ts`, which imports each listed package's
+default export by its directory, and whose `providersOf(config, log)`
+calls `providersFrom` over the API's slots and those definitions; every
+entrypoint puts its answer in `deps.providers`, and the notifier sends on
+its channel slots, the agent dispatcher runs on its sandbox and model
+slots ([agent runs](/superschematic/guides/agent-runs/)). A listed provider
+of a Rust crate alone is no package the server links: a slot that names
+it is refused at start.
 
 It refuses at start a config that names a provider the server does not
 link, one of another interface, or leaves a setting unset, naming every

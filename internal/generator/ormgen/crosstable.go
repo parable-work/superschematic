@@ -23,14 +23,21 @@ import (
 
 // CrossTablesModel is what crosstable.go is generated from: the
 // definitions as the JSON crosstable.MustParse reads, each "" for none.
+// SQLiteSearchable is the search definition on SQLite, for a database
+// whose DB service lists the sqlite dialect (D186, #615): Postgres's, its
+// words the FTS5 table beside the index in place of the weighed document,
+// its key's type SQLite's and its index's audience compared through
+// json_each, as tsgen's sqliteSearchable writes it.
 type CrossTablesModel struct {
-	Calendar   string
-	Searchable string
+	Calendar         string
+	Searchable       string
+	SQLiteSearchable string
 }
 
 // crossTablesOf is the cross-table model of schema's tables, nil for a
-// database with no calendar source and no @searchable table.
-func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel) (*CrossTablesModel, error) {
+// database with no calendar source and no @searchable table; with sqlite,
+// it holds the search definition on SQLite too.
+func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel, sqlite bool) (*CrossTablesModel, error) {
 	byType := map[string]*sqlutil.TableModel{}
 	for i := range tables {
 		byType[tables[i].Type] = &tables[i]
@@ -136,8 +143,28 @@ func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel) (*CrossTables
 			return nil, err
 		}
 		model.Searchable = string(data)
+		if sqlite {
+			onSQLite := make(map[string]searchableDef, len(searchable))
+			for name, def := range searchable {
+				def.Document = ""
+				def.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
+				def.KeyType = "text"
+				def.IndexAudience = &searchIndexAudienceDef{Contains: sqlutil.SQLiteAudienceContains, Placeholder: sqlutil.SQLiteAudiencePlaceholder}
+				onSQLite[name] = def
+			}
+			if data, err = json.Marshal(onSQLite); err != nil {
+				return nil, err
+			}
+			model.SQLiteSearchable = string(data)
+		}
 	}
 	return model, nil
+}
+
+// searchIndexAudienceDef is crosstable.SearchIndexAudience.
+type searchIndexAudienceDef struct {
+	Contains    string `json:"contains"`
+	Placeholder string `json:"placeholder"`
 }
 
 // calendarTableDef is crosstable.CalendarTable.
@@ -239,6 +266,9 @@ type searchableDef struct {
 	Audience  *searchAudienceDef `json:"audience,omitempty"`
 	Comments  *searchCommentsDef `json:"comments,omitempty"`
 	Files     *searchFilesDef    `json:"files,omitempty"`
+	// FTS and IndexAudience are the definition's on SQLite alone (D186).
+	FTS           string                  `json:"fts,omitempty"`
+	IndexAudience *searchIndexAudienceDef `json:"indexAudience,omitempty"`
 }
 
 type searchAudienceDef struct {

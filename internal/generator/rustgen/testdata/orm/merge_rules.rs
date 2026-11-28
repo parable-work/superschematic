@@ -7,9 +7,11 @@
 //! its unique index holds live rows alone; a code the index over an
 //! expression would refuse is deleted; a note is repointed with who changed
 //! it; the label merged away is deleted softly; a merge of a label into
-//! itself, into a label under it, of one gone, and by a party whose grant
-//! reaches one of the two labels alone (D156, D181), is refused and writes
-//! nothing; and a customer, whose status is a Workflow, is deleted through
+//! itself, into a label under it, of one gone, by a party whose grant
+//! reaches one of the two labels alone (D156, D181), and by one whose
+//! grants reach both labels and none of the rows that reference them, is
+//! refused and writes nothing; and a customer, whose status is a Workflow,
+//! is deleted through
 //! the core once its purchases and its profile are folded.
 
 use db::orm::postgres::{deadpool_postgres, tokio_postgres};
@@ -115,6 +117,31 @@ macro_rules! cases {
             let refused = $run!(party.label().unwrap().merge_into(&key(&defect), &key(&bug)));
             assert!(matches!(&refused, Err(Error::NotFound(message)) if message.contains(gone["id"].as_str().unwrap())), "{refused:?}");
         }
+        // Refused, writing nothing, for a party whose grants reach both
+        // labels and none of the rows that reference the defect (D156):
+        // the first table that holds one, by the steps' order, names it.
+        let both = $orm.acting(Some(ALICE.to_owned())).with_access(AccessCaller {
+            subject: Some(PARTY.to_owned()),
+            kind: PrincipalKind::Party,
+            grants: Some(
+                [&defect, &bug]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, row)| GrantReach {
+                        id: format!("g{i}"),
+                        target_type: "Label".to_owned(),
+                        target_id: row["id"].as_str().unwrap().to_owned(),
+                        reaches: Default::default(),
+                    })
+                    .collect(),
+            ),
+            ..AccessCaller::default()
+        });
+        let refused = $run!(both.label().unwrap().merge_into(&key(&defect), &key(&bug)));
+        assert!(
+            matches!(&refused, Err(Error::Merge { code: "out_of_reach", message }) if message.contains("DocumentLabel")),
+            "{refused:?}"
+        );
         let held = $run!(tags.untyped().find_many(Some(&values(json!({"labelId": {"eq": defect["id"]}}))), &FindOptions::default()))
             .expect("the defect's documents");
         assert_eq!(held.rows.len(), 2, "a merge the caller may not make wrote: {:?}", held.rows);

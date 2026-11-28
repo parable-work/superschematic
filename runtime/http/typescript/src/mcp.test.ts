@@ -228,6 +228,25 @@ describe('the router endpoint', () => {
     expect(missing.result.structuredContent.detail).toBe('get_item: id is required');
   });
 
+  test('a tool served beside the routes is listed and called as the caller, and a name a route takes is refused', async () => {
+    const app = new Hono();
+    const served = {
+      tool: { name: 'whoami', description: 'Who calls.', inputSchema: { type: 'object' } },
+      call: async (principal: { subject: string } | null, args: Readonly<Record<string, unknown>>) =>
+        args.fail ? { problem: { status: 400, title: 'Bad Request', detail: 'failed' } } : { result: { subject: principal?.subject } },
+    };
+    mountMcp(app, specs, tools, { authenticate }, { api: 'items-api', version: '1.0.0', requiresAuth: true }, { tools: [served] });
+    const names = (await messages(await post(app, rpc('tools/list'), { authorization: 'Bearer ada' })))[0].result.tools.map((t: { name: string }) => t.name);
+    expect(names).toEqual(['get_item', 'rename_item', 'export_items', 'ping', 'whoami']);
+    expect((await call(app, 'ada', 'whoami', {})).result.structuredContent).toEqual({ subject: 'ada' });
+    const refused = await call(app, 'ada', 'whoami', { fail: true });
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.structuredContent).toMatchObject({ status: 400, detail: 'failed' });
+    const clash = () =>
+      mountMcp(new Hono(), specs, tools, { authenticate }, { api: 'items-api', version: '1.0.0', requiresAuth: true }, { tools: [{ ...served, tool: { ...served.tool, name: 'ping' } }] });
+    expect(clash).toThrow('two tools are named ping');
+  });
+
   test("a tool the caller is not offered, or the API has not got, is the JSON-RPC invalid-params error", async () => {
     const app = router();
     for (const name of ['report', 'nowhere']) {

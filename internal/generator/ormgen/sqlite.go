@@ -306,12 +306,12 @@ func sqliteRefusal(repo *Repository) string {
 	if reason := sqlutil.SQLiteTableRefusal(repo.Table); reason != "" {
 		return reason
 	}
-	if repo.sqliteAccess != "" {
-		return repo.sqliteAccess
-	}
 	switch {
-	case repo.Versioned:
-		return "it is @versioned, whose history the SQLite DDL does not keep"
+	case repo.HasPruneHistory:
+		// A @versioned table's rows and version are served on SQLite, whose
+		// DDL's triggers keep its history (D189, #618); a history kept for
+		// some days is Postgres's prune function's alone.
+		return "it is @versioned with a history kept for some days (retentionDays), which SQLite has no prune of"
 	case len(repo.VectorFields) > 0:
 		return "it has a vector column, which SQLite has no storage for"
 	case len(repo.EncryptedFields) > 0:

@@ -126,6 +126,7 @@ examples/acme-schematic/
     services/shop-storefront  API on the TypeScript server: carts, a public probe, a manual event stream
     services/shop-tasks       Tasks: the example's build, vet and smoke as tasks, with acme's section
   ci/tasks.json               shop-tasks' task file, which build-all installs and `tasks --check` holds current
+  ci/workflows/shop-tasks.yml the GitHub Actions workflow the github renderer writes from it, a job per task
   storefront/                 app.ts implements the generated shop-storefront router; app.test.ts drives it
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
   scripts/smoke.sh            the end-to-end assertions
@@ -948,6 +949,15 @@ acme-schematic tasks schemas/services/shop-tasks --check   # the committed file 
 acme-schematic tasks plan HEAD --file examples/acme-schematic/ci/tasks.json
 acme-schematic tasks inputs schemas/services/shop-tasks    # after build-all
 ```
+
+The schema's config also names the core's `github` renderer
+(`outputs.tasks.ci.github`), which writes `ci/workflows/shop-tasks.yml`
+from the same file: a job per task, each needing the tasks its task uses
+and follows, with `schema-build`'s generated tree carried to `api-build`
+as an artifact. The renderer reads the `github` section beside acme's
+for the triggers and the repository the image is pulled from. The
+workflow is installed in the example's own directory and not in
+`.github/workflows`, so GitHub does not run it.
 
 `ext/tasks_test.go` is a reader: a forge in miniature. It decodes the
 committed file with the public `tasks` package, reads acme's section to

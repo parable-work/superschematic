@@ -299,6 +299,33 @@ impl<'a> Plan<'a> {
         self.require_user()
     }
 
+    /// The read of a row of a merge's step the caller may not write
+    /// (D156): one of the step's rows, those that reference `from`, that
+    /// the conditions of a write of their table leave out. None for
+    /// repositories opened for no caller, and for a table no audience or
+    /// grant holds for the caller, whose rows it may all write.
+    pub(crate) fn merge_reach(
+        &self,
+        reach: &super::MergeReach,
+        from: &Value,
+    ) -> Result<Option<Statement>, Error> {
+        if self.session.access.is_none() {
+            return Ok(None);
+        }
+        let table = self.definition.table(&reach.table)?;
+        let mut args = vec![self.key(from)?];
+        let conditions = self.access_conditions(table, &mut args, true)?;
+        if conditions.is_empty() {
+            return Ok(None);
+        }
+        let c = &self.definition.clauses;
+        let writable = fill(&c.group, &[&conditions.join(&c.and)])?;
+        Ok(Some(Statement {
+            sql: format!("{} AND NOT COALESCE({writable}, FALSE) LIMIT 1", reach.rows),
+            args,
+        }))
+    }
+
     /// The statement that sets the history actor for a merge's
     /// transaction, whose steps delete a @versioned table's rows (D147).
     pub(crate) fn merge_history_actor(&self) -> Statement {
