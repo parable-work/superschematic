@@ -829,7 +829,14 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 					tsDeps.Agents.RunRequests = runs.Name
 				}
 			}
+			// The rest of the runtime pieces the server wires over the
+			// repositories (typescript_runtime.go).
+			typeScriptRuntime(&tsDeps, schema)
 		}
+	}
+	// The runtime providers of the API's slots (D159).
+	if tsDeps.Providers, err = r.typeScriptProviders(); err != nil {
+		return nil, nil, err
 	}
 	if e := apiOutput.Engine; e != nil {
 		// Deps holds the engine of the API's engine database, which a server

@@ -240,6 +240,15 @@ export interface GrantAuthenticatorOptions {
   readonly inner?: Authenticator;
   /** The time a grant is held to; the clock's unless set. */
   readonly now?: () => Date;
+  /**
+   * What an agent run's token meets: refused 401 (refuse, the default), or
+   * handed to inner as any other request is (inner), which accepts it only
+   * where it is the dispatcher's authenticator, agents.authenticator. The
+   * generated server wraps an implementation's authenticator with inner,
+   * so a run's token reaches the API's routes where the implementation
+   * says (D194).
+   */
+  readonly runTokens?: 'refuse' | 'inner';
 }
 
 /**
@@ -288,7 +297,10 @@ function grantAuthenticatorOf(options: GrantAuthenticatorOptions, admitsRuns: bo
     // is no credential of any route.
     if (grant.targetType === 'CalendarFeed' || grant.targetType.startsWith('CalendarFeed;')) throw unauthorized("A calendar feed's token reads its feed alone");
     // An agent run's token is the dispatcher's to resolve (D194).
-    if (!admitsRuns && grant.holderKind === 'agent') throw unauthorized("An agent run's token is resolved by the agent dispatcher's authenticator alone");
+    if (!admitsRuns && grant.holderKind === 'agent') {
+      if (options.runTokens === 'inner') return options.inner ? options.inner(ctx) : null;
+      throw unauthorized("An agent run's token is resolved by the agent dispatcher's authenticator alone");
+    }
     const ended = await grantEnded(db, grant, options.now?.() ?? new Date());
     if (ended !== undefined) throw unauthorized(`The grant has ${ended === 'not started' ? 'not started' : 'ended'}`);
     const role = await roles.findOne({ name: { eq: grant.role } });

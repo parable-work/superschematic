@@ -16,7 +16,7 @@ takes one path, which decides who sent it and what it may reach.
 | Built | Not built yet |
 | --- | --- |
 | `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
-| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
+| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage; a generated TypeScript server that builds it into its `Deps` and mounts each relay's inbound route ([below](#take-what-comes-in)) | the same in a generated Go or Rust server |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
 | messages as rows, with their files and the rows they are about | |
@@ -71,6 +71,18 @@ const inbound = createInbound({ orm, notifier, runs: runRequestQueue, providers,
 app.post("/webhooks/sms/inbound", async c =>
   c.json(await inbound.inbound("SMS", { headers: Object.fromEntries(c.req.raw.headers), body: await c.req.text() })));
 ```
+
+A generated TypeScript server of an API over a Postgres database with the
+conversations and a run requests queue does this itself: `deps.inbound` is
+`createInbound` over `deps.orm`, `deps.notifier` and the queue, with the
+channel slots of `deps.providers`, and `POST /webhooks/<slot>/inbound`
+hands each relay's request to it. The bucket, the inbound address and the
+approval policy of a send are the implementation's `createRuntimeOptions`'
+(`inbound: { bucket: deps.files, inboundAddress, approve }`); with the
+agent orchestration the approval policy is the dispatcher's
+`sendApproval`, which the server wires. A `@worker` of the run requests
+is the dispatcher's where the database uses the orchestration, and the
+implementation's otherwise ([act on a run request](#act-on-a-run-request)).
 
 The adapter reads the request, fetches a text's photos and reports an
 email's authentication. The core decides who sent it:

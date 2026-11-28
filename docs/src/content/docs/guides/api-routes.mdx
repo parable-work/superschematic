@@ -2120,6 +2120,13 @@ buildRouter(implementations, {
 });
 ```
 
+A generated TypeScript server does this itself for a database with an
+`@accessGrants` or an `@accessLog` table: the implementation's
+`authenticate` is `inner`, and an agent run's token goes on to it
+(`runTokens: 'inner'`), which resolves it where it is the dispatcher's
+([agent runs](/superschematic/guides/agent-runs/)). An API whose identity service establishes
+its callers keeps the identity's alone on its routes.
+
 ### In Go
 
 The Go server and ORM serve the same access. The auth provider's
@@ -2233,7 +2240,6 @@ too (D191), through the runtime's `orm::notify`.
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |
-| a generated TypeScript server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options; the Go server records its calls itself |
 | a GIN index on `effective_audience` | add one with `@rawSql` for a large table |
 
 ## A table's behavior operations

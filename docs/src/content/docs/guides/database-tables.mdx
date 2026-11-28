@@ -575,8 +575,13 @@ and a hidden row never shows as a gap:
 
 `searchRoutes({ orm, authenticate })` serves the search at
 `GET /api/search?q=...&tables=...&scope=...&limit=...&offset=...`, and
-`searchMcpTool` with `callSearchTool` as the MCP tool `search`. An app
-mounts them; an agent run calls the tool with its run token, a grant, and
+`searchMcpTool` with `callSearchTool` as the MCP tool `search`. A
+generated TypeScript server of an API over the database mounts both
+itself, the tool on the API's MCP endpoint, and a `@worker` of the
+declaration's queue hands each message to `indexSearch`, so the
+implementation has no method for it. What it searches with, a table's
+permission or embeddings, is the implementation's `createRuntimeOptions`'
+`search`. An agent run calls the tool with its run token, a grant, and
 finds what its grant reaches.
 
 ### Embeddings
@@ -4033,8 +4038,12 @@ shows only what its owner chose. A feed lasts a year unless its issue says
 otherwise; `POST /api/calendar/feeds/<id>/rotate` revokes it and issues
 another, and `DELETE /api/calendar/feeds/<id>` revokes it.
 
-The generated router mounts neither `calendarRoutes` nor the calendar's
-MCP tool: an app wires them itself, as it wires `grantAuthenticator`
+A generated TypeScript server of an API over the database mounts
+`calendarRoutes` beside its router and serves the `calendar` tool on its
+MCP endpoint, and puts `grantAuthenticator` in front of the
+implementation's authenticator, which refuses a feed's token on every
+other route. A source's permission is the implementation's
+`createRuntimeOptions`' `calendar: { permissions: { duty: "duties.work" } }`
 (`examples/recurring-duties`). Recurrence and the calendar are served end
 to end by a TypeScript server, a Rust one and a Go one on Postgres, and
 by a TypeScript one on SQLite and D1 too.

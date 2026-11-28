@@ -50,11 +50,14 @@ import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackag
 import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hono';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 {{- if .Identity }}
-import { parseIdentityConfigJSON, {{ join .IdentityStoreImports ", " }}, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
+import { {{ if .RoutesIdentity }}identityAuthenticator, {{ end }}parseIdentityConfigJSON, {{ join .IdentityStoreImports ", " }}, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
 {{- end }}
 {{- if .PostgresDatabases }}
 import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
+{{- end }}
+{{- if .AccessImports }}
+import { {{ join .AccessImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 {{- end }}
 {{- if .SQLiteDatabases }}
 import { ping as pingSqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
@@ -295,7 +298,12 @@ async function main(): Promise<void> {
   {{ template "ts-deps" . }}
   const {{ .Implementations }} = await construct({{ tsQuote .Service }}, 'implementation', () => {{ .Impl }}.create({{ .Deps }}));
 {{- if .Authenticate }}
-  const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', () => {{ .Impl }}.authenticate({{ .Deps }}));
+{{- if .Grants }}
+  // A grant's token runs as its holder (D156), and the implementation's
+  // authenticator establishes every other caller, a run's token among
+  // them where it is the dispatcher's (D194).
+{{- end }}
+  const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', {{ .AuthenticatorFactory }});
 {{- end }}
 {{- if .Identity }}
   // The identity runtime authenticates its callers and serves its user
@@ -320,17 +328,7 @@ async function main(): Promise<void> {
   // router mounts behind each one's auth gate (D51).
   const {{ .ManualRoutes }} = await construct({{ tsQuote .Service }}, 'manual routes', () => {{ .Impl }}.createManualRoutes({{ .Deps }}));
 {{- end }}
-{{- if .AgentRoutes }}
-  // The agent routes a run's sandbox instance calls (D158, D183): its
-  // turns, its MCP endpoint, its credential reports and its finish, under
-  // the dispatcher's endpoint, which a run's token alone reaches.
-  const {{ .AgentRoutes }} = {{ .Deps }}.agents.routes();
-  app.use('*', async (c, next) => {
-    const answered = await {{ .AgentRoutes }}(c.req.raw);
-    if (answered) return answered;
-    await next();
-  });
-{{- end }}
+{{- template "ts-runtime-routes" . }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
 {{- if .MountsEngine }}
   // The engine's routes, its event stream and its MCP endpoint (D58),
