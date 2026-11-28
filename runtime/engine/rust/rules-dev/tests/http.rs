@@ -418,7 +418,14 @@ fn the_inbox_is_the_notifiers_and_no_operation_of_the_core() {
         200
     );
     assert_eq!(
-        call(&mut dev, Some(&admin), "POST", "/schemas/Review/publish", None).status,
+        call(
+            &mut dev,
+            Some(&admin),
+            "POST",
+            "/schemas/Review/publish",
+            None
+        )
+        .status,
         200
     );
     let created = call(
@@ -435,10 +442,7 @@ fn the_inbox_is_the_notifiers_and_no_operation_of_the_core() {
         Some(&alice),
         "POST",
         "/schemas/Review/instances/x1/operations/post",
-        Some((
-            JSON,
-            json!({"body": "Look, carol.", "mentions": ["carol"]}),
-        )),
+        Some((JSON, json!({"body": "Look, carol.", "mentions": ["carol"]}))),
     );
     assert_eq!(posted.status, 200, "{:?}", posted.json());
     let carol = Caller::new("carol", Vec::<String>::new());

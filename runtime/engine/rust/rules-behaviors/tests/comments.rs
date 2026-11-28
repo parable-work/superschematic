@@ -148,6 +148,7 @@ fn the_config_is_the_declaration_files_schema_and_a_member_that_waits_is_refused
             "deliverPermission",
             "deliveryRetentionMs",
             "editWindowMs",
+            "events",
             "maxAttempts",
             "maxBodyLength",
             "maxDrafts",
@@ -569,4 +570,97 @@ fn comments_joins_a_table_with_rows_and_does_not_leave_one() {
         ),
         "{refusal}"
     );
+}
+
+/// With the config's events (#713), a message that comes to stand emits
+/// mentioned and replied about the row, beside it: the mentioned, as
+/// written, and the thread's followers no mention reached, never the author
+/// or the subject it was written for; an edit that adds a mention emits
+/// mentioned for the added. Without them it emits nothing. A message
+/// records the channel its caller came over as via (#606).
+#[test]
+fn a_message_emits_its_mentions_and_replies_with_the_configs_events_and_records_its_via() {
+    let mut host = Host::new(core(), review(json!({"events": true})));
+    let alice = caller("alice", &[]);
+    changed(host.create(&alice, "r1", json!({"title": "Plan"})));
+    let version = host.row("r1").version;
+    let top = post(
+        &mut host,
+        "alice",
+        json!({"body": "Look, bob and carol.", "mentions": ["bob", "carol", "alice"]}),
+    );
+    assert_eq!(
+        host.row("r1").version,
+        version,
+        "an emit beside the row moves no version of it"
+    );
+    let events = std::mem::take(&mut host.tables.events);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        (events[0].kind.as_str(), events[0].use_id.as_str()),
+        ("mentioned", USE)
+    );
+    assert_eq!(
+        events[0].payload,
+        json!({"message": top["id"], "author": "alice", "excerpt": "Look, bob and carol.", "subjects": ["bob", "carol"]})
+    );
+    // bob replies, mentioning carol: alice follows the thread and hears of
+    // it as replied, carol as mentioned, once.
+    post(
+        &mut host,
+        "bob",
+        json!({"body": "Seen.", "thread": top["id"], "mentions": ["carol"]}),
+    );
+    let events = std::mem::take(&mut host.tables.events);
+    let kinds: Vec<(&str, Value)> = events
+        .iter()
+        .map(|event| (event.kind.as_str(), event.payload["subjects"].clone()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [("mentioned", json!(["carol"])), ("replied", json!(["alice"]))]
+    );
+    // An edit that adds a mention emits it for the added alone.
+    result(host.invoke(
+        &alice,
+        "r1",
+        USE,
+        "edit",
+        json!({"message": 1, "mentions": ["bob", "carol", "dan"]}),
+    ));
+    let events = std::mem::take(&mut host.tables.events);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload["subjects"], json!(["dan"]));
+    // An agent writing for dan over SMS: dan hears nothing of it, and the
+    // message records its for and its via.
+    let agent = caller("run-1", &[]).acting_for("dan").over("sms");
+    let posted = result(host.invoke(
+        &agent,
+        "r1",
+        USE,
+        "post",
+        json!({"body": "On my way.", "mentions": ["dan", "carol"]}),
+    ));
+    assert_eq!(
+        (posted["for"].clone(), posted["via"].clone()),
+        (json!("dan"), json!("sms"))
+    );
+    let events = std::mem::take(&mut host.tables.events);
+    assert_eq!(events[0].payload["subjects"], json!(["carol"]));
+    assert_eq!(
+        (
+            events[0].payload["via"].clone(),
+            events[0].payload["forSubject"].clone()
+        ),
+        (json!("sms"), json!("dan"))
+    );
+    // Without the config's events, nothing is emitted.
+    let mut quiet = Host::new(core(), review(json!({})));
+    changed(quiet.create(&alice, "r1", json!({"title": "Plan"})));
+    post(
+        &mut quiet,
+        "alice",
+        json!({"body": "Look, bob.", "mentions": ["bob"]}),
+    );
+    assert!(quiet.tables.events.is_empty());
 }
