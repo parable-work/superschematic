@@ -16,7 +16,7 @@ use super::super::parties::identity_lapsed;
 #[cfg(feature = "postgres")]
 use super::super::postgres::deadpool_postgres;
 use super::super::store::{
-    Db, IntoDb, PartQueue, PgClient, PoolTransaction, Store, StoreRepositories,
+    Db, DbFuture, IntoDb, PartQueue, PgClient, PoolTransaction, Store, StoreRepositories,
 };
 use super::super::{
     AccessCaller, Caller, Definition, Error, EventDefinition, FindOptions, OrderBy, Values,
@@ -912,37 +912,44 @@ impl Notifier {
     /// caller's transaction with it. `client` is a Postgres client or a
     /// [`Db`]; in a caller's own rusqlite transaction, use
     /// [`Notifier::raise_sqlite`].
-    pub async fn raise<'c>(&self, client: impl IntoDb<'c>, input: RaiseInput) -> Result<String> {
-        self.raise_in(client.into_db(), input, false).await
+    pub fn raise<'a, 'c: 'a>(
+        &'a self,
+        client: impl IntoDb<'c>,
+        input: RaiseInput,
+    ) -> DbFuture<'a, Result<String>> {
+        let client = client.into_db();
+        Box::pin(async move { self.raise_in(client, input, false).await })
     }
 
     /// Raises a behavior's event (D104), as its behavior worker's Workers
     /// method hands it: its kind is the use's member, a dot and the
     /// behavior's kind, which needs no declaration.
-    pub async fn from_behavior_event<'c>(
-        &self,
+    pub fn from_behavior_event<'a, 'c: 'a>(
+        &'a self,
         client: impl IntoDb<'c>,
         table: &str,
         member: &str,
         kind: &str,
         key: &str,
         payload: Option<&Value>,
-    ) -> Result<String> {
-        self.raise_in(
-            client.into_db(),
-            behavior_event(table, member, kind, key, payload),
-            true,
-        )
-        .await
+    ) -> DbFuture<'a, Result<String>> {
+        let client = client.into_db();
+        let input = behavior_event(table, member, kind, key, payload);
+        Box::pin(async move { self.raise_in(client, input, true).await })
     }
 
     /// Raises `reference.cleared` on the row that held a reference a
     /// target's delete cleared (D154), from the cleared queue's message:
     /// its `holderTable`, `holderKey`, `targetTable`, `targetKey` and
     /// `role`.
-    pub async fn cleared<'c>(&self, client: impl IntoDb<'c>, message: &Value) -> Result<String> {
-        self.raise_in(client.into_db(), cleared_event(message), true)
-            .await
+    pub fn cleared<'a, 'c: 'a>(
+        &'a self,
+        client: impl IntoDb<'c>,
+        message: &Value,
+    ) -> DbFuture<'a, Result<String>> {
+        let client = client.into_db();
+        let input = cleared_event(message);
+        Box::pin(async move { self.raise_in(client, input, true).await })
     }
 
     /// [`Notifier::raise`] in the caller's own transaction on a SQLite

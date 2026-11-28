@@ -320,6 +320,13 @@ pub trait IntoDb<'c> {
     fn into_db(self) -> Db<'c, Self::Client>;
 }
 
+/// The future of a part's method that takes an [`IntoDb`]: the client is
+/// converted before the future is built, and the future is boxed, so a
+/// caller's own `Send` future (an `async_trait` method's) holds no
+/// `IntoDb` bound, whose lifetime rustc cannot prove `Send` for every
+/// lifetime there.
+pub type DbFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
 impl<'c, C: PgClient + 'c> IntoDb<'c> for Db<'c, C> {
     type Client = C;
     fn into_db(self) -> Db<'c, C> {

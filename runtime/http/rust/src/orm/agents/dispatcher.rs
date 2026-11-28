@@ -2402,18 +2402,18 @@ impl Agents {
     /// transaction, due after `delay`; a principal of kind agent may not
     /// request a run, and an inbound message's request names its party and
     /// its grant.
-    pub async fn request<'c>(
-        &self,
+    pub fn request<'a, 'c: 'a>(
+        &'a self,
         client: impl super::super::store::IntoDb<'c>,
         input: AgentRunRequest,
         delay: Duration,
-    ) -> Result<()> {
-        let input = self.requested(input)?;
-        client
-            .into_db()
-            .enqueue(&self.inner.requests, &input, delay)
-            .await?;
-        Ok(())
+    ) -> super::super::store::DbFuture<'a, Result<()>> {
+        let client = client.into_db();
+        Box::pin(async move {
+            let input = self.requested(input)?;
+            client.enqueue(&self.inner.requests, &input, delay).await?;
+            Ok(())
+        })
     }
 
     /// [`Agents::request`] in the caller's own transaction on a SQLite
