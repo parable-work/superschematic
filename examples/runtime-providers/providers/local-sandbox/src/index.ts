@@ -3,7 +3,8 @@
 // for a container platform or a VM service implements the same four
 // operations. The command runs with the spec's env and secrets as its
 // environment, and no secret is logged. cancel kills the process; cost is
-// its wall time and the CPU time the platform reports once it exits.
+// its wall time, which it also reports as its CPU time: Node gives a
+// child's CPU time to no one but the child.
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   defineProvider,
