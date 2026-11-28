@@ -1,0 +1,39 @@
+import { Identity, Temporal } from "superscalar";
+import { Nullable } from "@superschematic/schema";
+import { AutoGenerate, Relation, audience, key, queue } from "@superschematic/db";
+
+// The queue a folder's change of audience enqueues on, one message per
+// folder and table that inherits from it. The build fills its fields,
+// childTable and parentKey.
+@queue()
+export abstract class AudienceResolving {}
+
+// A folder of pages. Its owner sees it whatever its audience.
+@audience<Folder>({ owner: "owner" })
+export abstract class Folder {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: string;
+
+  owner: Identity.UUID;
+
+  createdAt: Temporal.DateTime;
+  createdBy: Identity.UUID;
+}
+
+// A page in a folder. A folder holds very many, so a change of the
+// folder's audience reaches them through the queue's worker, after the
+// folder's write commits.
+@audience<Page>({ inheritFrom: "folder", queue: AudienceResolving })
+export abstract class Page {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  folder: Nullable<Relation<Folder, { onDelete: "SET NULL" }>>;
+
+  title: string;
+
+  createdAt: Temporal.DateTime;
+  createdBy: Identity.UUID;
+}

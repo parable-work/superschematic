@@ -207,6 +207,7 @@ pub fn search_tables(
         effective: "si.audience".to_owned(),
         agents: "si.agents".to_owned(),
         probe: None,
+        resolve: None,
     };
     conditions.extend(audience_conditions(
         definition, &copied, &caller, &mut args, false,

@@ -44,7 +44,14 @@ const (
 	// WorkerSearch is a worker of a @searchable declaration's indexing
 	// queue (D155).
 	WorkerSearch = "search"
+	// WorkerAudience is a worker of an @audience declaration's queue
+	// (D156, #734), whose handler is audience.ts's.
+	WorkerAudience = "audience"
 )
+
+// AudienceFile is the module of the API package that holds the handler of
+// the database's @audience queues (#734).
+const AudienceFile = "audience.ts"
 
 // DepsProviders are the runtime providers Deps holds (D159): the API's
 // provider slots, each with its interface, and the provider packages its
@@ -125,6 +132,11 @@ type DepsRoutes struct {
 	// order: a @worker of one hands each message to indexSearch.
 	SearchQueues []string
 
+	// AudienceQueues are the @audience declarations' queues (D156,
+	// #734), in order: a @worker of one hands each message to
+	// resolveAudience, through audience.ts.
+	AudienceQueues []string
+
 	// Grants is set for a database with an @accessGrants table (D156): a
 	// grant's token runs as its holder on the router's routes, through
 	// grantAuthenticator around the implementation's authenticator.
@@ -155,6 +167,10 @@ func (o *APIOutput) HasCalendar() bool { return o.Deps.Routes.Calendar }
 
 // HasSearch reports whether the server serves search across tables (D155).
 func (o *APIOutput) HasSearch() bool { return o.Deps.Routes.Search }
+
+// HasAudienceQueues reports whether the API package writes audience.ts:
+// the database's @audience declarations name a queue (#734).
+func (o *APIOutput) HasAudienceQueues() bool { return len(o.Deps.Routes.AudienceQueues) > 0 }
 
 // HasFileProcessing reports whether runtime.ts exports processPendingFiles
 // (D154, D159, #702): the database declares @attachments, and the API's
@@ -286,6 +302,8 @@ func runtimeOf(deps DepsInfo, queue string) string {
 		return WorkerNotifier
 	case slices.Contains(deps.Routes.SearchQueues, queue):
 		return WorkerSearch
+	case slices.Contains(deps.Routes.AudienceQueues, queue):
+		return WorkerAudience
 	}
 	return ""
 }

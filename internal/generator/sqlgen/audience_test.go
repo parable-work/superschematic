@@ -79,3 +79,56 @@ func TestAudienceTriggersOfTheFixture(t *testing.T) {
 		}
 	}
 }
+
+// TestAudienceIndexOfTheFixture: each @audience table of fixture-access-db
+// has a GIN index over its effective audience, which create.sql writes
+// (D156).
+func TestAudienceIndexOfTheFixture(t *testing.T) {
+	dir := audienceFixtureDDL(t)
+	create, err := os.ReadFile(filepath.Join(dir, "create.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"document", "folder"} {
+		want := "CREATE INDEX idx_" + table + "_effective_audience ON " + table + " USING GIN (effective_audience);"
+		if !strings.Contains(string(create), want) {
+			t.Errorf("create.sql lacks %s", want)
+		}
+	}
+}
+
+// TestAudienceIndexOnPostgresCreateSQL applies fixture-access-db's
+// create.sql to a real Postgres; testdata/pgcheck's
+// TestAudienceIndexOnPostgres holds the checks: the index is a GIN index,
+// and a read's overlap of the effective audience with the caller's ids
+// reads it. Set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
+// TestProjectionMigrationsOnPostgres.
+func TestAudienceIndexOnPostgresCreateSQL(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply an @audience table's index against Postgres")
+	}
+	runPGCheck(t, "TestAudienceIndexOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+audienceFixtureDDL(t),
+	)
+}
+
+// audienceFixtureDDL writes fixture-access-db's create.sql and drop.sql
+// to a temporary directory and returns it.
+func audienceFixtureDDL(t *testing.T) string {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-access-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Generate(schema, Options{SchemaName: "fixture-access-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := WriteDDL(out, dir); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}

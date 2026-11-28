@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -47,6 +48,15 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			// audience a JSON array a search reads with json_each (D186).
 			searchIndex = out.Tables[i].Name
 			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool { return idx.Type == "GIN" })
+		}
+		if td := schema.Types[out.Tables[i].OriginalName]; td != nil && td.Audience != nil {
+			// An @audience table's effective audience has a GIN index on
+			// Postgres; on SQLite it is a JSON array a read takes apart
+			// with json_each, which no index serves (D182).
+			effective := sqlutil.QuoteIdentifier(codegen.ToSnakeCase(ir.EffectiveAudienceField))
+			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool {
+				return idx.Type == "GIN" && slices.Equal(idx.Columns, []string{effective})
+			})
 		}
 	}
 	if err := sqliteRefusals(out, types); err != nil {

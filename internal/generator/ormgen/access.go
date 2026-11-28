@@ -51,6 +51,18 @@ type AccessModel struct {
 	// a database with an @audience table or grants. A database with an
 	// access log alone has only its log.
 	Held bool
+
+	// Resolves are the tables whose @audience names a queue (#734), by
+	// type, sorted, each with the statement that resolves a batch of its
+	// rows that inherit from one parent: audience_resolve.go's
+	// ResolveAudience runs it.
+	Resolves []AudienceResolve
+}
+
+// AudienceResolve is a table whose @audience names a queue, by its type,
+// and its resolve statement (sqlutil.AudienceModel's Resolve).
+type AudienceResolve struct {
+	Type, Statement string
 }
 
 // AccessTable is one table as access reads it.
@@ -137,6 +149,9 @@ func accessOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Rep
 		}
 		if table.Audience != nil {
 			at.Effective, at.Agents = table.Audience.Effective, table.Audience.Agents
+			if table.Audience.Resolve != "" {
+				model.Resolves = append(model.Resolves, AudienceResolve{Type: table.Type, Statement: table.Audience.Resolve})
+			}
 		}
 		for _, rel := range table.ToOne {
 			if !served[rel.Target] {
@@ -167,6 +182,7 @@ func accessOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Rep
 		model.Tables = append(model.Tables, at)
 	}
 	slices.SortFunc(model.Tables, func(a, b AccessTable) int { return strings.Compare(a.Type, b.Type) })
+	slices.SortFunc(model.Resolves, func(a, b AudienceResolve) int { return strings.Compare(a.Type, b.Type) })
 	return model, nil
 }
 
