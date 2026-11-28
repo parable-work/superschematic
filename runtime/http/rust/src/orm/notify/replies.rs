@@ -7,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::super::postgres::{deadpool_postgres, Repositories};
+use super::super::store::{PgClient, StoreRepositories, TxRepositories};
 use super::super::{rfc3339_millis, FindOptions, Values, WriteOptions};
 use crate::auth::{covers, Principal, PrincipalKind};
 use crate::BoxError;
@@ -18,7 +18,7 @@ pub struct ReplyContext<'a, 't> {
     /// reply's principal: its writes keep to what the principal sees
     /// (D156), and its behaviors' commands run with the reply's
     /// permissions (D103).
-    pub repositories: &'a Repositories<'a, deadpool_postgres::Transaction<'t>>,
+    pub repositories: &'a TxRepositories<'a, 't>,
     /// The notice it answers, a row of the inbox.
     pub notice: &'a Values,
     /// The reply's principal, with the permissions the channel's trust
@@ -131,7 +131,10 @@ impl ReplyAction for Decide {
             .to_owned();
         // The approval is read and written as the system: the replier's
         // right to decide it is its permission, not its audience.
-        let system = Repositories::new(ctx.repositories.client(), ctx.repositories.definition())?
+        let system = ctx
+            .repositories
+            .db()
+            .repositories(ctx.repositories.definition())?
             .as_system();
         let approvals = system.table(&self.table)?;
         let mut by_key = Values::new();
@@ -174,8 +177,8 @@ impl ReplyAction for Decide {
     }
 }
 
-fn approvals_key<C: deadpool_postgres::GenericClient + Sync>(
-    repositories: &Repositories<'_, C>,
+fn approvals_key<C: PgClient>(
+    repositories: &StoreRepositories<'_, C>,
     table: &str,
 ) -> Result<String, BoxError> {
     Ok(repositories.definition().table(table)?.key.clone())

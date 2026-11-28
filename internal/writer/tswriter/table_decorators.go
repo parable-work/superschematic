@@ -42,7 +42,7 @@ func (e *emitter) emitTableFeatureDecorators(def *ir.TypeDef) {
 		e.decorator("searchable", def.Name, e.searchableArgs(search))
 	}
 	if audience := def.Audience; audience != nil {
-		e.decorator("audience", def.Name, audienceArgs(audience))
+		e.decorator("audience", def.Name, e.audienceArgs(audience))
 	}
 	if def.AccessGrants != nil {
 		e.decorator("accessGrants", "", "")
@@ -206,8 +206,8 @@ func (e *emitter) searchableArgs(search *ir.SearchableDef) string {
 }
 
 // audienceArgs renders @audience's options (D156), or none for every
-// option's default.
-func audienceArgs(audience *ir.AudienceDef) string {
+// option's default: its queue as the class (#734).
+func (e *emitter) audienceArgs(audience *ir.AudienceDef) string {
 	var parts []string
 	for _, opt := range []struct{ key, value string }{
 		{"owner", audience.Owner}, {"inheritFrom", audience.InheritFrom}, {"default", audience.Default}, {"agents", audience.Agents},
@@ -215,6 +215,9 @@ func audienceArgs(audience *ir.AudienceDef) string {
 		if opt.value != "" {
 			parts = append(parts, opt.key+": "+quote(opt.value))
 		}
+	}
+	if audience.Queue != "" {
+		parts = append(parts, "queue: "+e.classValue(audience.Queue))
 	}
 	return optionalObject(parts)
 }
@@ -236,6 +239,9 @@ func tableFeatureClassRefs(def *ir.TypeDef) []string {
 	}
 	if def.Searchable != nil {
 		refs = append(refs, def.Searchable.Queue)
+	}
+	if def.Audience != nil && def.Audience.Queue != "" {
+		refs = append(refs, def.Audience.Queue)
 	}
 	return refs
 }

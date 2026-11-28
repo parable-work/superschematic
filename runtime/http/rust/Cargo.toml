@@ -61,6 +61,12 @@ tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"], optional = tr
 # The identity-sqlite feature's client, with the SQLite it bundles, as the
 # version graph's Rust engine binds it.
 rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
+# The sqlite feature's time zones (#618): a notice's quiet hours and
+# digests read a recipient's wall time, which Postgres reads from its own
+# zone database and a SQLite file has none of, so the IANA database is
+# bundled into the binary (tzdb-bundle-always), as the engine's calendar
+# bundles it, and neither the host's zone files nor its system zone.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"], optional = true }
 # The postgres feature's pool (D57), over the tokio-postgres above, with the
 # TLS of the http-client feature (native-tls) for a connection string.
 deadpool-postgres = { version = "0.14.2", default-features = false, features = ["rt_tokio_1"], optional = true }
@@ -121,7 +127,7 @@ postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:n
 # them, on tokio's blocking pool. With it, a worker as a function its host
 # calls with a connection, the time and a limit, which needs no runtime, and
 # the loop on tokio over it (D116).
-sqlite = ["dep:rusqlite", "tokio/rt", "tokio-util/rt"]
+sqlite = ["dep:rusqlite", "dep:jiff", "tokio/rt", "tokio-util/rt"]
 # A bucket on Google Cloud Storage (D54): GcsBucket, the Bucket a stack
 # server, job or worker opens for each bucket its APIs list, over Cloud
 # Storage's JSON API through the http-client feature's client, as the

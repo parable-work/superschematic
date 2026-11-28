@@ -53,6 +53,8 @@ func (w *TypeScriptWorker) planRuntimeHandler(o *tsrestgen.APIOutput, info tsres
 	case tsrestgen.WorkerSearch:
 		w.Handler = "indexSearchMessage"
 		w.HandlerOptions = true
+	case tsrestgen.WorkerAudience:
+		w.Handler = "resolveAudienceMessage"
 	}
 }
 
@@ -66,6 +68,8 @@ func (w *TypeScriptWorker) HandlerPiece() string {
 		return "the notifier (D153)"
 	case "indexSearchMessage":
 		return "search's indexing (D155)"
+	case "resolveAudienceMessage":
+		return "the audience's resolving (D156)"
 	}
 	return ""
 }

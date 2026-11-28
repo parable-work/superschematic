@@ -30,6 +30,8 @@ var featureServices = []string{
 	tsFixtures + "/fixture-agent-runs-db",
 	tsFixtures + "/fixture-agent-runs-go-api",
 	tsFixtures + "/fixture-aliased-db",
+	tsFixtures + "/fixture-audience-queue-api",
+	tsFixtures + "/fixture-audience-queue-db",
 	tsFixtures + "/fixture-audience-behaviors-api",
 	tsFixtures + "/fixture-audience-behaviors-db",
 	tsFixtures + "/fixture-calendar-db",

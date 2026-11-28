@@ -777,6 +777,27 @@ func tablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema, first bool)
 		case td == nil:
 		case td.Audience != nil:
 			tables[i].Audience = AudienceOf(td)
+			if td.Audience.Queue != "" && td.Audience.InheritFrom != "" {
+				var parent TableModel
+				for _, fd := range td.Fields {
+					if fd != nil && fd.Name == td.Audience.InheritFrom && fd.Relation != nil {
+						for j := range tables {
+							if tables[j].Type == fd.Relation.Type {
+								parent = tables[j]
+							}
+						}
+					}
+				}
+				resolve, err := AudienceResolveSQL(tables[i], parent, td.Audience.InheritFrom)
+				if err != nil {
+					refused[td.Name] = fmt.Errorf("table %s: %w", td.Name, err)
+					if first {
+						return nil, refused
+					}
+					continue
+				}
+				tables[i].Audience.Resolve = resolve
+			}
 		case td.AccessGrants != nil:
 			tables[i].Access = AccessGrants
 		case td.AccessLog != nil:
@@ -844,6 +865,57 @@ type AudienceModel struct {
 	Effective string
 	Agents    string
 	Probe     string
+
+	// Resolve is the statement that resolves again a batch of the table's
+	// rows that inherit from one parent, on a table whose @audience names
+	// a queue (#734), on Postgres; empty for any other table and for a
+	// view. Its parameters are the parent's key as text ($1), the last key
+	// of the batch before as text, or null for the first ($2), and the
+	// batch's size ($3). It updates each row of the batch with no change,
+	// so the row's own trigger resolves it from the parent, in key order,
+	// and answers one row: how many it resolved (resolved, a bigint) and
+	// the batch's last key as text (last), null once none is left.
+	Resolve string
+}
+
+// AudienceResolveSQL is the Resolve statement of table, whose @audience
+// inherits from the relation inheritFrom to parent.
+func AudienceResolveSQL(table, parent TableModel, inheritFrom string) (string, error) {
+	var key, fk, audience *ColumnModel
+	for i := range table.Columns {
+		c := &table.Columns[i]
+		switch {
+		case c.Key && key == nil:
+			key = c
+		case c.Field == inheritFrom && c.Relation != "":
+			fk = c
+		case c.Field == ir.AudienceField:
+			audience = c
+		}
+	}
+	parentKey := parent.KeyColumn()
+	if key == nil || fk == nil || audience == nil || parentKey == nil {
+		return "", fmt.Errorf("@audience on %s: table %s has no key, no column of inheritFrom %s or no audience column, or %s has no key", table.Type, table.Name, inheritFrom, parent.Type)
+	}
+	// The foreign key holds the parent's key, of its type.
+	of := *fk
+	of.Type = parentKey.Type
+	// cast is the column and a text parameter compared with it: the
+	// parameter as the column's type, or both as text where the column's
+	// type is the generator's.
+	cast := func(c *ColumnModel, param string) (string, string) {
+		if c.Type == "" {
+			return c.Quoted + "::text", param
+		}
+		return c.Quoted, param + "::" + strings.ToLower(c.Type)
+	}
+	k, after := cast(key, "$2::text")
+	p, parentParam := cast(&of, "$1::text")
+	return fmt.Sprintf("WITH next AS (SELECT %s AS k FROM %s WHERE %s = %s AND %s = 'inherit' AND ($2::text IS NULL OR %s > %s) ORDER BY 1 LIMIT $3), "+
+		"resolved AS (UPDATE %s SET %s = %s WHERE %s IN (SELECT k FROM next) RETURNING %s AS k) "+
+		"SELECT (SELECT count(*) FROM resolved) AS resolved, (SELECT k::text FROM resolved ORDER BY k DESC LIMIT 1) AS last",
+		k, table.Quoted, p, parentParam, audience.Quoted, k, after,
+		table.Quoted, audience.Quoted, audience.Quoted, k, k), nil
 }
 
 // AudienceOf is the audience model of td, an @audience table.

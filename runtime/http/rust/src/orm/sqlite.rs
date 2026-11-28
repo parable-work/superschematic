@@ -28,7 +28,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
-pub use super::sqlite_file::{connect, Database, DatabaseOptions};
+pub use super::sqlite_file::{connect, Database, DatabaseOptions, HeldWrite};
 
 // The SQLite client the repositories run on, for a types crate's `orm`
 // module and its callers to name without a version of their own.
@@ -310,6 +310,12 @@ impl Tables {
     /// The keys of the database's `Encrypted<T>` fields, when given.
     pub fn keys(&self) -> Option<&Arc<dyn FieldKeys>> {
         self.keys.as_ref()
+    }
+
+    /// What runs the behaviors of the tables that compose them, when
+    /// given.
+    pub fn rules(&self) -> Option<&Arc<dyn Rules>> {
+        self.rules.as_ref()
     }
 
     /// The definition of the database's tables.

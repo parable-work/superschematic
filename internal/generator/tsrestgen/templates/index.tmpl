@@ -12,6 +12,9 @@ export * from './providers';
 {{- if .HasRuntime }}
 export * from './runtime';
 {{- end }}
+{{- if .HasAudienceQueues }}
+export * from './audience';
+{{- end }}
 {{- if .HasEnvConfig }}
 export * from './config';
 {{- end }}

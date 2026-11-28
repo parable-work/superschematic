@@ -352,6 +352,10 @@ type ormAudience struct {
 	Effective string `json:"effective"`
 	Agents    string `json:"agents"`
 	Probe     string `json:"probe,omitempty"`
+	// Resolve is the statement that resolves a batch of the table's rows
+	// that inherit from one parent, on a table whose @audience names a
+	// queue (#734): orm::resolve_audience runs it.
+	Resolve string `json:"resolve,omitempty"`
 }
 
 type ormFence struct {
@@ -599,7 +603,7 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			Access:     t.Access,
 		}
 		if a := t.Audience; a != nil {
-			table.Audience = &ormAudience{Effective: a.Effective, Agents: a.Agents, Probe: a.Probe}
+			table.Audience = &ormAudience{Effective: a.Effective, Agents: a.Agents, Probe: a.Probe, Resolve: a.Resolve}
 		}
 		if t.Search {
 			table.Search = t.SearchColumn
@@ -760,6 +764,12 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				// index (D186).
 				onSQLite.Calendar = onPostgres.Calendar
 				onSQLite.Searchable = sqliteSearchable(onPostgres.Searchable)
+				// The notifier (D153), the parties, the inbound path and
+				// conversations (D157) and the agent orchestration (D158)
+				// read the same tables on SQLite (#618).
+				onSQLite.Events = onPostgres.Events
+				onSQLite.Notifier = onPostgres.Notifier
+				onSQLite.Party, onSQLite.Conversations, onSQLite.Agents = onPostgres.Party, onPostgres.Conversations, onPostgres.Agents
 			}
 			sqlite.Tables = append(sqlite.Tables, onSQLite)
 		}

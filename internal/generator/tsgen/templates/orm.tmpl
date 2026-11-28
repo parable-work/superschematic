@@ -335,7 +335,7 @@ export const {{.Const}}: TableDefinition = {
   search: {{jsonString .Search}},
 {{- end}}
 {{- if .Audience}}
-  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}} },
+  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}}{{if .Audience.Resolve}}, resolve: {{jsonString .Audience.Resolve}}{{end}} },
 {{- end}}
 {{- if .Calendar}}
   calendar: [

@@ -144,6 +144,17 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(accessFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove access.go: %w", err)
 	}
+	// audience_resolve.go resolves the rows whose @audience names a queue
+	// (#734); a database with none has none, so a file an earlier build
+	// wrote goes.
+	audienceResolveFile := filepath.Join(outputDir, "audience_resolve.go")
+	if output.Access != nil && len(output.Access.Resolves) > 0 {
+		if err := generateFile(generator, "audience_resolve.tmpl", audienceResolveFile, output); err != nil {
+			return fmt.Errorf("failed to write audience_resolve.go: %w", err)
+		}
+	} else if err := os.Remove(audienceResolveFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove audience_resolve.go: %w", err)
+	}
 	// access_sqlite.go holds the same access on SQLite (D182, #611), for a
 	// database whose repositories keep to a caller and that lists sqlite.
 	accessSQLiteFile := filepath.Join(outputDir, "access_sqlite.go")
