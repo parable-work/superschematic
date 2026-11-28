@@ -15,7 +15,7 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
@@ -198,9 +198,16 @@ message is filed onto are read through their repository as the caller.
 The approval policy is a `SendApproval`: the app's (`ApprovalFunc`), or
 the agent dispatcher, which is built before the path and given it
 (`SetInbound`). A run request's message and grant are in base62, as the
-repositories write a key. A Go server over a database that lists `sqlite`
-first is refused the parties' tables, which run on SQLite and D1 in
-TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+repositories write a key.
+
+On SQLite the Go runtime runs the same inbound path (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Orchestration()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). A message's
+files go through the SQLite database's attachments, and `RunQueue` claims
+the run requests on SQLite.
 
 ## In Rust
 

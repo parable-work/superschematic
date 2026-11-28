@@ -16,8 +16,9 @@
 // as the caller a context names (Host.As): Record, Find and Update take a
 // filter or an update in the repositories' filter syntax, as JSON, so a
 // recipient's read of a record keeps to the record's audience and the
-// recipient's grants as any read of theirs does (D156, D180). Postgres
-// alone, as the loader holds the notifier to.
+// recipient's grants as any read of theirs does (D156, D180). The
+// statements are Postgres's, and SQLite's on a DialectHost that says so
+// (dialect.go, #618), as the TypeScript notifier runs on both (D189).
 package notifications
 
 import (
@@ -123,10 +124,14 @@ type Queue interface {
 
 // Column is a column of one of the notifier's tables: its name, quoted,
 // and whether it holds a UUID, which the notifier writes in the
-// database's form and reads in base62.
+// database's form and reads in base62. SQLite is how a SQLite column holds
+// it (SQLiteJSON, SQLiteUUIDs, SQLiteTime, SQLiteBool; none for text, a
+// number or a UUID), which the generated ORM of a database that lists
+// sqlite writes (#618).
 type Column struct {
-	Name string `json:"name"`
-	UUID bool   `json:"uuid,omitempty"`
+	Name   string `json:"name"`
+	UUID   bool   `json:"uuid,omitempty"`
+	SQLite string `json:"sqlite,omitempty"`
 }
 
 // Part is one of the notifier's tables (ir.NotifierParts, and

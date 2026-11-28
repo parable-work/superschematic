@@ -14,9 +14,9 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
-| the same notifier in the Go runtime, on Postgres ([in Go](#in-go)) | a route to an agent in Go (D158 is TypeScript's alone so far) |
+| the same notifier in the Go runtime, on Postgres and SQLite ([in Go](#in-go)) | a route to an agent in Go (D158 is TypeScript's alone so far) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
@@ -352,3 +352,15 @@ statuses or reads inbound messages is whether it implements
 `providers.ChannelStatusReader` and `providers.ChannelInboundReader`. A
 route that names an agent is logged and reaches no one: the Go runtime
 does not serve agent runs yet.
+
+On SQLite the Go runtime runs the same notifier (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Notifications()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). Its
+`Raise` enqueues in the caller's `*SQLiteTx`, so an event commits with
+the change, and `WorkerQueue()` claims the dispatch queue on SQLite, which
+has no slots and no next due time (D145). The wall time of quiet hours
+and digests is read from Go's zone database there, which the runtime
+carries.

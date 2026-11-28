@@ -73,6 +73,18 @@ func goRuntimeModule(t *testing.T, db, name, source, run string, modules map[str
 	httpRuntime := naming.Default().HTTPRuntimeGoModule
 	env = append([]string{"CGO_LDFLAGS=" + archiveLDFlags(t)}, env...)
 	edit := []string{"mod", "edit", "-require=" + httpRuntime + "@v0.0.0-00010101000000-000000000000", "-replace=" + httpRuntime + "=" + paths.HTTPRuntimeGo}
+	// A source that runs on SQLite (#618) reads the SQLite DDL the build
+	// wrote, through the driver its module requires.
+	if strings.Contains(source, `"modernc.org/sqlite"`) {
+		ddl, err := os.ReadFile(filepath.Join(SQLDir(outputRoot, db), SQLiteSubdir, "create.sql"))
+		if err != nil {
+			t.Fatalf("the build wrote no SQLite DDL for %s: %v", db, err)
+		}
+		if err := os.WriteFile(filepath.Join(ormDir, "testdata", "sqlite.sql"), ddl, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		edit = append(edit, "-require=modernc.org/sqlite@"+sqliteDriverVersion)
+	}
 	for _, path := range sortedModuleKeys(modules) {
 		edit = append(edit, "-require="+path+"@v0.0.0-00010101000000-000000000000", "-replace="+path+"="+modules[path])
 	}

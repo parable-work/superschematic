@@ -2409,15 +2409,42 @@ statements in SQLite's words, as the TypeScript runtime does on SQLite
 | Indexing | `IndexSearch` reads the row and writes its index row with its access columns in one statement; `ReindexSearch` indexes a table's rows one at a time |
 
 Embeddings are refused on SQLite: a search with `Vector` is `Invalid`, and
-`Embeddings` in the options is `ErrSQLiteEmbeddings`. A Go server whose
-database lists `sqlite` first is still refused the notifier, the parties
-and the agents, which run in TypeScript alone there (D189).
+`Embeddings` in the options is `ErrSQLiteEmbeddings`.
+
+The notifier, the parties and the agent dispatcher run on SQLite too
+(#618), as they do in TypeScript there (D189).
+`(*SQLiteDatabase).Notifications()` and `Orchestration()` are the hosts the
+HTTP runtime's `notify`, `inbound` and `agents` packages run through, so
+`notify.New(db.Notifications(), ...)` takes either database. The runtime
+writes each statement over the notifier's and the orchestration's own
+tables in SQLite's words:
+
+| Part | On SQLite |
+| --- | --- |
+| A statement | each parameter `?n`; a list bound as JSON text and read through `json_each`; a time bound as RFC 3339 text to the millisecond; a boolean as 1 or 0 |
+| A row read back | each cell as the Postgres driver reads its column: JSON decoded, a time a `time.Time`, a boolean `true` or `false`, a UUID in base62. The definitions name how a SQLite column holds each |
+| A recipient's wall time | read from Go's zone database, which the runtime carries, since SQLite holds none |
+| An enqueue | the queue's statement on SQLite, in the caller's `*SQLiteTx`, so an event commits with the change that raised it |
+| A claim | the queue's claims on SQLite. A queue there has no slots and no next due time (D145): a worker in drain mode takes its slot and stops once idle |
+| A behavior's operation | a run's Lease, Retries and status through the core, in the repository's transaction on SQLite |
+
+A record a recipient reads goes through its repository on SQLite, which
+keeps it to the record's audience and the recipient's grants. A
+`@versioned` table, as the agents' definitions are, keeps its rows and its
+version on SQLite, and its history by the SQLite DDL's row triggers
+(D189). The Go repository reads no history there, as the TypeScript one
+reads none: `GetVersion`, `GetVersions`, `ListVersions`, `GetAsOf` and the
+`ListAsOfBy...` reads answer `ErrSQLiteUnsupported`. The generated Go
+server's wiring of the notifier and its workers over a database that
+lists `sqlite` first is a follow-up: the implementation builds them over
+`Deps.DB` itself.
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
-`@versioned` table, an `Encrypted<T>` field, a `Mergeable` table, and a
-version graph's released rows. The SQLite DDL refuses a vector and a
-`@versioned` table for the whole service. A timestamp is held to the millisecond, so two rows written in one
+`@versioned` table whose history is kept for some days, an `Encrypted<T>`
+field, a `Mergeable` table, and a version graph's released rows. The
+SQLite DDL refuses a vector for the whole service, and a `@versioned`
+history kept for some days, pinned or partitioned. A timestamp is held to the millisecond, so two rows written in one
 millisecond tie in an order by it, and their keys break the tie.
 
 An enqueue on SQLite takes the transaction itself

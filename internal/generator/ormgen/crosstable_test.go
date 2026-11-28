@@ -14,8 +14,9 @@ import (
 )
 
 // crossTablesOnSQLite are the fixtures whose DB service lists the sqlite
-// dialect, whose ORM holds the reads across tables on SQLite too (#615).
-var crossTablesOnSQLite = map[string]bool{"fixture-recurrence-db": true, "fixture-search-db": true}
+// dialect, whose ORM holds the reads across tables on SQLite too (#615),
+// and the notifier, the parties and the agents (#618).
+var crossTablesOnSQLite = map[string]bool{"fixture-recurrence-db": true, "fixture-search-db": true, "fixture-notifications-db": true, "fixture-parties-db": true, "fixture-agent-runs-db": true}
 
 // crossTablesOutput is the ORM of svc, written, and the directory it is
 // in; on SQLite too for a fixture of crossTablesOnSQLite.

@@ -738,16 +738,27 @@ func (n *Notifier) preferenceOf(ctx context.Context, h notifications.Host, recip
 }
 
 // wallOf is the wall time of at in zone, from Postgres, which holds the
-// zone database: its minutes of the day, its second, and its date.
+// zone database, or on SQLite, which holds none, from Go's (#618), as the
+// TypeScript notifier reads it from Intl there (D189): its minutes of the
+// day, its second, and its date.
 func (n *Notifier) wallOf(ctx context.Context, h notifications.Host, at time.Time, zone string) (int, int, string, error) {
-	rows, err := h.Query(ctx, `SELECT to_char(($1::timestamptz) AT TIME ZONE $2::text, 'HH24:MI:SS YYYY-MM-DD') AS wall`, at.UTC(), zone)
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("notify: the wall time in %s: %w", zone, err)
+	var wall string
+	if notifications.OnSQLite(h) {
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			return 0, 0, "", fmt.Errorf("notify: the wall time in %s: %w", zone, err)
+		}
+		wall = at.In(loc).Format("15:04:05 2006-01-02")
+	} else {
+		rows, err := h.Query(ctx, `SELECT to_char(($1::timestamptz) AT TIME ZONE $2::text, 'HH24:MI:SS YYYY-MM-DD') AS wall`, at.UTC(), zone)
+		if err != nil {
+			return 0, 0, "", fmt.Errorf("notify: the wall time in %s: %w", zone, err)
+		}
+		if len(rows) == 0 {
+			return 0, 0, "", fmt.Errorf("notify: the wall time in %s: no row", zone)
+		}
+		wall = textOf(rows[0]["wall"])
 	}
-	if len(rows) == 0 {
-		return 0, 0, "", fmt.Errorf("notify: the wall time in %s: no row", zone)
-	}
-	wall := textOf(rows[0]["wall"])
 	clock, date, _ := strings.Cut(wall, " ")
 	parts := strings.Split(clock, ":")
 	var hms [3]int
@@ -1563,7 +1574,8 @@ func (n *Notifier) WorkerQueue() worker.Queue {
 // and returns how many.
 func (n *Notifier) Prune(ctx context.Context, limit int) (int, error) {
 	t := n.deliveries
-	deleted, err := n.host.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE %s IN (SELECT %s FROM %s WHERE %s < $1 LIMIT $2)", t.Table, t.c("id"), t.c("id"), t.Table, t.c("endedAt")), n.now().Add(-n.retain), limit)
+	sql, args := notifications.Statement(n.host, fmt.Sprintf("DELETE FROM %s WHERE %s IN (SELECT %s FROM %s WHERE %s < $1 LIMIT $2)", t.Table, t.c("id"), t.c("id"), t.Table, t.c("endedAt")), []any{n.now().Add(-n.retain), limit})
+	deleted, err := n.host.Exec(ctx, sql, args...)
 	return int(deleted), err
 }
 

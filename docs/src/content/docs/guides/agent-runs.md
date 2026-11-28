@@ -14,7 +14,7 @@ stop switch ends every run in flight.
 
 | Built | Not built yet |
 | --- | --- |
-| `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
+| `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
 | autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
@@ -23,7 +23,7 @@ stop switch ends every run in flight.
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
 | a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; a generated Go server that builds the dispatcher into its `Deps`, and a Rust server that does the same; `@autonomy` in a Go server, which serves no MCP endpoint |
-| the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres | |
+| the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres and SQLite | |
 | the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres | |
 
 [D158](https://github.com/parable-work/superschematic/issues/607) and [D183](https://github.com/parable-work/superschematic/issues/612)
@@ -332,6 +332,17 @@ sandbox's side is `providers.RunAgentInstance`. A Go server is refused an
 operation's `@autonomy`, which holds an agent run's calls of the API's MCP
 tools, since it serves no MCP endpoint; `MCPGate` is that gate for the day
 one does.
+
+On SQLite the Go runtime runs the same dispatcher (#618), as the
+TypeScript one does (D189). `(*SQLiteDatabase).Orchestration()` is its
+host over the SQLite file, and the runtime writes its statements over the
+orchestration's tables in SQLite's words
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). A
+run's Lease, Retries and status run through the behaviors' core in the
+SQLite repository's transaction, the definitions keep their rows and
+version there, which a run records, and `WorkerQueue()` claims the requests
+on SQLite. The Go repository reads no definition's history on SQLite, as
+the TypeScript one reads none.
 
 ## In Rust
 
