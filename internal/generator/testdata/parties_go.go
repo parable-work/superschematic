@@ -537,6 +537,13 @@ func TestParties(t *testing.T) {
 		if w.files.size() != 1 {
 			t.Fatalf("%d objects after filing", w.files.size())
 		}
+		// A run request run again, after its handler failed, files nothing
+		// twice.
+		filer := must(w.inbound.PrincipalOf(ctx, orchestration.PartyRef{Table: "Contact", Key: w.dee}, ""))
+		check(t, w.inbound.File(ctx, inbound.FileInput{Message: outcome.Message, To: rowrefs.RowRef{Table: "Report", Key: report}, As: filer}))
+		if again := w.attachments("Report", report); len(again) != 1 {
+			t.Fatalf("the report's files after filing again: %+v", again)
+		}
 		// The message is on each row it references: the job, the report and
 		// the party.
 		for _, row := range [][2]string{{"Job", w.job}, {"Report", report}, {"Contact", w.dee}} {
