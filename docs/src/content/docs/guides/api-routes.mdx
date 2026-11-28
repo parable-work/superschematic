@@ -3690,9 +3690,25 @@ issuesapi.RegisterRoutes(router, issuesapi.Config{
 })
 ```
 
-A Rust server keeps each operation a method of the implementation's trait,
-written over the database's `references()` and `attachments()`, until its
-generator writes the handlers. The released queue's worker, which deletes an
+The Rust server serves them from the crate's `src/rowfeatures.rs`, through
+the `references()` and `attachments()` of the database's repositories in
+its Rust types, which the HTTP runtime's `orm::rowfeatures::routes` runs as
+the route's caller. `Implementations::new` takes the pool, or the SQLite
+file of a database that lists sqlite first, and the bucket that holds the
+files; the generated entrypoint passes the ones it opened for `Deps`:
+
+```rust
+let implementations = issues_api::Implementations::new(handlers, pool.clone(), Arc::clone(&issue_files));
+```
+
+An add of a reference, a begin of an upload and a filing run in a
+transaction of their own; the other operations run as their statements do,
+so a completion whose bytes differ removes the file and refuses, and the
+removal stays. The database's Rust types are generated, and a
+content-addressed bucket (D142) is refused for the files, as in Go.
+
+On every server the interface of your implementation has no method for a
+row feature operation. The released queue's worker, which deletes an
 object once no file names it, stays the app's: it calls
 `orm.asSystem().attachments.release(message, { bucket })`.
 
