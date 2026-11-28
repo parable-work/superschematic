@@ -25,9 +25,9 @@ import (
 // that entry's build read. A restore writes the entry's depfiles back into
 // dist, so the stamp it writes and the next hash agree.
 
-// depfiles are the depfiles a build writes, each at its path under the
-// schemas root.
-var depfiles = []struct {
+// knownDepfiles are the depfiles a build writes, each at its path under
+// the schemas root.
+var knownDepfiles = []struct {
 	name string
 	path func(schemasRoot, service string) string
 }{
@@ -45,7 +45,7 @@ func entryDepfilePath(entry, depfile string) string {
 func localDepfiles(repoRoot, service string) map[string][]byte {
 	found := map[string][]byte{}
 	schemasRoot := filepath.Join(repoRoot, SchemasDir)
-	for _, d := range depfiles {
+	for _, d := range knownDepfiles {
 		if data, err := os.ReadFile(d.path(schemasRoot, service)); err == nil {
 			found[d.name] = data
 		}
@@ -69,7 +69,7 @@ func entryDepfiles(entry string, names []string) map[string][]byte {
 func stageDepfiles(staging, repoRoot, service string) ([]string, error) {
 	local := localDepfiles(repoRoot, service)
 	var names []string
-	for _, d := range depfiles {
+	for _, d := range knownDepfiles {
 		data, ok := local[d.name]
 		if !ok {
 			continue
@@ -99,7 +99,7 @@ func restoreDepfiles(entry, repoRoot string, m manifest) error {
 		kept[name] = true
 	}
 	schemasRoot := filepath.Join(repoRoot, SchemasDir)
-	for _, d := range depfiles {
+	for _, d := range knownDepfiles {
 		path := d.path(schemasRoot, m.Name)
 		if !kept[d.name] {
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
