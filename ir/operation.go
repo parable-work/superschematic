@@ -65,6 +65,12 @@ type OperationSet struct {
 	// [GraphOperationsConfig].
 	GraphOperations *GraphOperationsConfig `json:"graphOperations,omitempty" yaml:"graphOperations,omitempty"`
 
+	// RowFeatureOperations is @rowFeatureOperations(Type, { ... }) on a
+	// class with no methods (#723, D154): the loader fills Operations with
+	// the operations of the table's references and files. Nil for every
+	// other set. See [RowFeatureOperationsConfig].
+	RowFeatureOperations *RowFeatureOperationsConfig `json:"rowFeatureOperations,omitempty" yaml:"rowFeatureOperations,omitempty"`
+
 	// Auth, Permissions and Public are a @behaviorOperations set's and a
 	// @graphOperations set's user clause, @auth, @requirePermission and
 	// @publicRoute on its class

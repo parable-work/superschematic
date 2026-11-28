@@ -1,5 +1,25 @@
 {
   "dialect": "sqlite",
+  "rows": [
+    {
+      "insert": "INSERT INTO \"channel_trust\" (\"channel_kind\", \"level\", \"permissions\")\nSELECT 'sms', 'low', '[]'\nWHERE NOT EXISTS (SELECT 1 FROM \"channel_trust\" WHERE \"channel_kind\" = 'sms')\nON CONFLICT DO NOTHING",
+      "key": "{\"channelKind\":\"sms\"}",
+      "origin": "ChannelTrust",
+      "table": "channel_trust"
+    },
+    {
+      "insert": "INSERT INTO \"channel_trust\" (\"channel_kind\", \"level\", \"permissions\")\nSELECT 'email', 'standard', NULL\nWHERE NOT EXISTS (SELECT 1 FROM \"channel_trust\" WHERE \"channel_kind\" = 'email')\nON CONFLICT DO NOTHING",
+      "key": "{\"channelKind\":\"email\"}",
+      "origin": "ChannelTrust",
+      "table": "channel_trust"
+    },
+    {
+      "insert": "INSERT INTO \"notice_preference\" (\"principal\", \"event_kind\", \"urgency\", \"channels\")\nSELECT NULL, '*', '*', '[\"sms\",\"email\"]'\nWHERE NOT EXISTS (SELECT 1 FROM \"notice_preference\" WHERE \"principal\" IS NULL AND \"event_kind\" = '*' AND \"urgency\" = '*')\nON CONFLICT DO NOTHING",
+      "key": "{\"eventKind\":\"*\",\"principal\":null,\"urgency\":\"*\"}",
+      "origin": "NoticePreference",
+      "table": "notice_preference"
+    }
+  ],
   "service": "fixture-notifications-db",
   "tables": [
     {

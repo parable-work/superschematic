@@ -34,6 +34,11 @@ type Layout struct {
 	// none for a layout whose uses name none.
 	Declarations []json.RawMessage `json:"declarations,omitempty"`
 
+	// Permissions is where a permissions read is answered (D200): the
+	// database's identity tables; nil for a layout that names none, whose
+	// reads answer no subject.
+	Permissions *Permissions `json:"permissions,omitempty"`
+
 	// checks is the define check of each type, made once per core a
 	// command runs on over this layout.
 	checks layoutChecks

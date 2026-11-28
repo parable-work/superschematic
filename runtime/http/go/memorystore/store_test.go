@@ -215,6 +215,10 @@ func TestChannels(t *testing.T) {
 	if n := counterValue(t, reader, MetricPublish, "stock-samples", OutcomeOK); n != 4 {
 		t.Errorf("ok publishes = %d, want 4", n)
 	}
+	// The deliverer counts a message once its handlers have run, so a
+	// handler's wake can come before the count: wait for it, then hold it
+	// to 2, each message once however many handlers it woke.
+	waitFor(t, func() bool { return counterValue(t, reader, MetricReceive, "stock-changed", "") >= 2 })
 	if n := counterValue(t, reader, MetricReceive, "stock-changed", ""); n != 2 {
 		t.Errorf("stock-changed receives = %d, want 2, each message once however many handlers it woke", n)
 	}

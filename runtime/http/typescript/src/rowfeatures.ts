@@ -190,6 +190,8 @@ export interface References {
 
 /** The attachment operations of an ORM whose database declares @attachments (orm.attachments). */
 export interface Attachments {
+  /** Whether table is an @attachments table, whose rows hold files; no other is asked for a file. */
+  holds(table: string): boolean;
   /**
    * Starts an upload of a file to row: a pending file, held to the
    * declaration's bounds with the row's other files and uploads, and a URL
@@ -747,6 +749,10 @@ function attachmentsOf(host: RowFeatureHost): Attachments {
   };
 
   return {
+    holds(table) {
+      return Object.hasOwn(definition.holders, table);
+    },
+
     async begin(input, options) {
       const holder = holderOf(input.to.table);
       checkName(input.name);

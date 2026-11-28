@@ -1,0 +1,22 @@
+{
+  "name": "@schemas/fixture-references-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the fixture-references-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/fixture-references-api-api": "workspace:*",
+    "@schemas/fixture-references-api-types": "workspace:*",
+    "@schemas/fixture-references-db-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "7.0.2"
+  }
+}

@@ -227,7 +227,10 @@ is `extension:<name>` and whose permissions are its role: what it writes
 through an ORM opened with no user is recorded as the provider.
 `extensionAuthenticator` authenticates a provider that calls the app with
 its own key, such as a messaging bridge that connects outward and relays
-replies, as that principal.
+replies, as that principal. `examples/runtime-providers`'s `chat-bridge`
+is one: its loop relays what a messaging network received to the slot's
+inbound route with a key that can only relay messages
+([a messaging bridge](/superschematic/guides/parties/#a-messaging-bridge)).
 
 ## Credentials never reach the caller
 

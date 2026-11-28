@@ -2,6 +2,7 @@ package sqlgen
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -75,9 +76,17 @@ func TestSearchTriggersOnSQLite(t *testing.T) {
 		t.Errorf("a table with no deleted_at enqueues every insert:\n%s", definitions["trg_folder_search_insert"])
 	}
 
-	up, down := SearchFTS("search_index", sqliteQuote)
-	if len(up) != 4 || len(down) != 4 {
+	up, down := SearchFTS("search_index", sqliteQuote, false)
+	if len(up) != 9 || len(down) != 4 {
 		t.Fatalf("the FTS5 piece is %d statements and its down %d", len(up), len(down))
+	}
+	// It runs again over what it made: its down first, its words filled
+	// from the index rows last (#740).
+	if !slices.Equal(up[:4], down) || !strings.HasPrefix(up[8], `INSERT INTO "search_index_fts" (title, body, comments, files, ref, source_table, source_key)`) {
+		t.Errorf("the FTS5 piece does not drop first and fill last:\n%s", strings.Join(up, "\n"))
+	}
+	if folded, _ := SearchFTS("search_index", sqliteQuote, true); !strings.Contains(folded[4], "tokenize = 'unicode61 remove_diacritics 2'") {
+		t.Errorf("a folding index's FTS5 table is %s", folded[4])
 	}
 	for _, want := range []string{
 		`CREATE VIRTUAL TABLE "search_index_fts" USING fts5(title, body, comments, files, ref, source_table UNINDEXED, source_key UNINDEXED, tokenize = 'unicode61 remove_diacritics 0')`,

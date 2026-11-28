@@ -2,6 +2,7 @@ import type { SqlDatabase, SqlValue } from './d1.js';
 import type { OrmOptions, OrmQueryable } from './orm.js';
 import { HttpProblem } from './problem.js';
 import { wakeAfterEnqueue } from './queue-wake.js';
+import { readPermissions } from './rules-permissions.js';
 import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
@@ -266,7 +267,9 @@ export type CoreReadRequest =
   /** The row of a key of a use's shared table, kept for the type's table as a whole (D103's step 4), with its version. */
   | { readonly kind: 'sharedRow'; readonly type: string; readonly useId: string; readonly table: string; readonly key: string }
   /** The live versions of the types that compose a behavior, in name order (D77's primitive 3): what an operation of the namespace runs over. The adapter answers its layout's types that compose it, since a table's API authorizes. */
-  | { readonly kind: 'composing'; readonly behavior: string };
+  | { readonly kind: 'composing'; readonly behavior: string }
+  /** The permissions each subject holds now (D200): what an Approvals requirement with recheckPermission reads of its signers. The adapter answers it from the layout's identity tables, and leaves out a subject it cannot answer for, which the core holds to none. */
+  | { readonly kind: 'permissions'; readonly subjects: readonly string[] };
 
 /** One sub-table of a use, as a read across a table names it (D104): the use's id and the sub-table's declared name (superschematic_rules::TableRef). */
 export interface CoreTableRef {
@@ -322,7 +325,9 @@ export type CoreAnswer =
   | { readonly linked: CoreLinkedRows }
   | { readonly sharedRow: CoreSharedRow | null }
   /** The types a composing read asks for (D77's primitive 3), in name order. */
-  | { readonly specs: readonly CoreTypeSpec[] };
+  | { readonly specs: readonly CoreTypeSpec[] }
+  /** The permissions a permissions read asks for, by subject (D200); a subject the host cannot answer for is absent. */
+  | { readonly permissions: Readonly<Record<string, readonly string[]>> };
 
 /** One answered request, and how many locks the host held when it made the read. */
 export interface CoreAnswered {
@@ -689,6 +694,29 @@ export interface RulesLayout {
   readonly types: Readonly<Record<string, RulesTable>>;
   /** The declaration files of the declarative behaviors (D103's step 5) the tables' uses name, each whole, which the adapter hands its core (RulesCore.declare) before it checks the layout's specs; absent for none. */
   readonly declarations?: readonly object[];
+  /** Where the adapter answers the core's permissions read (D200): the database's identity tables; absent for a layout that names none, whose reads answer no subject. */
+  readonly permissions?: RulesPermissions;
+}
+
+/**
+ * The identity tables a permissions read reads (D200), each table and
+ * column unquoted, as behaviorlayout.Permissions writes them: the user
+ * table and its key column, the credential's disabled and pending columns,
+ * the role grants, and the roles' permissions.
+ */
+export interface RulesPermissions {
+  readonly users: string;
+  readonly user: RulesColumn;
+  readonly credentials: string;
+  readonly credentialUser: string;
+  readonly disabledAt: string;
+  readonly pendingAt: string;
+  readonly grants: string;
+  readonly grantUser: string;
+  readonly grantRole: string;
+  readonly roles: string;
+  readonly roleKey: string;
+  readonly rolePermissions: string;
 }
 
 // ---- The store ----
@@ -1816,6 +1844,10 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
           .map(name => host.layout.types[name]!.spec)
           .filter(spec => (spec.uses ?? []).some(use => use.behavior === request.behavior)),
       };
+    case 'permissions':
+      // The permissions each subject holds now (D200), from the layout's
+      // identity tables.
+      return { permissions: await readPermissions(host.store, host.layout.permissions, request.subjects) };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
   }
@@ -2020,7 +2052,7 @@ function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStateme
   const dialect = host.store.dialect;
   const fences: RulesStatement[] = [];
   for (const { request, answer, held } of reads) {
-    if ((held ?? 0) === 0 || request.kind === 'spec' || request.kind === 'composing') continue;
+    if ((held ?? 0) === 0 || request.kind === 'spec' || request.kind === 'composing' || request.kind === 'permissions') continue;
     const table = host.layout.types[request.type];
     if (table === undefined) continue;
     if (request.kind === 'row' && 'row' in answer) {

@@ -7,9 +7,9 @@ guide covers it in full.
 
 | Path | What it is |
 |---|---|
-| `schemas/services/tickets-db` | DB, Postgres: `Ticket` raises `ticket.assigned`, `ticket.overdue` (urgent), `ticket.summary` (digest) and `reference.cleared` (record), and its owner sees it with those it names; `Duty` implements Recurrence, whose `recurrence.missed` is urgent; the notifier's tables (`Notice`, `Delivery`, `NoticeRoute`, `NoticePreference`, `Subscription`, `ChannelTrust`, `Reply`) and its queue `NoticeWork`; `ChannelIdentity`, the addresses people are reached at and reply from |
+| `schemas/services/tickets-db` | DB, Postgres: `Ticket` raises `ticket.assigned`, `ticket.overdue` (urgent), `ticket.summary` (digest) and `reference.cleared` (record), and its owner sees it with those it names; `Duty` implements Recurrence, whose `recurrence.missed` is urgent; the notifier's tables (`Notice`, `Delivery`, `NoticeRoute`, `NoticePreference`, `Subscription`, `ChannelTrust`, `Reply`) and its queue `NoticeWork`, with everyone's preference and each channel kind's trust as seed rows (`@seedRows`); `ChannelIdentity`, the addresses people are reached at and reply from |
 | `schemas/services/tickets-api` | API over `tickets-db`: `TicketsApiConfig` names two channel slots, `SMS` and `MAIL`; `Routes` lists and creates routes behind `notifications.routes`; `Notify` drains the notifier's queue, `HearCleared` the queue a deleted ticket's references enqueue on, and `DutyDeadlines` fires each duty's deadlines |
-| `server/server.ts` | What the implementation adds to the generated server: the reply `done 142` (`createRuntimeOptions`), the seed rows, password reset's handlers, and the workers of its own |
+| `server/server.ts` | What the implementation adds to the generated server: the reply `done 142` (`createRuntimeOptions`), password reset's handlers, and the workers of its own |
 
 The channels are the SMS relay and the mail relay of
 `examples/runtime-providers`. Swapping either for another adapter is the
@@ -28,7 +28,9 @@ environment's config alone.
   the ticket gets nothing, and nothing records that they were skipped.
 - **Each person's channels are theirs.** A preference row lists the
   channels in the order a failure falls through, quiet hours and a digest
-  rule. Urgent ignores quiet hours; digest waits for the digest.
+  rule. Urgent ignores quiet hours; digest waits for the digest. Everyone's
+  default and each channel kind's trust are seed rows of the schema, which
+  the migrations write once and never overwrite.
 - **A reply is input.** "ACK 142" by text acknowledges notice 142 and stops
   its escalation. "done 142" by email marks the ticket done as its sender,
   and the echo says how to undo it. By text, which `ChannelTrust` keeps

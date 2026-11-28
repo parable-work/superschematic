@@ -285,8 +285,9 @@ func newWorld(t *testing.T, opts options) *world {
 	for _, who := range [][3]string{{w.ann, phoneAnn, emailAnn}, {w.ben, phoneBen, emailBen}, {w.cal, phoneCal, emailCal}} {
 		w.exec(`INSERT INTO channel_identity (kind, address, principal, trust, verified_at) VALUES ('phone', $1, $2, 'verified', now()), ('email', $3, $2, 'verified', now())`, who[1], rowrefs.UUIDToDB(who[0]), who[2])
 	}
-	w.exec(`INSERT INTO notice_preference (principal, event_kind, urgency, channels) VALUES (NULL, '*', '*', '{sms,email}')`)
-	w.exec(`INSERT INTO channel_trust (channel_kind, level, permissions) VALUES ('sms', 'low', '{}'), ('email', 'standard', NULL)`)
+	// Everyone's preference (SMS, then email) and each channel kind's trust
+	// (SMS low, email standard) are the schema's seed rows (#625), which
+	// create.sql wrote.
 	w.route("Overdue tickets page their people", "ticket.overdue", `[{"path":"owner"},{"path":"watchers"}]`, `[{"afterSeconds":600,"channels":["email"]}]`)
 	return w
 }

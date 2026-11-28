@@ -5,7 +5,7 @@ import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema
 // an encrypted field that stays out of the index; the grants a party
 // reaches rows through; and the queue a write that changes the indexed
 // text enqueues on. Built for Postgres and SQLite, whose TypeScript
-// runtime searches both (D186).
+// runtime searches both (D186), its index folding diacritics (#740).
 export default defineConfig({
   name: "fixture-search-db",
   kind: SchemaKind.DB,
@@ -13,6 +13,6 @@ export default defineConfig({
     types: {
       [TargetLanguage.TypeScript]: { enabled: true }
     },
-    sql: { dialects: ["postgres", "sqlite"] }
+    sql: { dialects: ["postgres", "sqlite"], search: { foldDiacritics: true } }
   }
 });

@@ -89,6 +89,9 @@ import (
 {{- else if .TakesDatabase }}
 	orm "{{ .Deps.ORMModule }}"
 {{- end }}
+{{- if .RowFeatureBucket }}
+	"{{ $.Naming.SchemaRuntimeGoModule }}/rowrefs"
+{{- end }}
 {{- if .RoutesNeedTypes }}
 	types "{{ .TypesModule }}"
 {{- end }}
@@ -135,6 +138,18 @@ type Config struct {
 	// DB is the ORM of {{ .Deps.Database }}, the API's database: the graph
 	// operations read the root, its refs and its commits through it (D138).
 	DB orm.DatabaseInterface
+{{- else if .HasRowFeatureEndpoints }}
+	// DB is the ORM of {{ .Deps.Database }}, the API's database: the references
+	// and files run through its References() and Attachments() (#723).
+	DB orm.DatabaseInterface
+{{- end }}
+{{- if .RowFeatureBucket }}
+
+	// Attachments is the bucket that holds the files (#723), {{ .RowFeatureBucket }}:
+	// an upload's begin and a download sign a URL of it, and an upload's
+	// completion reads the object back. A server builds it from Deps with
+	// bucket.ForAttachments(deps.{{ .RowFeatureBucketField }}).
+	Attachments rowrefs.Bucket
 {{- end }}
 {{- if .HasGraphEndpoints }}
 
@@ -271,6 +286,10 @@ func (c *Config) Validate() error {
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required: the graph operations of {{ .SchemaName }} read through it (D138)")
 	}
+{{- else if .HasRowFeatureEndpoints }}
+	if c.DB == nil {
+		return fmt.Errorf("Config.DB is required: the references and files of {{ .SchemaName }} run through it (#723)")
+	}
 {{- else if .IsPublic }}
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required")
@@ -279,6 +298,11 @@ func (c *Config) Validate() error {
 {{- if .HasGraphEndpoints }}
 	if err := c.Graphs.validate(); err != nil {
 		return err
+	}
+{{- end }}
+{{- if .RowFeatureBucket }}
+	if c.Attachments == nil {
+		return fmt.Errorf("Config.Attachments is required: the file uploads and downloads of {{ .SchemaName }} sign their URLs of it (#723)")
 	}
 {{- end }}
 	if c.Logger == nil {
@@ -556,6 +580,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 {{- else if .TableRequiresCaller }}requireTableCaller(create{{ .HandlerName }}(cfg.DB))
 {{- else if .ServedTable }}create{{ .HandlerName }}(cfg.DB)
 {{- else if .GraphRoutes }}create{{ .HandlerName }}(&{{ .GraphRoutes }}{db: cfg.DB, graph: cfg.Graphs.{{ .GraphMember }}})
+{{- else if .RowFeatureOperation }}create{{ .HandlerName }}(&{{ .RowFeatureRoutes }}{rowFeatureRoutes{db: cfg.DB{{ if .RowFeatureTakesBucket }}, bucket: cfg.Attachments{{ end }}}})
 {{- else }}create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }})
 {{- end }}
 {{- end }}
@@ -749,10 +774,18 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 // {{ .GraphOperation.Database }} (D138), through the method of graphs.go that serves it:
 // no implementation method serves it.
 {{- end }}
+{{- with .RowFeatureOperation }}
+//
+// It runs {{ .Type }}'s {{ .Operation }} (#723), an operation of a table's references and
+// files of {{ .Database }}, through the method of rowfeatures.go that serves it:
+// no implementation method serves it.
+{{- end }}
 {{- if or .BehaviorOperation .ServedTable }}
 func create{{ .HandlerName }}(db orm.DatabaseInterface) gohttp.HandlerFunc {
 {{- else if .GraphRoutes }}
 func create{{ .HandlerName }}(impl *{{ .GraphRoutes }}) gohttp.HandlerFunc {
+{{- else if .RowFeatureOperation }}
+func create{{ .HandlerName }}(impl *{{ .RowFeatureRoutes }}) gohttp.HandlerFunc {
 {{- else }}
 func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) gohttp.HandlerFunc {
 {{- end }}

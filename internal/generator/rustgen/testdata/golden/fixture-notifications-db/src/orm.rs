@@ -360,6 +360,9 @@ pub struct ChannelIdentityFilter {
 }
 
 /// A row of `ChannelTrust`.
+///
+/// A text may only acknowledge, since its sender id can be spoofed; an
+/// email may run what its sender may. Keyed by the unique channel kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelTrustRow {
     pub id: IdentityUUID,
@@ -864,6 +867,10 @@ pub struct NoticeFilter {
 }
 
 /// A row of `NoticePreference`.
+///
+/// Everyone hears by SMS, then email, unless their own row says otherwise:
+/// a row of no principal, seed data (#625), identified by whom and what it
+/// is for, since no unique constraint holds the rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoticePreferenceRow {
     pub id: IdentityUUID,

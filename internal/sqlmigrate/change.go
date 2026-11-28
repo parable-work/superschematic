@@ -59,6 +59,9 @@ const (
 	// The roles @seedRoles keeps in a UserRole table (D88).
 	opSeedRole   op = "seedRole"
 	opUpdateRole op = "updateRole"
+
+	// The rows @seedRows seeds a table with (#625).
+	opSeedRow op = "seedRow"
 )
 
 // rank is a change's place in its phase. Expand runs renames, then creates
@@ -118,6 +121,9 @@ var rank = map[op]int{
 	// its insert's conflict reads exist; in contract, before any drop.
 	opSeedRole:   17,
 	opUpdateRole: 17,
+	// A row is seeded once its table, its columns and every constraint
+	// and trigger of the table exist, after the roles.
+	opSeedRow: 17,
 }
 
 // rankOf is c's place in its phase: its op's rank, scaled so the raw SQL
@@ -220,6 +226,9 @@ type change struct {
 	role    *RoleSeed
 	oldRole *RoleSeed
 
+	// row is a @seedRows row the change inserts (#625).
+	row *SeedRow
+
 	hazards []*Hazard
 }
 
@@ -299,6 +308,8 @@ func viewRelation(v *View) string {
 func rawSQLSubject(id string) string { return "rawSql/" + id }
 
 func roleSubject(table, name string) string { return "role/" + table + "/" + name }
+
+func seedRowSubject(table, key string) string { return "row/" + table + "/" + key }
 
 // addHazard adds a hazard of class to c, or appends reason to the one c
 // already has of that class and reader.

@@ -669,6 +669,19 @@ var planCases = []planCase{
 	{name: "add-seed-roles", base: userModelDir, before: func(s *ir.Schema) { s.UserRoleTable().SeedRoles = nil }, rows: unseededMember},
 	{name: "seed-roles-gain", base: userModelDir, after: memberSeed("identity.roles.read", "identity.users.write")},
 	{name: "seed-roles-lose", base: userModelDir, before: memberSeed("identity.roles.read", "identity.users.write")},
+	// The rows a table seeds (#625): a new one is inserted, and one the
+	// previous model held is not touched, though its seed's values change,
+	// so an app's edit to it stays; the insert run again changes nothing.
+	{name: "seed-rows-added",
+		before: labelSeeds(map[string]any{"name": "urgent", "color": "red"}),
+		after:  labelSeeds(map[string]any{"name": "urgent", "color": "crimson"}, map[string]any{"name": "gift", "color": "green"}),
+		rows:   editedLabelSeed},
+	// A seeded row that the schema no longer seeds stays: no step.
+	{name: "seed-rows-removed",
+		before: labelSeeds(map[string]any{"name": "urgent", "color": "red"}, map[string]any{"name": "gift", "color": "green"}),
+		after:  labelSeeds(map[string]any{"name": "gift", "color": "green"}),
+		rows: extraRows{checks: []seedCheck{{Name: "the row the seed no longer names stays",
+			SQL: `SELECT count(*) = 1 FROM "label" WHERE "name" = 'urgent' AND "color" = 'red'`}}}},
 	// @table names the queue's table and @column its key's column (D85):
 	// the plan renames both, with the key's indexes, and replaces the
 	// trigger, which is named after the queue's table.
@@ -949,6 +962,34 @@ var unseededMember = extraRows{
 	checks: []seedCheck{
 		{Name: "member holds the seed's permissions",
 			SQL: `SELECT count(*) = 1 FROM "role" m WHERE m."name" = 'member' AND m."permissions" <> (SELECT r."permissions" FROM "role" r WHERE r."name" <> 'member')`},
+	},
+}
+
+// labelSeeds gives Label an optional color and seeds it with rows, keyed by
+// its unique name (#625).
+func labelSeeds(rows ...map[string]any) func(*ir.Schema) {
+	return func(s *ir.Schema) {
+		addField(s, "Label", &ir.FieldDef{Name: "color", TypeRef: stringRef})
+		typeNamed(s, "Label").SeedRows = &ir.SeedRows{Rows: rows}
+	}
+}
+
+// editedLabelSeed is an app's edit to the seeded urgent label, then that
+// seed's insert run again, as a re-run of create.sql runs it: the edit
+// survives both and the plan, and the plan seeds gift.
+var editedLabelSeed = extraRows{
+	seed: []string{
+		`UPDATE "label" SET "color" = 'orange' WHERE "name" = 'urgent'`,
+		`INSERT INTO "label" ("name", "color")
+SELECT 'urgent', 'red'
+WHERE NOT EXISTS (SELECT 1 FROM "label" WHERE "name" = 'urgent')
+ON CONFLICT DO NOTHING`,
+	},
+	checks: []seedCheck{
+		{Name: "an app's edit to a seeded row survives its insert run again and the plan",
+			SQL: `SELECT count(*) = 1 FROM "label" WHERE "name" = 'urgent' AND "color" = 'orange'`},
+		{Name: "the plan seeds the new row",
+			SQL: `SELECT count(*) = 1 FROM "label" WHERE "name" = 'gift' AND "color" = 'green'`},
 	},
 }
 

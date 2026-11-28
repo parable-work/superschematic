@@ -380,13 +380,13 @@ func TestBehaviorOperationsRefusals(t *testing.T) {
 		}, ordersDB, "OrderActions: @behaviorOperations is only allowed in an API schema (this schema has kind General)"},
 		{"@auth on another set", func() *ir.Schema {
 			return ordersAPI(plainSet(func(s *ir.OperationSet) { s.Auth = true }))
-		}, ordersDB, "Orders: @auth on a class applies only to a @behaviorOperations or @graphOperations set; extend Authenticated, or put @auth on each method of Orders"},
+		}, ordersDB, "Orders: @auth on a class applies only to a @behaviorOperations, @graphOperations or @rowFeatureOperations set; extend Authenticated, or put @auth on each method of Orders"},
 		{"@requirePermission on another set", func() *ir.Schema {
 			return ordersAPI(plainSet(func(s *ir.OperationSet) { s.Permissions = []string{"orders.read"} }))
-		}, ordersDB, "Orders: @requirePermission on a class applies only to a @behaviorOperations or @graphOperations set; put it on each method of Orders"},
+		}, ordersDB, "Orders: @requirePermission on a class applies only to a @behaviorOperations, @graphOperations or @rowFeatureOperations set; put it on each method of Orders"},
 		{"@publicRoute on another set", func() *ir.Schema {
 			return ordersAPI(plainSet(func(s *ir.OperationSet) { s.Public = true }))
-		}, ordersDB, "Orders: @publicRoute on a class applies only to a @behaviorOperations or @graphOperations set; put it on each method of Orders"},
+		}, ordersDB, "Orders: @publicRoute on a class applies only to a @behaviorOperations, @graphOperations or @rowFeatureOperations set; put it on each method of Orders"},
 		{"@publicRoute with @auth", func() *ir.Schema {
 			set := actionsOf("OrderActions", "Order")
 			set.Public, set.Auth = true, true

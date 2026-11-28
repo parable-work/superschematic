@@ -29,6 +29,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/notifications"
+	"github.com/parable-work/superschematic/internal/loader/rowfeatureops"
 	"github.com/parable-work/superschematic/internal/loader/rowrefs"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
@@ -250,6 +251,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.SearchFoldsDiacritics = searchFoldsDiacritics(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
 		vin.MCPServer = mcpServer(cfg)
@@ -318,6 +320,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.SearchFoldsDiacritics = searchFoldsDiacritics(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
 		vin.MCPServer = mcpServer(cfg)
@@ -486,6 +489,9 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 		}
 		if set.IsGraphOperations() {
 			why = "whose version graphs its @graphOperations sets serve"
+		}
+		if set.IsRowFeatureOperations() {
+			why = "whose tables' references and files its @rowFeatureOperations sets serve"
 		}
 	}
 	if schema.HasTableOperations() {
@@ -751,6 +757,21 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 			}
 		}
 	}
+	// A table's references and files join their @rowFeatureOperations
+	// sets the same way (#723), with the types they take and return.
+	if err := verify.CheckRowFeatureOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
+		added, err := rowfeatureops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// A @behaviorWorker runs its table's behavior queues, which the
 	// database's load added (D103): it becomes an ordinary worker of those
 	// queues before the pass, once its checks hold that they are there,
@@ -813,7 +834,7 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// Search across tables (D155): the database's search index and the
 	// fields of the queues @searchable names join the schema before the
 	// pass, so it reads them as its own.
-	if added := search.Expand(schema); len(added) > 0 {
+	if added := search.Expand(schema, vin.SearchFoldsDiacritics); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}
@@ -831,6 +852,11 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	}
 	if len(refused) > 0 {
 		return nil, refused[0]
+	}
+	// After the pass, which holds each field a seed row names to the
+	// table's, the fields the expansions filled among them (#625).
+	if err := validateSeedRowValues(schema, vin.ExternalEnums); err != nil {
+		return nil, err
 	}
 	added := versiongraph.Expand(schema)
 	added = append(added, identity.Expand(schema)...)
