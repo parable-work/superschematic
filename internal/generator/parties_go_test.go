@@ -53,6 +53,7 @@ func goRuntimeModule(t *testing.T, db, name, source, run string, modules map[str
 		cfg.Outputs["types"] = types
 	}
 	types["go"] = map[string]any{"enabled": true}
+	postgresOnly(cfg)
 	if _, err := Run(schema, cfg, Options{
 		OutputRoot:       outputRoot,
 		Paths:            paths,

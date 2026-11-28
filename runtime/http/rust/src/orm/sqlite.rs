@@ -737,7 +737,9 @@ impl Repository<'_> {
     /// through the behaviors' core (D103): a Workflow's `transition` of
     /// `status`, say, with its parameters in their wire form. It answers
     /// the operation's result; the core's refusal is [`Error::Refused`],
-    /// and a key no live row holds [`Error::NotFound`].
+    /// and a key no live row holds [`Error::NotFound`], as is, opened for a
+    /// caller (D156), a row the caller may not write, or for an operation
+    /// that writes nothing does not see.
     pub fn operation(
         &self,
         member: &str,

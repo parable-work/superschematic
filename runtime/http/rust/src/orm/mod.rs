@@ -482,6 +482,30 @@ pub struct MergeStep {
     pub collisions: Vec<MergeStatement>,
     /// Repoints every row that references the row merged away.
     pub repoint: MergeStatement,
+    /// The rows the step writes as per-record access holds them (D156);
+    /// none for a step whose rows are the merged rows' own (an Aliased
+    /// use's, and the pairs of a `@manyToMany` the table declares).
+    #[serde(default)]
+    pub reach: Option<MergeReach>,
+}
+
+/// The code of [`Error::Merge`] for a merge opened for a caller (D156)
+/// that would repoint or delete a row of another table the caller may not
+/// write.
+pub const MERGE_OUT_OF_REACH: &str = "out_of_reach";
+
+/// The rows a merge's step writes as per-record access holds them (D156):
+/// a merge opened for a caller refuses, before it writes, when one of them
+/// is a row the caller may not write.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct MergeReach {
+    /// The table type whose access holds the rows.
+    #[serde(rename = "type")]
+    pub table: String,
+    /// Reads one of them, `SELECT 1 FROM` the table `WHERE` a condition
+    /// that takes the key of the row merged away first, which the
+    /// conditions of the caller's write of the table's rows are added to.
+    pub rows: String,
 }
 
 /// One statement of a merge (D147): its SQL, and how it takes the acting
@@ -576,6 +600,44 @@ pub struct Behaviors {
     /// insert would leave unwritten, so the table has no upserts.
     #[serde(default)]
     pub no_upsert: bool,
+    /// The operations on a row that write nothing, by the member they sit
+    /// under (`comments`: `listMessages`), as the core declares them: a
+    /// caller who sees the row may run one of them, and every other
+    /// operation needs a caller who may write it (D156).
+    #[serde(default)]
+    pub reads: BTreeMap<String, Vec<String>>,
+    /// The operations of the table as a whole whose answer names one of
+    /// its rows (Aliased's `resolve`), which the repositories keep to their
+    /// caller (D156): the core reads every row.
+    #[serde(default)]
+    pub answers: Vec<AnsweredRow>,
+}
+
+/// An operation of a table as a whole whose answer names one of the
+/// table's rows (D156): under `row`, an object whose `key` is the row's
+/// key in its wire form, or null for none. Opened for a caller, the
+/// repositories answer null there for a row the caller does not see, as
+/// for an answer of no row.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AnsweredRow {
+    /// The member the use's operations sit under.
+    pub member: String,
+    /// The operation.
+    pub operation: String,
+    /// The member of the answer that holds the row.
+    pub row: String,
+}
+
+impl Behaviors {
+    /// Whether `operation` under `member` writes: every operation the
+    /// definition does not name a read, so one written before it named
+    /// them needs a caller who may write the row.
+    pub fn writes(&self, member: &str, operation: &str) -> bool {
+        !self
+            .reads
+            .get(member)
+            .is_some_and(|reads| reads.iter().any(|read| read == operation))
+    }
 }
 
 impl Table {
@@ -775,10 +837,13 @@ pub enum Error {
     /// says it. Boxed, so a result that may hold one stays small.
     Refused(Box<Refusal>),
     /// A merge the repository refuses before it writes (D147): of a row
-    /// into itself (`self`), or into a row that references the one merged
-    /// away through a relation of the table to itself (`self_reference`).
+    /// into itself (`self`), into a row that references the one merged
+    /// away through a relation of the table to itself (`self_reference`),
+    /// or, opened for a caller (D156), one that would repoint or delete a
+    /// row of another table the caller may not write (`out_of_reach`),
+    /// which a table operation answers 403.
     Merge {
-        /// `self` or `self_reference`.
+        /// `self`, `self_reference` or `out_of_reach`.
         code: &'static str,
         /// What it says.
         message: String,
@@ -1903,6 +1968,21 @@ mod tests {
             .of_kind(PrincipalKind::Party)
             .acting_for(ActingFor::user(owner));
         assert_eq!(AccessCaller::of(Some(&party)).audience_ids(), [user]);
+    }
+
+    #[test]
+    fn a_behavior_operation_writes_unless_the_definition_names_it_a_read() {
+        // A caller who sees a row runs a read; every other operation, and
+        // every one of a definition that names none, needs write reach
+        // (D156).
+        let behaviors: Behaviors =
+            serde_json::from_str(r#"{"owned": [], "reads": {"comments": ["listMessages"]}}"#)
+                .unwrap();
+        assert!(!behaviors.writes("comments", "listMessages"));
+        assert!(behaviors.writes("comments", "post"));
+        assert!(behaviors.writes("status", "listMessages"));
+        let before: Behaviors = serde_json::from_str(r#"{"owned": []}"#).unwrap();
+        assert!(before.writes("comments", "listMessages"));
     }
 
     #[test]

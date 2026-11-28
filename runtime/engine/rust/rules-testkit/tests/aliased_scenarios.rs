@@ -1,7 +1,7 @@
 //! The hand-written scenarios of D147's Aliased (`core-aliased.json`)
 //! replayed on the core: a create that gives the name, and a name another
 //! row holds, as its name or an alias, in its normalized form, refused
-//! with that row's key in a create, a rename and an addAlias; rename
+//! naming nothing of that row in a create, a rename and an addAlias; rename
 //! keeping the old name as an alias, a rename to an alias, one of only the
 //! case and one answered unchanged; addAlias and removeAlias under
 //! normalize slug, a removed alias taken by another row and the name

@@ -530,13 +530,15 @@ func (r *ShipmentSQLiteRepository) GetManyByIDs(ctx context.Context, ids []types
 		keys = append(keys, key)
 	}
 	var records []sqliteRecord
-	for start := 0; start < len(keys); start += 32766 {
-		args := keys[start:min(start+32766, len(keys))]
+	most := 32766
+	for start := 0; start < len(keys); start += most {
+		args := keys[start:min(start+most, len(keys))]
 		placeholders := make([]string, len(args))
 		for i := range args {
 			placeholders[i] = fmt.Sprintf("?%d", i+1)
 		}
-		read, err := shipmentSQLite.query(ctx, r.q(), fmt.Sprintf(shipmentSQLite.st.getMany, strings.Join(placeholders, ", "))+shipmentSQLite.st.live, args...)
+		query := fmt.Sprintf(shipmentSQLite.st.getMany, strings.Join(placeholders, ", ")) + shipmentSQLite.st.live
+		read, err := shipmentSQLite.query(ctx, r.q(), query, args...)
 		if err != nil {
 			return nil, err
 		}

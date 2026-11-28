@@ -21,6 +21,11 @@ func checkTableCallers(in Input, o *apigen.APIOutput) error {
 	if o.AuthWired() {
 		return nil
 	}
+	if o.Deps.Wiring.Authenticates() && !o.Deps.SQLite {
+		// The server establishes a grant's holder, and an agent run, as the
+		// caller of every route (D180, D192; go_wiring.go).
+		return nil
+	}
 	for _, ep := range o.ServedTableEndpoints() {
 		to := ep.TableOperation()
 		if !ep.RequiresAuth {

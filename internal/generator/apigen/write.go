@@ -110,6 +110,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.Tables != nil, Template: "tables.tmpl", Filename: "tables.go"},
 		{Condition: output.Graphs != nil, Template: "graphs.tmpl", Filename: "graphs.go"},
 		{Condition: output.Deps.Providers != nil, Template: "providers.tmpl", Filename: "providers.go"},
+		{Condition: output.HasWiring(), Template: "wiring.tmpl", Filename: "wiring.go"},
 	}
 	// A provider file with the name of a core file replaces it when its
 	// condition holds, and leaves the core's file alone when it does not

@@ -280,6 +280,11 @@ pub struct Column {
     /// How the adapter converts it; `None` for none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub convert: Option<Convert>,
+    /// The field is a list of its type, a `UUID[]` of ids on Postgres and
+    /// the JSON text of an array on SQLite (D156, D182), which the adapter
+    /// reads and binds element by element.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub list: bool,
 }
 
 impl Column {
@@ -294,6 +299,7 @@ impl Column {
             column: column.into(),
             type_name: type_name.into(),
             convert: None,
+            list: false,
         }
     }
 
@@ -455,6 +461,17 @@ pub struct Operation {
     /// (`run_table_operation`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub table: bool,
+    /// Of an operation of the table as a whole, the member of its answer
+    /// that names one of the table's rows (Aliased's `resolve`'s `row`,
+    /// Pool's `pick`'s `member`), which a caller's repositories answer null
+    /// for a row the caller does not see (D156); none for any other. The
+    /// adapter answers what the core answers, which reads every row.
+    #[serde(
+        default,
+        rename = "answersRow",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub answers_row: Option<String>,
 }
 
 impl Operation {
@@ -464,6 +481,7 @@ impl Operation {
             name: name.into(),
             writes,
             table: false,
+            answers_row: None,
         }
     }
 
@@ -473,7 +491,16 @@ impl Operation {
             name: name.into(),
             writes,
             table: true,
+            answers_row: None,
         }
+    }
+
+    /// The operation, its answer naming one of the table's rows under
+    /// `member` (D156).
+    #[must_use]
+    pub fn answering(mut self, member: impl Into<String>) -> Self {
+        self.answers_row = Some(member.into());
+        self
     }
 }
 
@@ -769,7 +796,7 @@ mod tests {
             [
                 Operation::new("markOut", true),
                 Operation::new("reportRoom", true),
-                Operation::of_table("pick", false),
+                Operation::of_table("pick", false).answering("member"),
             ]
         );
         let budget = account

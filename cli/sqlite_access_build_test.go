@@ -16,27 +16,83 @@ import (
 )
 
 // sqliteAccessGoCheck is the test the Go ORM of fixture-access-db runs on
-// SQLite: a held database's repositories refuse every call there, naming
-// why, and so do its References and its access log's repository.
+// SQLite (D182, #611): over the SQLite DDL the build wrote, a private
+// folder is its owner's alone and a named one the principals it names, as
+// the TypeScript repositories keep them, and the access log takes a row.
 const sqliteAccessGoCheck = `package orm
 
 import (
 	"context"
-	"errors"
+	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/parable-work/superschematic/runtime/schema/go/access"
+	_ "modernc.org/sqlite"
 )
 
-func TestTheRepositoriesOnSQLiteRefusePerRecordAccess(t *testing.T) {
+const (
+	alice  = "00000000-0000-4000-8000-0000000000a1"
+	bob    = "00000000-0000-4000-8000-0000000000b2"
+	carol  = "00000000-0000-4000-8000-0000000000c3"
+	taxes  = "00000000-0000-4000-8000-000000000f01"
+	travel = "00000000-0000-4000-8000-000000000f02"
+)
+
+func TestTheRepositoriesOnSQLiteServePerRecordAccess(t *testing.T) {
 	ctx := context.Background()
-	db := &SQLiteDatabase{}
-	if _, _, err := db.GetFolderRepository().FindMany(ctx, nil, nil); !errors.Is(err, ErrSQLiteUnsupported) {
-		t.Errorf("Folder's FindMany on SQLite answered %v, want ErrSQLiteUnsupported", err)
+	ddl, err := os.ReadFile(os.Getenv("SQLITE_CREATE_SQL"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, _, err := db.GetGrantRepository().FindMany(ctx, nil, nil); !errors.Is(err, ErrSQLiteUnsupported) {
-		t.Errorf("Grant's FindMany on SQLite answered %v, want ErrSQLiteUnsupported", err)
+	raw, err := sql.Open("sqlite", SQLiteDSN(filepath.Join(t.TempDir(), "access.db")))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, _, err := db.GetAccessEntryRepository().FindMany(ctx, nil, nil); !errors.Is(err, ErrSQLiteUnsupported) {
-		t.Errorf("AccessEntry's FindMany on SQLite answered %v, want ErrSQLiteUnsupported", err)
+	if _, err := raw.ExecContext(ctx, string(ddl)); err != nil {
+		t.Fatalf("the SQLite DDL: %v", err)
+	}
+	for _, folder := range [][4]string{{taxes, "Taxes", "private", ""}, {travel, "Trip", "named", "[\"" + bob + "\"]"}} {
+		var named any
+		if folder[3] != "" {
+			named = folder[3]
+		}
+		if _, err := raw.ExecContext(ctx, ` + "`" + `INSERT INTO folder (id, "name", owner, created_by, audience, audience_named) VALUES (?1, ?2, ?3, ?3, ?4, ?5)` + "`" + `, folder[0], folder[1], alice, folder[2], named); err != nil {
+			t.Fatalf("insert %s: %v", folder[1], err)
+		}
+	}
+	db, err := OpenSQLite(ctx, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	names := func(who string) []string {
+		t.Helper()
+		as := WithPrincipal(ctx, access.Principal{Subject: who, Kind: access.KindUser})
+		rows, _, err := db.GetFolderRepository().FindMany(as, nil, &FolderFindOptions{Fields: FolderFields{}.All()})
+		if err != nil {
+			t.Fatalf("the folders %s sees: %v", who, err)
+		}
+		var out []string
+		for _, row := range rows {
+			out = append(out, row.Name)
+		}
+		return out
+	}
+	for who, want := range map[string]int{alice: 2, bob: 1, carol: 0} {
+		if got := names(who); len(got) != want {
+			t.Errorf("%s sees the folders %v, want %d", who, got, want)
+		}
+	}
+	if got := names(bob); len(got) != 1 || got[0] != "Trip" {
+		t.Errorf("bob sees %v, want the folder that names him", got)
+	}
+	if err := RecordAccess(ctx, db, access.LogEntry{Kind: access.LogReveal, Principal: alice, Operation: "getAgreement", TargetType: "Agreement", Field: "terms"}); err != nil {
+		t.Fatalf("record a reveal: %v", err)
+	}
+	if _, total, err := db.GetAccessEntryRepository().FindMany(ctx, nil, &AccessEntryFindOptions{Fields: AccessEntryFields{}.All()}); err != nil || total != 1 {
+		t.Fatalf("the access log holds %d rows: %v", total, err)
 	}
 }
 `
@@ -81,9 +137,9 @@ test('a private folder is its owner alone, and a named one is the principals it 
 // listed first and Go's types on, through the build command (D182): a
 // DB service that lists sqlite and declares @audience, @accessGrants and
 // @accessLog builds, since the DB kind writes the Go ORM always. The Go
-// ORM builds and vets, and its repositories on SQLite answer
-// ErrSQLiteUnsupported for each call (D180); the TypeScript repositories
-// on bun:sqlite keep each folder to its audience. It skips in -short mode
+// ORM builds and vets, and its repositories on SQLite keep each folder to
+// its audience (D180, #611), as the TypeScript repositories on bun:sqlite
+// do. It skips in -short mode
 // and without bun, unless SUPERSCHEMATIC_REQUIRE_TS_CHECKS is set.
 func TestBuildAnAccessDatabaseOnSQLite(t *testing.T) {
 	if testing.Short() {
@@ -153,18 +209,21 @@ export default defineConfig({
 	root.SetArgs([]string{"build", serviceDir, "--out", outputRoot})
 	require.NoError(t, root.Execute(), buf.String())
 
-	// The Go ORM builds and vets, and its repositories refuse on SQLite.
+	// The Go ORM builds and vets, and its repositories keep each folder to
+	// its audience on SQLite.
 	ormDir := generator.ORMDir(outputRoot, name)
 	require.FileExists(t, filepath.Join(ormDir, "sqlite.go"), buf.String())
 	writeFiles(t, ormDir, map[string]string{"sqlite_access_test.go": sqliteAccessGoCheck})
 	var out []byte
-	for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "-count=1", "-v", "-run", "TestTheRepositoriesOnSQLiteRefusePerRecordAccess", "./..."}} {
+	sqliteCreate := filepath.Join(generator.SQLDir(outputRoot, name), "sqlite", "create.sql")
+	for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "-count=1", "-v", "-run", "TestTheRepositoriesOnSQLiteServePerRecordAccess", "./..."}} {
 		cmd := exec.Command("go", args...)
 		cmd.Dir = ormDir
+		cmd.Env = append(cmd.Environ(), "SQLITE_CREATE_SQL="+sqliteCreate)
 		out, err = cmd.CombinedOutput()
 		require.NoError(t, err, "go %s in the Go ORM: %s", strings.Join(args, " "), out)
 	}
-	require.Contains(t, string(out), "--- PASS: TestTheRepositoriesOnSQLiteRefusePerRecordAccess")
+	require.Contains(t, string(out), "--- PASS: TestTheRepositoriesOnSQLiteServePerRecordAccess")
 
 	// The TypeScript repositories run on bun:sqlite.
 	typesDir := generator.TypesDir(outputRoot, "typescript", name)

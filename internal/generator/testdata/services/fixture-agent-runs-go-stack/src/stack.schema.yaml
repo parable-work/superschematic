@@ -1,0 +1,12 @@
+# fixture-agent-runs-go-api on a Go server of its own, with its four
+# workers beside it, whose handlers the generated wiring gives the runtime
+# (D190, D192, D187). It declares no environment:
+# TestGoServerWiresTheRuntime in internal/generator builds it.
+kind: Stack
+types:
+  AgentRunsGo:
+    name: AgentRunsGo
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-agent-runs-go-api, kind: API }

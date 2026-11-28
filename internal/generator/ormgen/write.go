@@ -144,6 +144,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(accessFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove access.go: %w", err)
 	}
+	// access_sqlite.go holds the same access on SQLite (D182, #611), for a
+	// database whose repositories keep to a caller and that lists sqlite.
+	accessSQLiteFile := filepath.Join(outputDir, "access_sqlite.go")
+	if output.HasSQLiteAccess() {
+		if err := generateFile(generator, "access_sqlite.tmpl", accessSQLiteFile, output); err != nil {
+			return fmt.Errorf("failed to write access_sqlite.go: %w", err)
+		}
+	} else if err := os.Remove(accessSQLiteFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove access_sqlite.go: %w", err)
+	}
 	// rowrefs.go holds a database's references and attachments (D154,
 	// D184); a database without them has none, so a file an earlier build
 	// wrote goes.
