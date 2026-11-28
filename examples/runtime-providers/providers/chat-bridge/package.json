@@ -1,0 +1,22 @@
+{
+  "name": "@example-providers/chat-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A channel adapter for a messaging network that a bridge connects to outward: the app sends through the network's API, and the bridge relays what the network received to the app's inbound route with a key that can only relay messages (D159, D157).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "chat-bridge",
+      "implements": "channel",
+      "operations": ["send", "health", "inbound"],
+      "config": {
+        "URL": { "description": "The messaging network's API base URL." },
+        "TOKEN": { "secret": true, "description": "The network's API token, which sends." },
+        "RELAY_KEY": { "secret": true, "description": "The key the bridge relays with: the inbound route takes a request that bears it, and the API resolves it to this provider's principal, which may relay messages and nothing else." }
+      },
+      "role": ["messages.relay"]
+    }
+  }
+}

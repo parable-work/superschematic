@@ -46,6 +46,35 @@ const quiet: { at: string; zone: string; start: string | null; end: string | nul
   { at: '2027-03-10T23:30:00Z', zone: 'UTC', start: '22:00:0', end: '07:00:00' },
 ];
 
+// Quiet hours on nights the clocks change inside the window (#602): each
+// window starts and ends at the instants its wall times are reached in the
+// zone, which counting wall minutes did not.
+const quietChanges: { at: string; zone: string; start: string; end: string }[] = [
+  // New York goes forward at 02:00 on 2027-03-14 (07:00Z): 22:00 to 07:00 is 8 hours.
+  { at: '2027-03-14T03:00:00Z', zone: 'America/New_York', start: '22:00', end: '07:00' },
+  { at: '2027-03-14T06:59:00Z', zone: 'America/New_York', start: '22:00', end: '07:00' },
+  { at: '2027-03-14T07:00:00Z', zone: 'America/New_York', start: '22:00', end: '07:00' },
+  // An end the clocks skip, 02:30: the window ends at the jump, 03:00 EDT.
+  { at: '2027-03-14T06:15:00Z', zone: 'America/New_York', start: '01:00', end: '02:30' },
+  { at: '2027-03-14T07:00:00Z', zone: 'America/New_York', start: '01:00', end: '02:30' },
+  // A start the clocks skip, 02:30: the window starts at the jump.
+  { at: '2027-03-14T06:59:00Z', zone: 'America/New_York', start: '02:30', end: '04:00' },
+  { at: '2027-03-14T07:00:00Z', zone: 'America/New_York', start: '02:30', end: '04:00' },
+  // New York goes back at 02:00 on 2027-11-07 (06:00Z): 22:00 to 07:00 is 10 hours.
+  { at: '2027-11-07T02:00:00Z', zone: 'America/New_York', start: '22:00', end: '07:00' },
+  { at: '2027-11-07T11:59:00Z', zone: 'America/New_York', start: '22:00', end: '07:00' },
+  // An end the clocks show twice, 01:30: the first.
+  { at: '2027-11-07T05:00:00Z', zone: 'America/New_York', start: '00:30', end: '01:30' },
+  { at: '2027-11-07T05:45:00Z', zone: 'America/New_York', start: '00:30', end: '01:30' },
+  // A start the clocks show twice, 01:30: from the first, so the hour that repeats is inside.
+  { at: '2027-11-07T06:15:00Z', zone: 'America/New_York', start: '01:30', end: '03:00' },
+  // Paris goes forward at 02:00 on 2027-03-28 (01:00Z), and back at 03:00 on 2027-10-31 (01:00Z).
+  { at: '2027-03-27T22:30:00Z', zone: 'Europe/Paris', start: '23:00', end: '07:00' },
+  { at: '2027-10-30T21:30:00Z', zone: 'Europe/Paris', start: '23:00', end: '07:00' },
+  // A zone whose clocks change by half an hour.
+  { at: '2027-04-03T13:00:00Z', zone: 'Australia/Lord_Howe', start: '22:00', end: '07:00' },
+];
+
 const trust: { held: string[]; cap: string[] | null; need: string }[] = [
   { held: ['tickets.work'], cap: null, need: 'tickets.work' },
   { held: ['tickets.work'], cap: [], need: 'tickets.work' },
@@ -70,13 +99,14 @@ function hhmmss(at: Date, zone: string): string {
 function vectors() {
   return {
     comment:
-      "The notifier's pure parts (D153, D191): addresses is an address normalised by its kind (TypeScript's normaliseAddress, Rust's normalise_address); replies is a reply's words read (readReply, read_reply) and whether its text is shaped as a code (looksLikeCode, looks_like_code); quietHours is how many seconds a wall time waits out quiet hours (quietDelaySeconds at an instant in a zone, whose wall time is wall, and Rust's quiet_delay_seconds of the wall time); trust is a channel's trust over a principal's permissions (replyAllows, reply_allows; narrowedPermissions, narrowed_permissions), a null cap no cap; codeHashes is a code's stored hash (codeHash, code_hash); sameIds is an id in one form (sameId, same_id). runtime/http/typescript's notify-parity.test.ts writes the wants with NOTIFY_PARITY_WRITE=1.",
+      "The notifier's pure parts (D153, D191): addresses is an address normalised by its kind (TypeScript's normaliseAddress, Rust's normalise_address); replies is a reply's words read (readReply, read_reply) and whether its text is shaped as a code (looksLikeCode, looks_like_code); quietHours is how many seconds a wall time waits out quiet hours (quietDelaySeconds at an instant in a zone, whose wall time is wall, and Rust's quiet_delay_seconds of the wall time); quietHoursAcrossChanges is the same on nights the clocks change inside the window, from an instant in a zone (quietDelaySeconds, Go's QuietDelayAt); trust is a channel's trust over a principal's permissions (replyAllows, reply_allows; narrowedPermissions, narrowed_permissions), a null cap no cap; codeHashes is a code's stored hash (codeHash, code_hash); sameIds is an id in one form (sameId, same_id). runtime/http/typescript's notify-parity.test.ts writes the wants with NOTIFY_PARITY_WRITE=1.",
     addresses: addresses.map(([kind, address]) => ({ kind, address, want: normaliseAddress(kind, address) })),
     replies: replies.map(text => {
       const read = readReply(text);
       return { text, want: { verb: read.verb, reference: read.reference ?? null, args: read.args, ack: read.ack, undo: read.undo, code: looksLikeCode(text) } };
     }),
     quietHours: quiet.map(tc => ({ ...tc, wall: hhmmss(new Date(tc.at), tc.zone), want: quietDelaySeconds(new Date(tc.at), tc.zone, tc.start, tc.end) })),
+    quietHoursAcrossChanges: quietChanges.map(tc => ({ ...tc, want: quietDelaySeconds(new Date(tc.at), tc.zone, tc.start, tc.end) })),
     trust: trust.map(tc => ({ ...tc, allows: replyAllows(tc.held, tc.cap, tc.need), narrowed: narrowedPermissions(tc.held, tc.cap) })),
     codeHashes: codes.map(code => ({ code, want: codeHash(code) })),
     sameIds: ids.map(id => ({ id, want: sameId(id) })),

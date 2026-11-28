@@ -242,6 +242,10 @@ describe.skipIf(!available)('parties', () => {
     const [filed] = await sys.attachments.list({ table: 'Report', key: String(reports[0]!.id) });
     expect(filed).toMatchObject({ name: 'gate.jpg', contentHash: PHOTO_SHA, objectKey: photo!.objectKey });
     expect(w.files.objects.size).toBe(1);
+    // A run request run again, after its handler failed, files nothing twice.
+    const filer = await w.inbound.principalOf({ table: 'Contact', key: w.dee });
+    await w.inbound.file({ message: outcome!.message!, to: { table: 'Report', key: String(reports[0]!.id) }, as: filer });
+    expect((await sys.attachments.list({ table: 'Report', key: String(reports[0]!.id) })).length).toBe(1);
     // The message is on each row it references: the job, the report and the party.
     for (const row of [{ table: 'Job', key: w.job }, { table: 'Report', key: String(reports[0]!.id) }, { table: 'Contact', key: w.dee }]) {
       const backlinks = await sys.references.referencedBy(row);

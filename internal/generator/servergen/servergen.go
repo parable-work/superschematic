@@ -954,11 +954,8 @@ func Plan(in Input) (*Server, error) {
 				}
 				d.Queues = o.Deps.Queues
 				if o.Deps.SQLite {
-					// A Go server and job open the SQLite file (D116); a
-					// worker claims its queue on Postgres alone.
-					if s.Worker != nil {
-						return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Go server and job open a SQLite file, and a Go worker claims its queue on Postgres alone (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
-					}
+					// A Go server, job and worker open the SQLite file
+					// (D116), and a worker claims its queue there (#717).
 					d.SQLite, d.FieldKeys = true, ""
 				}
 				databases[db] = d

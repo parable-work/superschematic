@@ -667,6 +667,11 @@ async fn a_text_with_a_photo_becomes_a_row_on_the_granted_record() {
     let filed = w.attachments("Report", &report).await;
     assert_eq!((filed[0].name.as_str(), filed[0].content_hash.as_str(), filed[0].object_key.as_str()), ("gate.jpg", sha(&PHOTO).as_str(), photos[0].object_key.as_str()));
     assert_eq!(w.bucket.objects.lock().unwrap().len(), 1);
+    // A run request run again, after its handler failed, files nothing
+    // twice.
+    let filer = w.inbound.principal_of(&w.dee_party(), None).await.unwrap();
+    w.inbound.file(&id, &RowRef::new("Report", report.clone()), &filer, None).await.unwrap();
+    assert_eq!(w.attachments("Report", &report).await.len(), 1);
     // The message is on each row it references: the job, the report and
     // the party.
     for (table, key) in [("Job", w.job.clone()), ("Report", report.clone()), ("Contact", w.dee.clone())] {

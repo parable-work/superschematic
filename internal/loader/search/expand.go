@@ -29,15 +29,18 @@ const (
 
 // Expand adds the search index to a schema with a @searchable table when
 // it has none yet, and fills each queue the declarations name that
-// declares no fields. It returns the scalar names the added fields use,
-// so the caller can hydrate any the schema did not already reference.
-func Expand(schema *ir.Schema) []string {
+// declares no fields. With fold (outputs.sql.search.foldDiacritics, #740)
+// the index folds diacritics: its words are in ir.SearchFoldedConfig,
+// which a piece of its raw SQL makes on Postgres. It returns the scalar
+// names the added fields use, so the caller can hydrate any the schema
+// did not already reference.
+func Expand(schema *ir.Schema, fold bool) []string {
 	tables := schema.SearchableTables()
 	if len(tables) == 0 {
 		return nil
 	}
 	if schema.Types[ir.SearchIndexTypeName] == nil {
-		schema.Types[ir.SearchIndexTypeName] = indexTable(tables[0].Owner)
+		schema.Types[ir.SearchIndexTypeName] = indexTable(tables[0].Owner, fold)
 	}
 	for _, td := range tables {
 		fill(schema, td.Searchable.Queue)
@@ -78,9 +81,14 @@ func fill(schema *ir.Schema, queue string) {
 func text(value string) *string { return &value }
 
 // indexTable is the search index (D155): one row per record, unique on
-// its table and key; its words, a GIN index over ir.SearchDocument; its
-// copied audience, a GIN index over the array; and its scope.
-func indexTable(owner string) *ir.TypeDef {
+// its table and key; its words, a GIN index over ir.SearchDocumentIn; its
+// copied audience, a GIN index over the array; and its scope. One that
+// folds holds the raw SQL of its configuration (#740).
+func indexTable(owner string, fold bool) *ir.TypeDef {
+	config := ir.SearchTextConfig
+	if fold {
+		config = ir.SearchFoldedConfig
+	}
 	td := &ir.TypeDef{
 		Name:        ir.SearchIndexTypeName,
 		Owner:       owner,
@@ -106,7 +114,7 @@ func indexTable(owner string) *ir.TypeDef {
 		},
 		Indexes: []ir.IndexDef{
 			{Keys: []string{ir.SearchSourceTableField, ir.SearchSourceKeyField}, Unique: true, Name: "source", Origin: ir.OriginSearch},
-			{Keys: []string{ir.SearchTitleField, ir.SearchBodyField, ir.SearchCommentsField, ir.SearchFilesField}, Name: "words", Method: ir.IndexMethodGIN, Expression: ir.SearchDocument(""), Origin: ir.OriginSearch},
+			{Keys: []string{ir.SearchTitleField, ir.SearchBodyField, ir.SearchCommentsField, ir.SearchFilesField}, Name: "words", Method: ir.IndexMethodGIN, Expression: ir.SearchDocumentIn(config, ""), Origin: ir.OriginSearch},
 			{Keys: []string{ir.SearchAudienceField}, Name: "audience", Method: ir.IndexMethodGIN, Origin: ir.OriginSearch},
 			{Keys: []string{ir.SearchScopeField}, Name: "scope", Origin: ir.OriginSearch},
 		},
@@ -114,5 +122,46 @@ func indexTable(owner string) *ir.TypeDef {
 	for _, fd := range td.Fields {
 		fd.Origin = ir.OriginSearch
 	}
+	if fold {
+		td.SearchFolds = true
+		td.RawSQL = []ir.RawSQLDef{unaccentPiece()}
+	}
 	return td
+}
+
+// unaccentPiece is the raw SQL that makes ir.SearchFoldedConfig on
+// Postgres (#740), after the tables and before the index over it: the
+// unaccent extension where the database lacks it, in
+// ir.SearchExtensionSchema, as the engine's index makes it (D58); then
+// the configuration in the current schema unless it is there, a copy of
+// simple whose words go through unaccent first. Each statement runs again
+// over what it made. Its down drops the configuration, once the index
+// over it is gone; the extension may serve others and stays.
+func unaccentPiece() ir.RawSQLDef {
+	up := `DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'unaccent') THEN
+    CREATE SCHEMA IF NOT EXISTS ` + ir.SearchExtensionSchema + `;
+    CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA ` + ir.SearchExtensionSchema + `;
+  END IF;
+END $$;
+DO $$
+DECLARE
+  dictionary text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_ts_config WHERE cfgname = '` + ir.SearchFoldedConfig + `' AND cfgnamespace = pg_catalog.current_schema()::regnamespace) THEN
+    SELECT pg_catalog.quote_ident(n.nspname) || '.unaccent' INTO dictionary
+      FROM pg_catalog.pg_extension AS e JOIN pg_catalog.pg_namespace AS n ON n.oid = e.extnamespace
+      WHERE e.extname = 'unaccent';
+    CREATE TEXT SEARCH CONFIGURATION ` + ir.SearchFoldedConfig + ` (COPY = pg_catalog.simple);
+    EXECUTE pg_catalog.format('ALTER TEXT SEARCH CONFIGURATION ` + ir.SearchFoldedConfig + ` ALTER MAPPING FOR word, hword, hword_part, numword, numhword, hword_numpart WITH %s, pg_catalog.simple', dictionary);
+  END IF;
+END $$;`
+	return ir.RawSQLDef{
+		ID:       ir.SearchUnaccentPiece,
+		Up:       up,
+		Down:     "DROP TEXT SEARCH CONFIGURATION IF EXISTS " + ir.SearchFoldedConfig + ";",
+		After:    ir.RawSQLAfterTables,
+		Dialects: []string{"postgres"},
+	}
 }

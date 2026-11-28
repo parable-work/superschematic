@@ -2422,9 +2422,9 @@ repository's write of several statements goes as one batch
 An API over the user model keeps its users on the file too, its identity
 store beside the repositories (D116), and on Workers it is refused: no
 identity store runs over D1. Resolution refuses a TypeScript, Rust or Go
-server or job whose database runs in another dialect than its first, and
-a Go worker on a SQLite database, since it claims its queue on Postgres
-alone.
+server, job or worker whose database runs in another dialect than its
+first. A Go worker of a sqlite-first database claims its queue on the
+file, as a Rust or TypeScript one does (#717).
 
 A deploy migrates each D1 database from your machine, or the CI job's,
 between its steps: it finds `superschematic-migrate` on `PATH`, or where

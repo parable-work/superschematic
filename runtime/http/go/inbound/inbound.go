@@ -482,7 +482,7 @@ func (in *Inbound) store(ctx context.Context, message string, files []providers.
 		return ""
 	}
 	attachments := in.host.Attachments()
-	if attachments == nil || in.opts.Bucket == nil {
+	if attachments == nil || !attachments.Holds(in.messageType) || in.opts.Bucket == nil {
 		return fmt.Sprintf("%d file(s) dropped: the inbound path has no bucket or the messages table no @attachments", len(files))
 	}
 	sys := in.system(ctx)
@@ -1178,21 +1178,36 @@ func (in *Inbound) File(ctx context.Context, input FileInput) error {
 		role = "about"
 	}
 	in.refer(ctx, input.Message, input.To, role)
+	// Only a messages table with @attachments has files to file, and only a
+	// row of a table with them takes one: any other row gets the reference
+	// alone.
 	attachments := in.host.Attachments()
-	if attachments == nil {
+	if attachments == nil || !attachments.Holds(in.messageType) || !attachments.Holds(input.To.Table) {
 		return nil
 	}
 	sys := in.system(ctx)
+	// Filing is idempotent, as the reference is: a run request whose
+	// handler failed after filing is run again, and the row takes no file
+	// twice.
+	held, err := attachments.List(sys, input.To)
+	if err != nil {
+		return err
+	}
+	filed := map[string]bool{}
+	for _, file := range held {
+		if file.FiledFrom != nil {
+			filed[*file.FiledFrom] = true
+		}
+	}
 	files, err := attachments.List(sys, rowrefs.RowRef{Table: in.messageType, Key: input.Message})
 	if err != nil {
 		return err
 	}
 	for _, file := range files {
+		if filed[in.messageType+":"+file.Key+":"+file.ID] {
+			continue
+		}
 		if _, err := attachments.File(sys, rowrefs.FileInput{FileRef: rowrefs.FileRef{Table: in.messageType, ID: file.ID}, To: input.To, Role: role}); err != nil {
-			// A row of a table that holds no files gets the reference alone.
-			if rowrefs.CodeOf(err) == rowrefs.CodeNotAHolder {
-				return nil
-			}
 			return err
 		}
 	}
