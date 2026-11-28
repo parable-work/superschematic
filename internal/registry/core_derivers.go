@@ -8,13 +8,11 @@ import (
 
 // deriverDecorator returns @deriver, from @superschematic/api and only in
 // API schemas: a class of the schema that declares a deriver of the API,
-// which fills the Derived fields of types of the API's database, its
-// engine types (D74) or its tables that implement Derived (D146). The
-// class holds no fields and is no type: Apply records the deriver in
-// Schema.Derivers, and the TypeScript reader leaves the class out of
-// Types. Each of its schemas is the name of a type of the API's database,
-// a string: an API imports no engine type, which its generators do not
-// render (D58).
+// which fills the Derived fields of the API's database's tables that
+// implement Derived (D146). The class holds no fields and is no type:
+// Apply records the deriver in Schema.Derivers, and the TypeScript reader
+// leaves the class out of Types. Each of its schemas is the name of a
+// table of the API's database, a string, which the API need not import.
 func deriverDecorator() DecoratorSpec {
 	return DecoratorSpec{
 		Name: "deriver", Packages: []string{pkgAPI}, Target: TargetType,
@@ -57,12 +55,12 @@ func deriverOf(td *ir.TypeDef, args []any) (*ir.Deriver, error) {
 		case "schemas":
 			list, ok := value.([]any)
 			if !ok {
-				return nil, ArgErrorf(0, "@deriver schemas is a list of the types whose Derived fields the deriver fills, tables or engine types of the API's database")
+				return nil, ArgErrorf(0, "@deriver schemas is a list of the tables of the API's database whose Derived fields the deriver fills")
 			}
 			for _, item := range list {
 				name, ok := item.(string)
 				if !ok {
-					return nil, ArgErrorf(0, "@deriver schemas lists the names of types of the API's database that compose Derived, tables or engine types, as strings (\"Ticket\"); an API imports no engine type")
+					return nil, ArgErrorf(0, "@deriver schemas lists the names of tables of the API's database that implement Derived, as strings (\"Ticket\")")
 				}
 				deriver.Schemas = append(deriver.Schemas, name)
 			}
@@ -91,7 +89,7 @@ func deriverOf(td *ir.TypeDef, args []any) (*ir.Deriver, error) {
 // CheckDeriver checks a deriver's declaration in every form: a name, each
 // schema named once, a concurrency of one or more when set, and a batch
 // size from 1 to ir.MaxDeriverBatchSize when set. Whether each schema is
-// an engine type of the API's database that composes Derived is checked
+// a table of the API's database that implements Derived is checked
 // where that database's schema is read: the API's build and the stack's
 // resolution.
 func CheckDeriver(deriver *ir.Deriver) error {

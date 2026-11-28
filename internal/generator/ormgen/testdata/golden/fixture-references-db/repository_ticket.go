@@ -439,9 +439,14 @@ func (r *TicketRepository) Comments() TicketCommentsOperations { return ticketCo
 type ticketCommentsOperations struct{ r *TicketRepository }
 
 // Post runs comments's post on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Post(ctx context.Context, id types.IdentityUUID, params TicketCommentsPostParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "post", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -457,9 +462,14 @@ func (o ticketCommentsOperations) Post(ctx context.Context, id types.IdentityUUI
 }
 
 // Edit runs comments's edit on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Edit(ctx context.Context, id types.IdentityUUID, params TicketCommentsEditParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "edit", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -476,9 +486,14 @@ func (o ticketCommentsOperations) Edit(ctx context.Context, id types.IdentityUUI
 
 // DeleteMessage runs comments's deleteMessage on the row id names, in a
 // transaction, and returns its result. It returns ErrNotFound when no live
-// row holds id, and any other refusal of the core's as the *rules.Refusal it
-// is.
+// row holds id, or the row is one the operation's caller may not write
+// (D156), as UpdateOne's is, and any other refusal of the core's as the
+// *rules.Refusal it is.
 func (o ticketCommentsOperations) DeleteMessage(ctx context.Context, id types.IdentityUUID, params TicketCommentsDeleteMessageParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "deleteMessage", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -494,9 +509,14 @@ func (o ticketCommentsOperations) DeleteMessage(ctx context.Context, id types.Id
 }
 
 // Purge runs comments's purge on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Purge(ctx context.Context, id types.IdentityUUID, params TicketCommentsPurgeParams) (*TicketCommentsPurgeResult, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsPurgeResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsPurgeResult, error) {
 		var out *TicketCommentsPurgeResult
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "purge", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -512,9 +532,14 @@ func (o ticketCommentsOperations) Purge(ctx context.Context, id types.IdentityUU
 }
 
 // React runs comments's react on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) React(ctx context.Context, id types.IdentityUUID, params TicketCommentsReactParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "react", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -530,9 +555,14 @@ func (o ticketCommentsOperations) React(ctx context.Context, id types.IdentityUU
 }
 
 // Unreact runs comments's unreact on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Unreact(ctx context.Context, id types.IdentityUUID, params TicketCommentsUnreactParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "unreact", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -548,9 +578,14 @@ func (o ticketCommentsOperations) Unreact(ctx context.Context, id types.Identity
 }
 
 // Pin runs comments's pin on the row id names, in a transaction, and returns
-// its result. It returns ErrNotFound when no live row holds id, and any other
-// refusal of the core's as the *rules.Refusal it is.
+// its result. It returns ErrNotFound when no live row holds id, or the row is
+// one the operation's caller may not write (D156), as UpdateOne's is, and any
+// other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Pin(ctx context.Context, id types.IdentityUUID, params TicketCommentsPinParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "pin", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -566,9 +601,14 @@ func (o ticketCommentsOperations) Pin(ctx context.Context, id types.IdentityUUID
 }
 
 // Unpin runs comments's unpin on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Unpin(ctx context.Context, id types.IdentityUUID, params TicketCommentsUnpinParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "unpin", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -584,9 +624,14 @@ func (o ticketCommentsOperations) Unpin(ctx context.Context, id types.IdentityUU
 }
 
 // Resolve runs comments's resolve on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Resolve(ctx context.Context, id types.IdentityUUID, params TicketCommentsResolveParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "resolve", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -602,9 +647,14 @@ func (o ticketCommentsOperations) Resolve(ctx context.Context, id types.Identity
 }
 
 // Reopen runs comments's reopen on the row id names, in a transaction, and
-// returns its result. It returns ErrNotFound when no live row holds id, and
-// any other refusal of the core's as the *rules.Refusal it is.
+// returns its result. It returns ErrNotFound when no live row holds id, or
+// the row is one the operation's caller may not write (D156), as UpdateOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) Reopen(ctx context.Context, id types.IdentityUUID, params TicketCommentsReopenParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "reopen", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -621,9 +671,14 @@ func (o ticketCommentsOperations) Reopen(ctx context.Context, id types.IdentityU
 
 // ListMessages runs comments's listMessages on the row id names, in a
 // transaction, and returns its result. It returns ErrNotFound when no live
-// row holds id, and any other refusal of the core's as the *rules.Refusal it
-// is.
+// row holds id, or the row is one the operation's caller does not see (D156),
+// as GetOne's is, and any other refusal of the core's as the *rules.Refusal
+// it is.
 func (o ticketCommentsOperations) ListMessages(ctx context.Context, id types.IdentityUUID, params TicketCommentsListMessagesParams) (*TicketCommentsListMessagesResult, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), false); err != nil {
+		var none *TicketCommentsListMessagesResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsListMessagesResult, error) {
 		var out *TicketCommentsListMessagesResult
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "listMessages", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -640,9 +695,14 @@ func (o ticketCommentsOperations) ListMessages(ctx context.Context, id types.Ide
 
 // GetMessage runs comments's getMessage on the row id names, in a
 // transaction, and returns its result. It returns ErrNotFound when no live
-// row holds id, and any other refusal of the core's as the *rules.Refusal it
-// is.
+// row holds id, or the row is one the operation's caller does not see (D156),
+// as GetOne's is, and any other refusal of the core's as the *rules.Refusal
+// it is.
 func (o ticketCommentsOperations) GetMessage(ctx context.Context, id types.IdentityUUID, params TicketCommentsGetMessageParams) (*TicketCommentsCommentMessage, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), false); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsCommentMessage, error) {
 		var out *TicketCommentsCommentMessage
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "getMessage", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -659,8 +719,13 @@ func (o ticketCommentsOperations) GetMessage(ctx context.Context, id types.Ident
 
 // ListEdits runs comments's listEdits on the row id names, in a transaction,
 // and returns its result. It returns ErrNotFound when no live row holds id,
-// and any other refusal of the core's as the *rules.Refusal it is.
+// or the row is one the operation's caller does not see (D156), as GetOne's
+// is, and any other refusal of the core's as the *rules.Refusal it is.
 func (o ticketCommentsOperations) ListEdits(ctx context.Context, id types.IdentityUUID, params TicketCommentsListEditsParams) (*TicketCommentsListEditsResult, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), false); err != nil {
+		var none *TicketCommentsListEditsResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsListEditsResult, error) {
 		var out *TicketCommentsListEditsResult
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "listEdits", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -677,9 +742,14 @@ func (o ticketCommentsOperations) ListEdits(ctx context.Context, id types.Identi
 
 // ListReactions runs comments's listReactions on the row id names, in a
 // transaction, and returns its result. It returns ErrNotFound when no live
-// row holds id, and any other refusal of the core's as the *rules.Refusal it
-// is.
+// row holds id, or the row is one the operation's caller does not see (D156),
+// as GetOne's is, and any other refusal of the core's as the *rules.Refusal
+// it is.
 func (o ticketCommentsOperations) ListReactions(ctx context.Context, id types.IdentityUUID, params TicketCommentsListReactionsParams) (*TicketCommentsListReactionsResult, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), false); err != nil {
+		var none *TicketCommentsListReactionsResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsListReactionsResult, error) {
 		var out *TicketCommentsListReactionsResult
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "listReactions", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
@@ -696,9 +766,14 @@ func (o ticketCommentsOperations) ListReactions(ctx context.Context, id types.Id
 
 // ListPinned runs comments's listPinned on the row id names, in a
 // transaction, and returns its result. It returns ErrNotFound when no live
-// row holds id, and any other refusal of the core's as the *rules.Refusal it
-// is.
+// row holds id, or the row is one the operation's caller does not see (D156),
+// as GetOne's is, and any other refusal of the core's as the *rules.Refusal
+// it is.
 func (o ticketCommentsOperations) ListPinned(ctx context.Context, id types.IdentityUUID, params TicketCommentsListPinnedParams) (*TicketCommentsListPinnedResult, error) {
+	if err := o.r.requireReach(ctx, id.ToUUID(), false); err != nil {
+		var none *TicketCommentsListPinnedResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*TicketCommentsListPinnedResult, error) {
 		var out *TicketCommentsListPinnedResult
 		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Ticket", id.String(), "Comments", "listPinned", params, behaviorCaller(ctx), o.r.operationOptions(ctx))

@@ -41,9 +41,9 @@ func newBehaviorsCmd(a *app) *cobra.Command {
 		Short: "Write each registered behavior's declaration for the crate that implements it",
 		Long: `behaviors writes the declaration of every behavior this binary registers,
 the JSON file its Go package embeds, into a directory of the crate that
-implements it: one <name>.behavior.json per behavior. An engine
-implementation carries that copy (a Rust behavior embeds it with
-include_str!), so the engine and the compiler read one declaration.
+implements it: one <name>.behavior.json per behavior. An implementation
+carries that copy (a Rust behavior embeds it with include_str!), so the
+crate and the compiler read one declaration.
 
 A copy is canonical: the declaration's keys in their documented order,
 each JSON Schema's object keys sorted, two-space indents and a final
@@ -56,7 +56,9 @@ package ships are written: the core's behaviors ship in
 @superschematic/rules (runtime/engine/rust/rules-behaviors/declarations,
 the behaviors the behaviors' core alone implements, on a table, D104), and
 each crate carries only its own. With --extension, only the behaviors that
-extension registered are written. Given both, a behavior must match both.
+extension registered are written, into the crate whose hooks run them
+on the behaviors' core (its registration's Rules crate). Given both, a
+behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when
 a copy differs, is missing, or has no registered behavior. CI runs it so a
@@ -67,8 +69,8 @@ Examples:
   superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
   superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
   superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
-  acme-schematic behaviors --extension acme --out crates/behaviors/declarations
-  acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check`,
+  my-schematic behaviors --extension my --out crates/my-rules/declarations
+  my-schematic behaviors --extension my --out crates/my-rules/declarations --check`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runBehaviors(cmd, a, flags)

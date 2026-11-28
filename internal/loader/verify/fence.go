@@ -17,10 +17,9 @@ import (
 // A fence is a trigger on a table and a bump in the statements of the
 // table's generated repositories, so the class is a table of a DB service
 // those repositories write: not a @jsonField type, a base class or any
-// other class with no table, not a @queue class, not an engine type, not
-// a member of a version graph, whose engines write its rows, and not a
-// table that composes a behavior, by a field-anchored use or an
-// implements one. There the update of a row, the update half of an
+// other class with no table, not a @queue class, not a member of a
+// version graph, whose engines write its rows, and not a table that
+// composes a behavior, by a field-anchored use or an implements one. There the update of a row, the update half of an
 // upsert and a soft delete go through the behaviors' core, which writes
 // the row's columns, the table's own among them, with statements of its
 // own that advance no fence, so the fence's trigger would refuse them.
@@ -75,8 +74,6 @@ func unfenceable(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool) strin
 	switch {
 	case schema.Kind != ir.SchemaKindDB:
 		return fmt.Sprintf("a fence is a trigger on a table of a DB service, and %s is a %s service; declare it on the table, in the DB service's schema", schema.Name, schema.Kind)
-	case codegen.IsEngineType(td):
-		return fmt.Sprintf("%s composes a behavior with @behavior, so the engine keeps its instances in tables of its own, which no fence's trigger watches and no repository writes; declare the fence on a table", td.Name)
 	case td.Queue != nil:
 		return fmt.Sprintf("%s is a @queue class, whose rows are messages the queue's clients write with statements of their own, which advance no fence; declare the fence on a table", td.Name)
 	case td.JsonField:

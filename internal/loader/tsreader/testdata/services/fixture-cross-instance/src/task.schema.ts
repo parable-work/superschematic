@@ -10,13 +10,6 @@ import { Validate, behavior } from "@superschematic/schema";
   ],
 })
 @behavior("Dependencies", { schemas: ["tasks", "documents"], gatedStates: ["done"] })
-@behavior("Links", {
-  links: {
-    spec: { schema: "documents", pinned: true },
-    parent: { schema: "tasks" },
-    project: { schema: "projects", required: true },
-  },
-})
 export abstract class Task {
   title: Validate<string, { maxLength: 200 }>;
 }

@@ -10,7 +10,7 @@ import (
 {{- end }}
 	"fmt"
 	"strings"
-{{- if or (and .Versioned .SQLite.Refusal) (and .HasBehaviors .HasSoftDelete (not .SQLite.Refusal)) }}
+{{- if or .Versioned (and .HasBehaviors .HasSoftDelete (not .SQLite.Refusal)) }}
 	"time"
 {{- end }}
 
@@ -626,6 +626,42 @@ func (r *{{ $repo }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	}
 	return page, nil
 }
+{{- if .Versioned }}
+{{- $history := printf "sqliteRefused(%q, %q)" .TypeName "has its history read on Postgres alone: on SQLite the DDL's triggers keep it (D189), and the Go repositories read the row and its version, and no history, as the TypeScript ones do (#618)" }}
+
+// The history of {{ .TypeName }}, a @versioned table, on SQLite: the SQLite
+// DDL's triggers keep it as Postgres's do (D189), and the repository reads
+// the row and its version, as the TypeScript repository does there, and no
+// history (#618), whose reads are refused with ErrSQLiteUnsupported.
+
+func (r *{{ $repo }}) GetVersion(context.Context, {{ .PrimaryKeyType }}, int64) (*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) GetVersions(context.Context, []VersionKey[{{ .PrimaryKeyType }}]) ([]*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) GetVersionsWithFields(context.Context, []VersionKey[{{ .PrimaryKeyType }}], {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) ListVersions(context.Context, {{ .PrimaryKeyType }}, *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error) {
+	return nil, {{ $history }}
+}
+
+func (r *{{ $repo }}) GetAsOf(context.Context, {{ .PrimaryKeyType }}, time.Time) (*types.{{ .TypeName }}, error) {
+	return nil, {{ $history }}
+}
+{{- range .Relationships }}
+{{- if not .IsArray }}
+
+func (r *{{ $repo }}) ListAsOfBy{{ toGoName .FieldName }}ID(context.Context, {{ $.UUIDGoType }}, time.Time, *{{ $.TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ $.TypeName }}], error) {
+	return nil, {{ $history }}
+}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if not .Released }}
 
 // stampCreate sets the audit fields of who wrote input, as the Postgres
@@ -1537,6 +1573,16 @@ type {{ $ops }} struct{ r *{{ $repo }} }
 func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 {{- else }}
 func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, id {{ $r.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if $.HeldByAccess }}
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := {{ $v }}.keyArg(id); err != nil {
+		var none {{ .ResultReturn }}
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, {{ .Writes }}); err != nil {
+		var none {{ .ResultReturn }}
+		return none, behaviorOutOfReach(err, {{ printf "%q" $r.TypeName }}, {{ $r.WireKey "id" }}, id)
+	}
+	{{- end }}
 {{- end }}
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -1551,6 +1597,12 @@ func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, id {{ $r.PrimaryKeyType }
 		if err != nil {
 			return err
 		}
+		{{- if and $.HeldByAccess .AnswersRow }}
+		// The core reads every row; its answer keeps to the caller (D156).
+		if raw, err = sqliteKeepAnsweredRow(ctx, tx, {{ printf "%q" $r.TypeName }}, {{ $v }}.quoted, raw, {{ printf "%q" .AnswersRow }}); err != nil {
+			return err
+		}
+		{{- end }}
 		{{- else }}
 		opts, err := o.r.operationOptions(ctx)
 		if err != nil {

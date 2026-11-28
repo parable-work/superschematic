@@ -9,6 +9,8 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/loader/jsonreader"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -270,4 +272,30 @@ func firstDiff(want, got string) string {
 		return b.String()
 	}
 	return ""
+}
+
+// TestWriteForWritesTheTableForm: WriteFor, which format --to=ts calls with
+// the registry the file was read with, writes a General type that composes
+// behaviors on the type as the table it publishes as, as WriteWith does
+// (D117), while it also hands the writer the registry's declarations (D147).
+func TestWriteForWritesTheTableForm(t *testing.T) {
+	path := filepath.Join("..", "migrateplan", "testdata", "development", "notes.schema.json")
+	doc, err := jsonreader.ReadFileWith(path, filepath.Base(path), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := WriteWith(doc, FormatTS, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := WriteFor(doc, FormatTS, registry.New(naming.Active()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "@behavior") {
+		t.Errorf("WriteFor writes @behavior, not the table form:\n%s", got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("WriteFor differs from WriteWith:\ngot:\n%s\nwant:\n%s", got, want)
+	}
 }

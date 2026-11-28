@@ -19,6 +19,415 @@
   "service": "fixture-user-model-db",
   "tables": [
     {
+      "checks": [
+        {
+          "column": "client_id",
+          "minLength": 1,
+          "name": "ck_oauth_client_client_id"
+        }
+      ],
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "OAuthClient.id",
+          "type": "UUID"
+        },
+        {
+          "name": "client_id",
+          "origin": "OAuthClient.clientId",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "OAuthClient.kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "OAuthClient.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "uri",
+          "nullable": true,
+          "origin": "OAuthClient.uri",
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "name": "redirect_uris",
+          "origin": "OAuthClient.redirectUris",
+          "type": "TEXT[]"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "OAuthClient.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "refreshed_at",
+          "nullable": true,
+          "origin": "OAuthClient.refreshedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "fresh_until",
+          "nullable": true,
+          "origin": "OAuthClient.freshUntil",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "OAuthClient.lastUsedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "An OAuth client: a metadata document's, cached, or one that registered.",
+      "kind": "entity",
+      "name": "oauth_client",
+      "origin": "OAuthClient",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_client_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "client_id"
+          ],
+          "name": "oauth_client_client_id_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "OAuthCode.id",
+          "type": "UUID"
+        },
+        {
+          "name": "client_id",
+          "origin": "OAuthCode.client",
+          "type": "UUID"
+        },
+        {
+          "name": "user_id",
+          "nullable": true,
+          "origin": "OAuthCode.user",
+          "type": "UUID"
+        },
+        {
+          "name": "grant_id",
+          "nullable": true,
+          "origin": "OAuthCode.grant",
+          "type": "UUID"
+        },
+        {
+          "name": "redirect_uri",
+          "origin": "OAuthCode.redirectUri",
+          "type": "TEXT"
+        },
+        {
+          "name": "code_challenge",
+          "origin": "OAuthCode.codeChallenge",
+          "type": "TEXT"
+        },
+        {
+          "name": "state",
+          "nullable": true,
+          "origin": "OAuthCode.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "scope",
+          "nullable": true,
+          "origin": "OAuthCode.scope",
+          "type": "TEXT"
+        },
+        {
+          "name": "resource",
+          "origin": "OAuthCode.resource",
+          "type": "TEXT"
+        },
+        {
+          "name": "nonce",
+          "origin": "OAuthCode.nonce",
+          "type": "TEXT"
+        },
+        {
+          "name": "code_hash",
+          "nullable": true,
+          "origin": "OAuthCode.codeHash",
+          "type": "VARCHAR(64)"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "OAuthCode.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "expires_at",
+          "origin": "OAuthCode.expiresAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "used_at",
+          "nullable": true,
+          "origin": "OAuthCode.usedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "An OAuth authorization request: pending while its user consents, then the code its client redeems once.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "client_id"
+          ],
+          "name": "fk_oauth_code_client_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_client"
+        },
+        {
+          "columns": [
+            "grant_id"
+          ],
+          "name": "fk_oauth_code_grant_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_grant"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_oauth_code_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "kind": "entity",
+      "name": "oauth_code",
+      "origin": "OAuthCode",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_code_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "code_hash"
+          ],
+          "name": "oauth_code_code_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "OAuthGrant.id",
+          "type": "UUID"
+        },
+        {
+          "name": "user_id",
+          "origin": "OAuthGrant.user",
+          "type": "UUID"
+        },
+        {
+          "name": "client_id",
+          "origin": "OAuthGrant.client",
+          "type": "UUID"
+        },
+        {
+          "name": "permissions",
+          "nullable": true,
+          "origin": "OAuthGrant.permissions",
+          "type": "TEXT[]"
+        },
+        {
+          "name": "resource",
+          "origin": "OAuthGrant.resource",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "OAuthGrant.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "expires_at",
+          "origin": "OAuthGrant.expiresAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "OAuthGrant.lastUsedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "OAuthGrant.revokedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "client_id"
+          ],
+          "name": "fk_oauth_grant_client_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_client"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_oauth_grant_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "user"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_oauth_grant_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "oauth_grant",
+      "origin": "OAuthGrant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_grant_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "OAuthToken.id",
+          "type": "UUID"
+        },
+        {
+          "name": "grant_id",
+          "origin": "OAuthToken.grant",
+          "type": "UUID"
+        },
+        {
+          "name": "kind",
+          "origin": "OAuthToken.kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "OAuthToken.tokenHash",
+          "type": "VARCHAR(64)"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "OAuthToken.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "expires_at",
+          "origin": "OAuthToken.expiresAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "used_at",
+          "nullable": true,
+          "origin": "OAuthToken.usedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "OAuthToken.revokedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "grant_id"
+          ],
+          "name": "fk_oauth_token_grant_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_grant"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "grant_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_oauth_token_grant"
+        }
+      ],
+      "kind": "entity",
+      "name": "oauth_token",
+      "origin": "OAuthToken",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_token_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "oauth_token_token_hash_key"
+        }
+      ]
+    },
+    {
       "columns": [
         {
           "default": "gen_random_uuid()",

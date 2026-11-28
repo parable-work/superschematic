@@ -23,9 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/release"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -171,7 +170,14 @@ func rootApps(c registry.GenerateContext, name string) ([]registry.CIApp, error)
 	var out []registry.CIApp
 	for _, entry := range entries {
 		other := entry.Name()
-		if !entry.IsDir() || strings.HasPrefix(other, "_") || other == filepath.Base(dir) || !hasConfig(filepath.Join(root, other)) {
+		if !entry.IsDir() || strings.HasPrefix(other, "_") || other == filepath.Base(dir) {
+			continue
+		}
+		_, _, ok, err := schemaconfig.Locate(filepath.Join(root, other))
+		if err != nil {
+			return nil, fmt.Errorf("stack %s: %w", name, err)
+		}
+		if !ok {
 			continue
 		}
 		cfg, err := c.Options.LoadDependencyConfig(other)
@@ -204,17 +210,6 @@ func rootApps(c registry.GenerateContext, name string) ([]registry.CIApp, error)
 		}
 	}
 	return out, nil
-}
-
-// hasConfig reports whether dir holds a schema config, as a service of the
-// services root does.
-func hasConfig(dir string) bool {
-	for _, file := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
-		if _, err := os.Stat(filepath.Join(dir, file)); err == nil {
-			return true
-		}
-	}
-	return false
 }
 
 // archives are the release's static archives by platform, with where
@@ -301,20 +296,8 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 	if implementationRoot, err = filepath.Abs(implementationRoot); err != nil {
 		return registry.CIStack{}, err
 	}
-	runsEngine := false
 	for _, env := range envs {
 		for _, d := range env.Deployables {
-			if d.Kind == ir.DeployableRunner && d.Runner != nil {
-				runsEngine = true
-				if _, ok := out.EngineArchives[d.Runner.Database]; ok || !projectEngine(c, d.Runner.Database) {
-					continue
-				}
-				if out.EngineArchives == nil {
-					out.EngineArchives = map[string]string{}
-				}
-				out.EngineArchives[d.Runner.Database] = path.Join(out.OutputRoot, "engine", "rust", d.Runner.Database, "ffi")
-				continue
-			}
 			if d.Kind == ir.DeployableSite && d.Site != nil {
 				if _, ok := out.Sites[d.Name]; ok {
 					continue
@@ -348,58 +331,7 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 		}
 	}
 	rulesOf(c, name, &out, envs, rel)
-	if runsEngine {
-		if checkout := engineCheckout(c.Options.Paths); checkout != "" {
-			if dir, err := rel("the engine's checkout", checkout); err == nil {
-				out.EngineCheckout = dir
-				out.EngineCheckoutTypeScript = c.Options.Paths.EngineTypeScript != "" &&
-					engineCheckout(naming.LocalPaths{EngineTypeScript: c.Options.Paths.EngineTypeScript}) == checkout
-			} else {
-				c.Logf("  - %s CI of stack %s builds nothing of the engine's checkout: %v\n", Name, name, err)
-			}
-		}
-	}
 	return out, nil
-}
-
-// engineCheckout is the root of the superschematic checkout the [paths]
-// engine keys name (D58), empty when none does: the engine's Go binding
-// and npm package lie at runtime/engine/go and runtime/engine/typescript
-// in it, and its crate at runtime/engine/rust/engine.
-func engineCheckout(paths naming.LocalPaths) string {
-	switch {
-	case paths.EngineGo != "":
-		return filepath.Dir(filepath.Dir(filepath.Dir(paths.EngineGo)))
-	case paths.EngineTypeScript != "":
-		return filepath.Dir(filepath.Dir(filepath.Dir(paths.EngineTypeScript)))
-	case paths.EngineRust != "":
-		return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(paths.EngineRust))))
-	}
-	return ""
-}
-
-// projectEngine reports whether the engine of the engine database db
-// composes a behavior the core's engine archive does not run, the work
-// queue's, a commerce one (D70) or an extension's, so its servers link the archive of the
-// project's engine crate, which the build writes (D58). A database the
-// build cannot load is left to the generators that read it.
-func projectEngine(c registry.GenerateContext, db string) bool {
-	if c.LoadDependency == nil {
-		return false
-	}
-	schema, err := c.LoadDependency(db)
-	if err != nil {
-		return false
-	}
-	for _, td := range codegen.EngineTypes(schema) {
-		for _, ref := range td.TypeBehaviors() {
-			declared, ok := c.Registry.Behavior(ref.Name)
-			if !ok || declared.Extension != "" || declared.Package != registry.EnginePackage {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // packageManager names the package manager of the schemas root by its

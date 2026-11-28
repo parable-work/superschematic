@@ -183,7 +183,7 @@ class Cover(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -210,7 +210,7 @@ class Cover(BaseModel):
         # Validate entityKey
         if self.entity_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -425,7 +425,7 @@ class Ingredient(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -450,7 +450,7 @@ class Ingredient(BaseModel):
             errors.add_field_error("step_key", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.step_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.step_key)) is None:
                 errors.add_field_error("step_key", "pattern", "invalid format")
 
         # Validate quantity
@@ -470,7 +470,7 @@ class Ingredient(BaseModel):
         # Validate entityKey
         if self.entity_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -683,7 +683,7 @@ class Note(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -706,7 +706,7 @@ class Note(BaseModel):
         # Validate replyTo
         if self.reply_to is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.reply_to), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.reply_to)) is None:
                 errors.add_field_error("reply_to", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -724,7 +724,7 @@ class Note(BaseModel):
         # Validate entityKey
         if self.entity_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -942,7 +942,7 @@ class Part(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -965,7 +965,7 @@ class Part(BaseModel):
         # Validate parentKey
         if self.parent_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.parent_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.parent_key)) is None:
                 errors.add_field_error("parent_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -987,7 +987,7 @@ class Part(BaseModel):
         # Validate entityKey
         if self.entity_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1201,7 +1201,7 @@ class PartReleased(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1226,13 +1226,13 @@ class PartReleased(BaseModel):
             errors.add_field_error("entity_key", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
         # Validate parentKey
         if self.parent_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.parent_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.parent_key)) is None:
                 errors.add_field_error("parent_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1444,7 +1444,7 @@ class Recipe(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1468,7 +1468,7 @@ class Recipe(BaseModel):
             errors.add_field_error("created_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.created_by)) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
 
         if by_alias:
@@ -1654,7 +1654,7 @@ class RecipeCommit(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1738,7 +1738,7 @@ class RecipeCommit(BaseModel):
             errors.add_field_error("created_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.created_by)) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
 
         if by_alias:
@@ -1921,13 +1921,13 @@ class RecipeCommitted(BaseModel):
             errors.add_field_error("root", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.root), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.root)) is None:
                 errors.add_field_error("root", "pattern", "invalid format")
 
         # Validate ref
         if self.ref is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.ref), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.ref)) is None:
                 errors.add_field_error("ref", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1943,7 +1943,7 @@ class RecipeCommitted(BaseModel):
             errors.add_field_error("commit", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.commit), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.commit)) is None:
                 errors.add_field_error("commit", "pattern", "invalid format")
 
         # Validate sequence
@@ -2133,7 +2133,7 @@ class RecipePatch(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -2162,7 +2162,7 @@ class RecipePatch(BaseModel):
             errors.add_field_error("entity_key", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
         # Validate entityId
@@ -2170,7 +2170,7 @@ class RecipePatch(BaseModel):
             errors.add_field_error("entity_id", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_id)) is None:
                 errors.add_field_error("entity_id", "pattern", "invalid format")
 
         # Validate entityVersion
@@ -2361,7 +2361,7 @@ class RecipePublished(BaseModel):
             errors.add_field_error("root", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.root), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.root)) is None:
                 errors.add_field_error("root", "pattern", "invalid format")
 
         # Validate commit
@@ -2369,7 +2369,7 @@ class RecipePublished(BaseModel):
             errors.add_field_error("commit", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.commit), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.commit)) is None:
                 errors.add_field_error("commit", "pattern", "invalid format")
 
         # Validate sequence
@@ -2573,7 +2573,7 @@ class RecipeRef(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -2640,7 +2640,7 @@ class RecipeRef(BaseModel):
             errors.add_field_error("created_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.created_by)) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
 
         # Validate updatedAt
@@ -2652,7 +2652,7 @@ class RecipeRef(BaseModel):
             errors.add_field_error("updated_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.updated_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.updated_by)) is None:
                 errors.add_field_error("updated_by", "pattern", "invalid format")
 
         # Validate deletedAt
@@ -2665,7 +2665,7 @@ class RecipeRef(BaseModel):
         # Validate deletedBy
         if self.deleted_by is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.deleted_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.deleted_by)) is None:
                 errors.add_field_error("deleted_by", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -2871,7 +2871,7 @@ class RecipeRelease(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -2909,7 +2909,7 @@ class RecipeRelease(BaseModel):
             errors.add_field_error("created_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.created_by)) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
 
         # Validate updatedAt
@@ -2921,7 +2921,7 @@ class RecipeRelease(BaseModel):
             errors.add_field_error("updated_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.updated_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.updated_by)) is None:
                 errors.add_field_error("updated_by", "pattern", "invalid format")
 
         # Validate _version
@@ -3107,7 +3107,7 @@ class RecipeSnapshotEntry(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -3136,7 +3136,7 @@ class RecipeSnapshotEntry(BaseModel):
             errors.add_field_error("entity_key", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
         # Validate entityId
@@ -3144,7 +3144,7 @@ class RecipeSnapshotEntry(BaseModel):
             errors.add_field_error("entity_id", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_id)) is None:
                 errors.add_field_error("entity_id", "pattern", "invalid format")
 
         # Validate entityVersion
@@ -3354,7 +3354,7 @@ class Step(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -3414,7 +3414,7 @@ class Step(BaseModel):
             errors.add_field_error("created_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.created_by)) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
 
         # Validate updatedAt
@@ -3426,13 +3426,13 @@ class Step(BaseModel):
             errors.add_field_error("updated_by", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.updated_by), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.updated_by)) is None:
                 errors.add_field_error("updated_by", "pattern", "invalid format")
 
         # Validate entityKey
         if self.entity_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -3671,7 +3671,7 @@ class Tasting(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -3696,7 +3696,7 @@ class Tasting(BaseModel):
             errors.add_field_error("taster", "required", "required field")
         else:
 
-            if re.search(r"^[0-9A-Za-z]{1,22}$", str(self.taster), re.ASCII) is None:
+            if re.search(r"^[0-9A-Za-z]{1,22}\Z", str(self.taster)) is None:
                 errors.add_field_error("taster", "pattern", "invalid format")
 
         # Validate salty
@@ -3734,7 +3734,7 @@ class Tasting(BaseModel):
             errors.add_field_error("served_at", "required", "required field")
         else:
 
-            if re.search(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$", str(self.served_at), re.ASCII) is None:
+            if re.search(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?[\t\n\f\r ]?[AaPp][Mm])\Z", str(self.served_at)) is None:
                 errors.add_field_error("served_at", "pattern", "invalid format")
 
         # Validate rested
@@ -3744,7 +3744,7 @@ class Tasting(BaseModel):
 
             if len(str(self.rested)) > 32:
                 errors.add_field_error("rested", "maxLength", "must be at most 32 characters")
-            if re.search(r"^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$", str(self.rested), re.ASCII) is None:
+            if re.search(r"^([0-9]+(\.[0-9]+)?(ns|us|\xb5s|ms|s|m|h))+\Z", str(self.rested)) is None:
                 errors.add_field_error("rested", "pattern", "invalid format")
 
         # Validate verdict
@@ -3782,7 +3782,7 @@ class Tasting(BaseModel):
                         errors.add_field_error(f"helpers[{index}]", "required", "required field")
             if isinstance(self.helpers, list):
                 for index, item in enumerate(self.helpers):
-                    if item is not None and re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(item), re.ASCII) is None:
+                    if item is not None and re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(item)) is None:
                         errors.add_field_error(f"helpers[{index}]", "pattern", "invalid format")
 
         # Validate bites
@@ -3818,7 +3818,7 @@ class Tasting(BaseModel):
         # Validate entityKey
         if self.entity_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -4034,7 +4034,7 @@ class Utensil(BaseModel):
             errors.add_field_error("id", "required", "required field")
         else:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
         # Validate recipe
@@ -4053,7 +4053,7 @@ class Utensil(BaseModel):
         # Validate entityKey
         if self.entity_key is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.entity_key)) is None:
                 errors.add_field_error("entity_key", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only

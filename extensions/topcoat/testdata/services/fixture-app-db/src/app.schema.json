@@ -105,11 +105,6 @@
         "plural": "Notes",
         "titleField": "title"
       },
-      "behaviors": [
-        {
-          "name": "Comments"
-        }
-      ],
       "fields": [
         {
           "name": "title",

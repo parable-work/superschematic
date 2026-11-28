@@ -1118,9 +1118,6 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		opts.Clock = codegen.DefaultClock()
 	}
 	opts.Naming = opts.Naming.OrDefault()
-	// An engine type gets no repository: the engine keeps its instances
-	// (D58).
-	schema = codegen.WithoutEngineTypes(schema)
 
 	tableTypes := tableTypeDefs(schema)
 	if len(tableTypes) == 0 && len(schema.Queues()) == 0 && len(schema.Queries()) == 0 {
@@ -1219,11 +1216,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	crossTables, err := crossTablesOf(schema, tables)
+	crossTables, err := crossTablesOf(schema, tables, opts.SQLite)
 	if err != nil {
 		return nil, err
 	}
-	notifier, err := notificationsOf(schema, tables, repositories)
+	notifier, err := notificationsOf(schema, tables, repositories, opts.SQLite)
 	if err != nil {
 		return nil, err
 	}
@@ -1393,11 +1390,13 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			}
 		}
 	}
-	// The inbound path and the dispatcher run on Postgres alone (D192).
-	if !opts.SQLite {
-		if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
-			return nil, err
-		}
+	// The inbound path and the dispatcher (D192), on SQLite too for a
+	// database that lists sqlite (#618): orchestration_sqlite.go.
+	if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
+		return nil, err
+	}
+	if err := checkNotifierQueuesOnSQLite(output); err != nil {
+		return nil, err
 	}
 
 	return output, nil

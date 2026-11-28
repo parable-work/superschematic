@@ -78,16 +78,6 @@ func (o *APIOutput) APICrateIdent() string {
 	return strings.ReplaceAll(o.CrateName, "-", "_")
 }
 
-// AppsEngine is the engine's crate as Rust source spells it when the
-// API's Deps hold the engine of its engine database, whose opened engine
-// each app's parts hold; empty without one.
-func (o *APIOutput) AppsEngine() string {
-	if o.Deps == nil || o.Deps.Engine == nil {
-		return ""
-	}
-	return o.Deps.Engine.CrateIdent()
-}
-
 // AppScaffold is what the scaffold of an app's crate is written from.
 type AppScaffold struct {
 	*APIOutput

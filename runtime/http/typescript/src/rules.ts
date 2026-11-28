@@ -884,10 +884,11 @@ export interface RulesHost {
   /** The request id of a command the wrappers build, unique per command; crypto.randomUUID() unless set. */
   readonly request?: () => string;
   /**
-   * False sends no wake after a command (wakeQueues): the generated
-   * repositories on SQLite and D1 set it, where no drain worker runs and an
-   * enqueue wakes none (D145's left, D182), as the Go SQLite rules host
-   * gives no Wake. Unset, the command wakes as the module says.
+   * False sends no wake after a command (wakeQueues), for a host whose
+   * queues no worker drains. The generated repositories set none, on
+   * Postgres, SQLite and D1 alike, since a worker drains a D1 database's
+   * queues on Workers too (D151, #702). Unset, the command wakes as the
+   * module says.
    */
   readonly wakes?: boolean;
 }

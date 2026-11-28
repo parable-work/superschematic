@@ -12,12 +12,19 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use postgres::{Client, NoTls};
+use postgres::Client;
 use serde_json::json;
+use superschematic_engine_pg::tls_for;
 use superschematic_rules::Code;
 use superschematic_rules_runtime::{Publish, Runtime};
 
 use common::{binaries, skipped};
+
+/// A connection with the TLS the URL's sslmode asks for.
+fn connect(url: &str) -> Result<Client, postgres::Error> {
+    let (url, tls) = tls_for(url).expect("the TLS");
+    Client::connect(&url, tls)
+}
 
 /// A database of its own on the test server, dropped with it.
 struct Database {
@@ -33,7 +40,7 @@ impl Database {
             return None;
         };
         let name = format!("rules_runtime_{test}_{}", std::process::id());
-        let mut client = Client::connect(&admin, NoTls).expect("the test server");
+        let mut client = connect(&admin).expect("the test server");
         client
             .batch_execute(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
             .expect("an earlier run's database dropped");
@@ -49,13 +56,13 @@ impl Database {
     }
 
     fn client(&self) -> Client {
-        Client::connect(&self.url, NoTls).expect("the test's database")
+        connect(&self.url).expect("the test's database")
     }
 }
 
 impl Drop for Database {
     fn drop(&mut self) {
-        if let Ok(mut client) = Client::connect(&self.admin, NoTls) {
+        if let Ok(mut client) = connect(&self.admin) {
             let _ = client.batch_execute(&format!(
                 "DROP DATABASE IF EXISTS {} WITH (FORCE)",
                 self.name
@@ -322,4 +329,44 @@ fn a_plan_in_progress_serves_no_request() {
         .batch_execute("UPDATE superschematic_schema_state SET plan_hash = NULL")
         .expect("the plan done");
     common::ok(&mut runtime, json!({"kind": "list", "type": "Task"}));
+}
+
+scenario!(
+    general_documents_publish_as_their_tables,
+    "general",
+    common::moves::general_documents_publish_as_their_tables
+);
+scenario!(
+    general_documents_publish_as_the_service_named,
+    "named",
+    common::moves::named_general_documents_publish
+);
+
+/// A development store in a Postgres schema of a database of its own moves
+/// to an empty runtime database with its rows (decision 5).
+#[test]
+fn a_development_store_moves_with_its_rows() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let (Some(development), Some(database)) = (Database::new("move_dev"), Database::new("move"))
+    else {
+        return;
+    };
+    let mut dev = superschematic_rules_dev::Dev::postgres(&development.url, "superschematic_dev")
+        .expect("a development store");
+    common::moves::development_moves_with_its_rows(&database.open(), &binaries, &mut dev);
+}
+
+/// A runtime database exports as a compiled DB service whose first plan
+/// from the recorded model is empty.
+#[test]
+fn a_runtime_database_exports_to_compiled() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let Some(database) = Database::new("export") else {
+        return;
+    };
+    common::moves::exports_to_compiled(&database.open(), &binaries, &database.url, "postgres");
 }

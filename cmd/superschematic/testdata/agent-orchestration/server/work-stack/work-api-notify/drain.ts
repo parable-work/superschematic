@@ -141,7 +141,7 @@ export class QueueWake extends WorkflowEntrypoint<unknown, WakeParams> {
 async function drain(on: { readonly cron?: string; readonly wake?: string }): Promise<void> {
   // The string bindings, and the value of each Secrets Store secret the
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, ['CREDENTIALS_TOKEN', 'SMS_TOKEN']);
+  const values = await stackEnvWithSecrets(env, ['CREDENTIALS_TOKEN', 'SMS_TOKEN'], ['CREDENTIALS_TOKEN', 'SMS_TOKEN']);
   const workApiConfig = configure('work-api', () => workApiApi.loadEnvConfig(values));
 
   // The API's database, over the hyperdrive binding its connection names
@@ -170,6 +170,9 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
   // A queue of the notifier (D153): its handler takes each
   // message as it is, and the implementation has no method for it.
   const queue = postgresQueue(workDbPool, noticeWorkQueue);
+  // The notifier's upkeep beside the queue's prune: every channel adapter's
+  // health on its schedule, and the deliveries past their retention.
+  const upkeep = workApiApi.notifierUpkeepOf(workApiDeps);
   logger.info('worker started', { api: 'work-api', class: 'Notify', queue: queue.name, concurrency, drainSeconds, ...on });
   // The window's end stops the claims, as SIGTERM stops main.ts's; a wake's
   // run stops sooner, once the queue was idle a while.
@@ -189,7 +192,7 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
         complete: (id, token) => queue.complete(id, token),
         fail: (id, token, cause) => queue.fail(id, token, cause),
         release: (id, token) => queue.release(id, token),
-        prune: limit => queue.prune(limit),
+        prune: async limit => (await queue.prune(limit)) + (await upkeep(limit)),
         nextDue: () => queue.nextDue(),
       },
     ],

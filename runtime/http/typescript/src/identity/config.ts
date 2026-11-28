@@ -65,6 +65,13 @@ export interface IdentityConfig {
   /** The origins (scheme://host[:port]) a cookie request may come from across origins, and the only ones CORS answers. */
   readonly trustedOrigins: readonly string[];
   readonly password: { readonly argon2: Argon2Params };
+  /**
+   * The deployment's part of the OAuth authorization server of an API with
+   * `@userSessions({ oauth })` (#695). publicBaseUrl is the URL the API is
+   * reached at from outside, which the stack fills in from the site's
+   * origin; empty means the request's own.
+   */
+  readonly oauth: { readonly publicBaseUrl: string };
 }
 
 /** The JSON a deployment writes: every member optional, null for its default. */
@@ -81,6 +88,7 @@ export interface IdentityConfigInput {
   } | null;
   trustedOrigins?: readonly (string | null)[] | null;
   password?: { argon2?: { memoryKiB?: number | null; iterations?: number | null; parallelism?: number | null } | null } | null;
+  oauth?: { publicBaseUrl?: string | null } | null;
 }
 
 /** A config the runtime refuses, with every reason. */
@@ -171,7 +179,7 @@ export function parseIdentityConfig(input: unknown): IdentityConfig {
     return value;
   };
 
-  checkMembers(root, '', ['sessionTtlSeconds', 'idleTimeoutSeconds', 'touchIntervalSeconds', 'apiKeyMaxTtlSeconds', 'cookie', 'trustedOrigins', 'password'], add);
+  checkMembers(root, '', ['sessionTtlSeconds', 'idleTimeoutSeconds', 'touchIntervalSeconds', 'apiKeyMaxTtlSeconds', 'cookie', 'trustedOrigins', 'password', 'oauth'], add);
   const ttl = integer(root, '', 'sessionTtlSeconds');
   const idle = integer(root, '', 'idleTimeoutSeconds');
   const touch = integer(root, '', 'touchIntervalSeconds');
@@ -210,6 +218,10 @@ export function parseIdentityConfig(input: unknown): IdentityConfig {
   const memoryKiB = integer(argon2Input, 'password.argon2.', 'memoryKiB', MAX_UINT32, 0);
   const iterations = integer(argon2Input, 'password.argon2.', 'iterations', MAX_UINT32, 0);
   const parallelism = integer(argon2Input, 'password.argon2.', 'parallelism', MAX_UINT32, 0);
+
+  const oauthInput = root?.oauth === null || root?.oauth === undefined ? undefined : objectOf(root.oauth, 'oauth', add);
+  checkMembers(oauthInput, 'oauth.', ['publicBaseUrl'], add);
+  const publicBaseUrl = text(oauthInput, 'oauth.', 'publicBaseUrl');
 
   // The rules, as Go's Config.Validate states them.
   if (ttl !== undefined && ttl <= 0) add(`sessionTtlSeconds must be positive, not ${ttl}`);
@@ -257,6 +269,11 @@ export function parseIdentityConfig(input: unknown): IdentityConfig {
     if (problem) add(`trustedOrigins[${i}]: ${problem}`);
   });
 
+  if (publicBaseUrl !== '') {
+    const problem = publicBaseUrlProblem(publicBaseUrl);
+    if (problem) add(`oauth.publicBaseUrl: ${problem}`);
+  }
+
   const argon2: Argon2Params = {
     memoryKiB: memoryKiB ?? DEFAULT_ARGON2_MEMORY_KIB,
     iterations: iterations ?? DEFAULT_ARGON2_ITERATIONS,
@@ -274,7 +291,42 @@ export function parseIdentityConfig(input: unknown): IdentityConfig {
     cookie: { name: cookieNameOf(cookieName, domain, secure), domain, secure, sameSite },
     trustedOrigins,
     password: { argon2 },
+    oauth: { publicBaseUrl },
   };
+}
+
+/**
+ * The reason a public base URL (#695) is not scheme://host[:port][/path]
+ * with no trailing slash, user, query or fragment, or is http on a host
+ * other than localhost, 127.0.0.1 and [::1], as Go's checkPublicBaseURL
+ * states it; undefined for one the runtime takes.
+ */
+export function publicBaseUrlProblem(base: string): string | undefined {
+  const u = parseGoURL(base);
+  const quoted = JSON.stringify(base);
+  if (!u) return `${quoted} is not a URL`;
+  if (u.host === '' || u.opaque !== '') return `${quoted} is not scheme://host[:port][/path]`;
+  if (u.hasUser) return `${quoted} has a user`;
+  if (u.rawQuery !== '' || u.fragment !== '' || /[?#]/u.test(base)) return `${quoted} has a query or fragment`;
+  if (u.path.endsWith('/')) return `${quoted} ends with a slash`;
+  if (u.scheme === 'https') return undefined;
+  if (u.scheme === 'http' && isLoopbackHost(hostnameOf(u.host))) return undefined;
+  return `${quoted} is not https, or http on localhost, 127.0.0.1 or [::1]`;
+}
+
+/** A URL host's name without its port and an IPv6 address's brackets, as Go's URL.Hostname gives it. */
+export function hostnameOf(host: string): string {
+  if (host.startsWith('[')) {
+    const close = host.indexOf(']');
+    return close < 0 ? host.slice(1) : host.slice(1, close);
+  }
+  const colon = host.lastIndexOf(':');
+  return colon < 0 ? host : host.slice(0, colon);
+}
+
+/** Whether a hostname names the machine itself: localhost, 127.0.0.1 or ::1. */
+export function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
 /** The reason argon2 does not take a cost, as a config states it; undefined when it does. */

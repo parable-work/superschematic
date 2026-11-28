@@ -18,7 +18,7 @@ module example.com/schemas/api/fixture-blueprint-api
 go 1.27.3
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	example.com/schemas/orm/fixture-blueprint-db v0.0.0-00010101000000-000000000000
 	example.com/schemas/types/go/fixture-blueprint-api v0.0.0-00010101000000-000000000000
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000

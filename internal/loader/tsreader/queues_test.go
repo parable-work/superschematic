@@ -271,7 +271,7 @@ func TestDeriversAreNoTypes(t *testing.T) {
 	}
 	for _, imp := range schema.Imports {
 		if slices.Contains(imp.Types, "Ticket") {
-			t.Errorf("imports = %+v, want no engine type", schema.Imports)
+			t.Errorf("imports = %+v, want no imported Ticket", schema.Imports)
 		}
 	}
 }

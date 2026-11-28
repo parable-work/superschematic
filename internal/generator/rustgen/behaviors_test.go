@@ -61,9 +61,6 @@ fn reads_and_writes_a_ticket_s_behaviors() {
     assert_eq!(behaviors.comments.last_message_at, Some(1790790800000));
     assert_eq!(behaviors.revisions.revision, Some(3));
     assert_eq!(behaviors.revisions.pending_proposals, None);
-    assert_eq!(behaviors.links.targets.project.id, "launch");
-    assert_eq!(behaviors.links.targets.reviewers.as_ref().map(Vec::len), Some(2));
-    assert_eq!(behaviors.links.targets.spec.as_ref().and_then(|spec| spec.stale), Some(true));
     assert!(behaviors.timers.deadlines.close.is_none());
     assert_eq!(behaviors.timers.deadlines.respond.as_ref().and_then(|d| d.outcome.as_deref()), Some("moved"));
     assert_eq!(behaviors.approvals.gates.done.as_ref().map(|gate| gate.signed_by.clone()), Some(vec!["ana".to_string()]));

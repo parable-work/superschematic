@@ -27,6 +27,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/migrateplan/lower"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -61,6 +62,17 @@ type Context struct {
 	// value a create gives takes its type before its config (D147). Nil is
 	// the core registry.
 	Registry *registry.Registry
+
+	// Tables writes a General document's type that composes a behavior on
+	// the type, D16's @behavior form, as the table it publishes as in
+	// runtime and compiled mode (D117, internal/migrateplan/lower), which
+	// format --to=ts does to a file: a class with a key, a behavior whose
+	// declaration names a value field as that field's type (`status:
+	// Workflow<{ ... }>`), and every other behavior one the class
+	// implements. The file then belongs to a DB service. Without it, as a
+	// General service is written whole, the type keeps @behavior, which a
+	// General service holds.
+	Tables bool
 }
 
 // Write renders a document as TypeScript schema source.
@@ -69,10 +81,19 @@ func Write(doc *schemafile.Document) ([]byte, error) {
 }
 
 // WriteContext renders a document as TypeScript schema source with
-// service-level context for cross-file references.
+// service-level context for cross-file references, and with ctx.Tables a
+// General document's types that compose behaviors on the type as the
+// tables they publish as.
 func WriteContext(doc *schemafile.Document, ctx *Context) ([]byte, error) {
 	if ctx == nil {
 		ctx = &Context{}
+	}
+	if ctx.Tables {
+		lowered, err := lower.Document(doc, lower.CoreValues())
+		if err != nil {
+			return nil, err
+		}
+		doc = lowered
 	}
 	e := &emitter{
 		doc:        doc,
@@ -281,8 +302,7 @@ func (e *emitter) emitApp(app *ir.App) {
 // emitDeriver renders a deriver as the class the reader reads it from
 // (D74): `@deriver({ schemas: ["<type>", ...], ... })` on an abstract class
 // with no members, or `@deriver()` when it sets nothing. Each schema is the
-// name of an engine type of the API's database, which the schema does not
-// import.
+// name of a table of the API's database, which the schema need not import.
 func (e *emitter) emitDeriver(deriver *ir.Deriver) {
 	if deriver == nil {
 		return

@@ -2619,11 +2619,11 @@ class TableRepository {
    * behaviors' core of count rows (D145), each of which its trigger wrote a
    * change of: updateMany's, deleteMany's and hardDeleteOne's. A write
    * through the core wakes it from the rules adapter. A table no behavior
-   * hears has none, and neither has one on SQLite or D1, where no drain
-   * worker runs and an enqueue wakes none (D182).
+   * hears has none. On SQLite and D1 the wake goes as on Postgres: a
+   * Worker on D1 sends it to the worker's Workflow (D151, #702), and a
+   * process with no waker sends nothing.
    */
   private wakeChanges(count: number): void {
-    if (this.runner.sqlite !== undefined) return;
     const queue = this.behaviors?.changes?.queue;
     if (queue !== undefined && count > 0) wakeAfterEnqueue(queue);
   }
@@ -3349,8 +3349,11 @@ class TableRepository {
     if (this.orm.dialect === 'sqlite') {
       const sqlite = this.runner.sqlite;
       if (sqlite === undefined) throw new Error(`orm: ${this.def.name} composes behaviors (D103), and the repositories on SQLite run over no SqlDatabase; open them with sqliteOrm`);
-      // No wake on SQLite or D1, where no drain worker runs (D145's left).
-      return { core: this.rules, layout: this.orm.rules, store: sqliteRulesStore(sqlite.db), wakes: false };
+      // On D1 a worker drains at a Cron Trigger's firings, and a command's
+      // deadline due before the next one, its events and its writes wake
+      // it as on Postgres (D151, #702); a process with no waker, a server
+      // over a SQLite file, sends nothing.
+      return { core: this.rules, layout: this.orm.rules, store: sqliteRulesStore(sqlite.db) };
     }
     const queryable = this.runner.queryable;
     return {

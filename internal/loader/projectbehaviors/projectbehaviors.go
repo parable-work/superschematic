@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"

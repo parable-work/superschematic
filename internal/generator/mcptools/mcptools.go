@@ -134,7 +134,12 @@ type Route struct {
 // ToolsLiteral is the tool table as JSON, indented by two spaces, which is
 // a TypeScript expression, and what the Rust runtime reads.
 func (e *Endpoint) ToolsLiteral() (string, error) {
-	return JSONLiteral(e.Tools, true)
+	// An endpoint with no visible tool serves an empty list, not null.
+	tools := e.Tools
+	if tools == nil {
+		tools = []Tool{}
+	}
+	return JSONLiteral(tools, true)
 }
 
 // JSONLiteral encodes value as JSON without HTML escapes, indented by two

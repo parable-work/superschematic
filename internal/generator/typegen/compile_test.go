@@ -145,9 +145,6 @@ func TestTicketBehaviorsRoundTrip(t *testing.T) {
 	if b.Workflow.Status != TicketStateInProgress || b.Comments.Messages != 2 || b.Comments.Threads.Open != 1 || *b.Revisions.Revision != 3 {
 		t.Fatalf("decoded %+v", b)
 	}
-	if b.Links.Targets.Project.Id != "launch" || len(b.Links.Targets.Reviewers) != 2 || !*b.Links.Targets.Spec.Stale {
-		t.Fatalf("decoded links %+v", b.Links)
-	}
 	if b.Timers.Deadlines.Close != nil || *b.Timers.Deadlines.Respond.Outcome != "moved" {
 		t.Fatalf("decoded timers %+v", b.Timers)
 	}

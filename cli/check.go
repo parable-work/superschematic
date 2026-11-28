@@ -148,14 +148,11 @@ func isDir(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// isServiceDir reports whether dir holds a schema.config in any form.
+// isServiceDir reports whether dir holds a schema.config in any form. A
+// directory Locate refuses (two forms) is one, so its load reports why.
 func isServiceDir(dir string) bool {
-	for _, name := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			return true
-		}
-	}
-	return false
+	_, _, ok, err := schemaconfig.Locate(dir)
+	return ok || err != nil
 }
 
 // checkDiagnostic is one finding of a check. File is absolute until a

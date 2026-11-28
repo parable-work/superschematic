@@ -82,6 +82,9 @@ export function notCovered(permissions: string[]): HttpProblem {
  */
 export const SESSION_ONLY_MESSAGE = 'An API key does not act on its own account: sign in with a session';
 
+/** The 403 of a route that acts on the caller's own account, called with an API key or an OAuth token (#695). */
+export const OAUTH_TOKEN_NOT_HELD_MESSAGE = 'An API key or an OAuth token does not act on its own account: sign in with a session';
+
 /** The 403 of a createApiKey naming a permission the caller does not hold. */
 export const API_KEY_NOT_HELD_MESSAGE = 'An API key names only permissions its user holds';
 

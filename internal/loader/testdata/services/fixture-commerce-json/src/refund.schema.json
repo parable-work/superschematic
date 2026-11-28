@@ -16,7 +16,6 @@
       }
     },
     { "name": "Approvals", "config": { "gates": { "approved": { "count": 2, "permission": "refunds.approve" } } } },
-    { "name": "Links", "config": { "links": { "order": { "schema": "Checkout", "required": true } } } },
     { "name": "Numbering", "config": { "format": "RF-{yyyy}-{seq:5}", "reset": "yearly" } },
     { "name": "StateRules", "config": { "states": { "requested": { "required": ["amountCents", "reason"] }, "approved": { "frozen": "all" } } } },
     {

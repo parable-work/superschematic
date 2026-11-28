@@ -28,8 +28,10 @@
 //! hash of the entry's source and key, which its owner looks up).
 //!
 //! Rust has no ambient caller (D181), so the read takes the caller's
-//! principal and opens the repositories for it itself. Postgres alone: a
-//! Rust server on SQLite is refused a calendar source (D188).
+//! principal and opens the repositories for it itself. On Postgres the
+//! read runs on a pool's client (D188); on a SQLite file through the
+//! SQLite repositories, the same read in SQLite's words ([`sqlite`],
+//! #615).
 
 use std::collections::BTreeMap;
 
@@ -219,13 +221,13 @@ pub fn iso(millis: i64) -> String {
 }
 
 /// The date of epoch milliseconds, `YYYY-MM-DD`, in UTC.
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 fn date_of(millis: i64) -> String {
     let (year, month, day) = crate::civil::from_days(millis.div_euclid(86_400_000));
     format!("{year:04}-{month:02}-{day:02}")
 }
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 fn text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -500,57 +502,131 @@ pub fn calendar_tool_read(args: &serde_json::Map<String, Value>) -> Result<Calen
     })
 }
 
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod shared;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use shared::{CalendarFeedOf, IssueCalendarFeed, IssuedCalendarFeed};
+
 #[cfg(feature = "postgres")]
 pub use pg::*;
+
+/// The calendar on a SQLite file (D152, D186, #615): the Postgres read,
+/// feed and routes over the SQLite repositories.
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 
 #[cfg(feature = "postgres")]
 mod pg {
     use std::sync::Arc;
-    use std::time::{Duration, SystemTime};
+    use std::time::SystemTime;
 
-    use axum::body::Body;
     use axum::extract::{Request, State};
-    use axum::response::{IntoResponse, Response};
+    use axum::response::Response;
     use axum::routing::any;
-    use axum::{Json, Router};
+    use axum::Router;
     use deadpool_postgres::GenericClient;
-    use http::{header, Method, StatusCode};
-    use serde_json::{json, Map, Value};
+    use serde_json::{Map, Value};
 
     use super::super::postgres::{query_rows, Repositories, Tables};
-    use super::super::{
-        AccessCaller, Bound, Definition, Error, FindOptions, Marks, OrderBy, Values, ACCESS_GRANTS,
-        ACCESS_ROLES,
-    };
+    use super::super::{AccessCaller, Bound, Definition, Error, FindOptions, Values};
+    use super::shared::{self, CalendarHost, Settings};
     use super::*;
-    use crate::access::{
-        grant_ended, grant_token_hash, issue_grant, revoke_grant, IssueGrant, GRANT_TOKEN_PREFIX,
-    };
-    use crate::auth::{Authenticator, Credential, CredentialKind, Principal, PrincipalKind};
+    use crate::access::{IssueGrant, IssuedGrant};
+    use crate::auth::{Authenticator, Principal};
     use crate::response::error_response;
     use crate::ApiError;
 
-    const DAY_MILLIS: i64 = 86_400_000;
-
-    fn eq(value: Value) -> Value {
-        json!({ "eq": value })
+    /// The Postgres repositories as the calendar's host.
+    struct PgHost<'a, C> {
+        repositories: Repositories<'a, C>,
     }
 
-    fn quote(name: &str) -> String {
-        format!("\"{}\"", name.replace('"', "\"\""))
+    impl<'a, C: GenericClient + Sync> PgHost<'a, C> {
+        /// The host over `repositories`' client, definition and session.
+        fn of(repositories: &Repositories<'a, C>) -> Result<Self, Error> {
+            Ok(Self {
+                repositories: Repositories::new(repositories.client(), repositories.definition())?
+                    .with_session(repositories.session().clone()),
+            })
+        }
     }
 
-    /// The repositories of `repositories`' database, with their session,
-    /// kept to what `principal` sees (D156).
-    fn as_caller<'a, C: GenericClient + Sync>(
-        repositories: &Repositories<'a, C>,
-        principal: Option<&Principal>,
-    ) -> Result<Repositories<'a, C>, Error> {
-        Ok(
-            Repositories::new(repositories.client(), repositories.definition())?
-                .with_session(repositories.session().clone())
-                .with_access(AccessCaller::of(principal)),
-        )
+    impl<C: GenericClient + Sync> CalendarHost for PgHost<'_, C> {
+        fn sqlite(&self) -> bool {
+            false
+        }
+
+        fn definition(&self) -> &Definition {
+            self.repositories.definition()
+        }
+
+        fn now(&self) -> SystemTime {
+            self.repositories
+                .session()
+                .now
+                .unwrap_or_else(SystemTime::now)
+        }
+
+        fn reading_as(&self, principal: Option<&Principal>) -> Result<Self, Error> {
+            let host = Self::of(&self.repositories)?;
+            Ok(Self {
+                repositories: host.repositories.with_access(AccessCaller::of(principal)),
+            })
+        }
+
+        fn acting_as(&self, principal: &Principal) -> Result<Self, Error> {
+            let host = Self::of(&self.repositories)?;
+            Ok(Self {
+                repositories: host
+                    .repositories
+                    .acting(crate::orm::routes::acting(Some(principal)))
+                    .with_access(AccessCaller::of(Some(principal))),
+            })
+        }
+
+        async fn find_many(
+            &self,
+            table: &str,
+            filter: &Values,
+            options: &FindOptions,
+        ) -> Result<Vec<Values>, Error> {
+            Ok(self
+                .repositories
+                .table(table)?
+                .find_many(Some(filter), options)
+                .await?
+                .rows)
+        }
+
+        async fn find_system(&self, table: &str, filter: &Values) -> Result<Option<Values>, Error> {
+            let system =
+                Repositories::new(self.repositories.client(), self.definition())?.as_system();
+            system
+                .table(table)?
+                .find_one(Some(filter), &FindOptions::default())
+                .await
+        }
+
+        async fn query(&self, sql: &str, args: &[Bound]) -> Result<Vec<Vec<Value>>, Error> {
+            query_rows(self.repositories.client(), sql, args).await
+        }
+
+        async fn issue_grant(&self, input: &IssueGrant) -> Result<IssuedGrant, Error> {
+            crate::access::issue_grant(&self.repositories, input).await
+        }
+
+        async fn revoke_grant(&self, id: &str, at: SystemTime) -> Result<(), Error> {
+            crate::access::revoke_grant(self.repositories.client(), self.definition(), id, at).await
+        }
+
+        async fn grant_ended(
+            &self,
+            grant: &Values,
+            now: SystemTime,
+        ) -> Result<Option<&'static str>, Error> {
+            crate::access::grant_ended(self.repositories.client(), self.definition(), grant, now)
+                .await
+        }
     }
 
     /// Reads the calendar as `principal` (D152): every source's entries
@@ -567,254 +643,8 @@ mod pg {
         read: &CalendarRead,
         options: &CalendarOptions,
     ) -> Result<Calendar, Error> {
-        let from = instant(&read.from, "from")?;
-        let to = instant(&read.to, "to")?;
-        let limit = read.limit.unwrap_or(500).clamp(1, 5000);
-        let db = as_caller(repositories, principal)?;
-        let mut entries = Vec::new();
-        let mut more = false;
-        for table in &db.definition().tables {
-            for source in &table.calendar {
-                if read
-                    .sources
-                    .as_ref()
-                    .is_some_and(|sources| !sources.contains(&source.name))
-                {
-                    continue;
-                }
-                if let Some(permission) = options.permissions.get(&source.name) {
-                    if !principal.is_some_and(|p| p.permissions.contains(permission)) {
-                        continue;
-                    }
-                }
-                let mut owned = Values::new();
-                if read.scope == CalendarScope::Mine {
-                    let (Some(owner), Some(principal)) = (&source.owner, principal) else {
-                        continue;
-                    };
-                    owned.insert(owner.clone(), eq(Value::String(principal.subject.clone())));
-                }
-                let (found, held_more) = match &source.occurrences {
-                    Some(occurrences) => {
-                        occurrences_of(
-                            &db,
-                            &table.name,
-                            source,
-                            occurrences,
-                            from,
-                            to,
-                            limit,
-                            owned,
-                        )
-                        .await?
-                    }
-                    None => rows_of(&db, &table.name, source, from, to, limit, owned).await?,
-                };
-                entries.extend(found);
-                more = more || held_more;
-            }
-        }
-        entries.sort_by(|a, b| {
-            a.start
-                .cmp(&b.start)
-                .then_with(|| a.source.cmp(&b.source))
-                .then_with(|| a.key.cmp(&b.key))
-        });
-        Ok(Calendar { entries, more })
-    }
-
-    fn entry_of(source: &CalendarSource, table: &str, key: String, title: String) -> CalendarEntry {
-        CalendarEntry {
-            source: source.name.clone(),
-            kind: source.kind.clone(),
-            color: source.color.clone(),
-            table: table.to_owned(),
-            key,
-            title,
-            start: String::new(),
-            end: None,
-            all_day: false,
-            occurrence: None,
-        }
-    }
-
-    /// A field source's rows in the window, through its repository.
-    async fn rows_of<C: GenericClient + Sync>(
-        db: &Repositories<'_, C>,
-        table: &str,
-        source: &CalendarSource,
-        from: i64,
-        to: i64,
-        limit: u32,
-        mut owned: Values,
-    ) -> Result<(Vec<CalendarEntry>, bool), Error> {
-        let definition = db.definition().table(table)?;
-        let field = source.field.clone().ok_or_else(|| {
-            Error::Definition(format!(
-                "{table}'s calendar source {} dates neither a field nor occurrences",
-                source.name
-            ))
-        })?;
-        let timestamp = definition.column(&field).is_some_and(|c| c.timestamp);
-        let bound = |at: i64| {
-            if timestamp {
-                iso(at)
-            } else {
-                date_of(at)
-            }
-        };
-        owned.insert(
-            field.clone(),
-            json!({ "gte": bound(from), "lt": bound(to) }),
-        );
-        let options = FindOptions {
-            order_by: vec![OrderBy::asc(field.clone())],
-            limit: Some(limit + 1),
-            skip_count: true,
-            ..FindOptions::default()
-        };
-        let rows = db
-            .table(table)?
-            .find_many(Some(&owned), &options)
-            .await?
-            .rows;
-        let more = rows.len() > limit as usize;
-        let form = |value: &Value| -> Option<String> {
-            let text = match value {
-                Value::Null => return None,
-                other => text(other),
-            };
-            Some(if timestamp {
-                epoch_millis(&text).map_or(text, iso)
-            } else {
-                text.chars().take(10).collect()
-            })
-        };
-        let mut entries = Vec::new();
-        for row in rows.iter().take(limit as usize) {
-            let Some(start) = row.get(&field).and_then(form) else {
-                continue;
-            };
-            let key = text(row.get(&definition.key).unwrap_or(&Value::Null));
-            let title = text(row.get(&source.title).unwrap_or(&Value::Null));
-            let mut entry = entry_of(source, table, key, title);
-            entry.start = start;
-            entry.end = source
-                .end
-                .as_ref()
-                .and_then(|end| row.get(end))
-                .and_then(form);
-            entry.all_day = !timestamp;
-            entries.push(entry);
-        }
-        Ok((entries, more))
-    }
-
-    /// An occurrences source's occurrences in the window, then the rows
-    /// they belong to through the repository as the caller, keeping the
-    /// occurrences of the rows it read.
-    #[allow(clippy::too_many_arguments)]
-    async fn occurrences_of<C: GenericClient + Sync>(
-        db: &Repositories<'_, C>,
-        table: &str,
-        source: &CalendarSource,
-        occ: &CalendarOccurrences,
-        from: i64,
-        to: i64,
-        limit: u32,
-        mut owned: Values,
-    ) -> Result<(Vec<CalendarEntry>, bool), Error> {
-        let definition = db.definition().table(table)?;
-        let due = if occ.due.is_empty() {
-            "NULL::text".to_owned()
-        } else {
-            format!("{}::text", quote(&occ.due))
-        };
-        let sql = format!(
-            "SELECT {row}, {key}::text, {due}, {due_at}, {state}::text FROM {table} WHERE {due_at} >= $1::timestamptz AND {due_at} < $2::timestamptz ORDER BY {due_at}, {key} LIMIT {n}",
-            row = quote(&occ.row),
-            key = quote(&occ.key),
-            due_at = quote(&occ.due_at),
-            state = quote(&occ.state),
-            table = quote(&occ.table),
-            n = limit + 1,
-        );
-        let window = |at: i64| Bound {
-            value: Value::String(iso(at)),
-            marks: Marks::TEXT,
-        };
-        let rows = query_rows(db.client(), &sql, &[window(from), window(to)]).await?;
-        let more = rows.len() > limit as usize;
-        let rows: Vec<Vec<Value>> = rows.into_iter().take(limit as usize).collect();
-        let mut keys: Vec<String> = Vec::new();
-        for row in &rows {
-            let key = text(&row[0]);
-            if !keys.contains(&key) {
-                keys.push(key);
-            }
-        }
-        let mut visible: BTreeMap<String, Values> = BTreeMap::new();
-        if !keys.is_empty() {
-            let count = u32::try_from(keys.len()).unwrap_or(u32::MAX);
-            owned.insert(definition.key.clone(), json!({ "in": keys }));
-            let options = FindOptions {
-                limit: Some(count),
-                skip_count: true,
-                ..FindOptions::default()
-            };
-            for parent in db
-                .table(table)?
-                .find_many(Some(&owned), &options)
-                .await?
-                .rows
-            {
-                let key = text(parent.get(&definition.key).unwrap_or(&Value::Null));
-                visible.insert(key, parent);
-            }
-        }
-        let mut entries = Vec::new();
-        for row in &rows {
-            let Some(parent) = visible.get(&text(&row[0])) else {
-                continue;
-            };
-            let key = text(parent.get(&definition.key).unwrap_or(&Value::Null));
-            let title = text(parent.get(&source.title).unwrap_or(&Value::Null));
-            let mut entry = entry_of(source, table, key, title);
-            let due_at = text(&row[3]);
-            entry.start = epoch_millis(&due_at).map_or(due_at, iso);
-            entry.occurrence = Some(CalendarOccurrence {
-                key: text(&row[1]),
-                due: text(&row[2]),
-                state: text(&row[4]),
-            });
-            entries.push(entry);
-        }
-        Ok((entries, more))
-    }
-
-    /// What [`issue_calendar_feed`] takes.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct IssueCalendarFeed {
-        /// The user the feed reads as: its principal's subject.
-        pub holder: String,
-        /// The UserRole row whose permissions bound what the feed reads.
-        pub role: String,
-        /// What it shows and which sources.
-        pub scope: CalendarFeedScope,
-        /// When it expires; [`CALENDAR_FEED_DAYS`] on unless set.
-        pub ends_at: Option<SystemTime>,
-    }
-
-    /// A feed [`issue_calendar_feed`] made: its grant's id, the token only
-    /// its holder is given, and when it expires.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct IssuedCalendarFeed {
-        /// The grant's id.
-        pub id: String,
-        /// The token, `grant_...`, which nothing stores.
-        pub token: String,
-        /// When it expires.
-        pub ends_at: SystemTime,
+        let host = PgHost::of(repositories)?.reading_as(principal)?;
+        shared::read_in(&host, principal, read, options).await
     }
 
     /// Issues a calendar feed (D152): a grant of the database's
@@ -826,83 +656,7 @@ mod pg {
         repositories: &Repositories<'_, C>,
         input: &IssueCalendarFeed,
     ) -> Result<IssuedCalendarFeed, Error> {
-        let now = repositories.session().now.unwrap_or_else(SystemTime::now);
-        let ends_at = input
-            .ends_at
-            .unwrap_or_else(|| now + Duration::from_secs(CALENDAR_FEED_DAYS * 86_400));
-        let issued = issue_grant(
-            repositories,
-            &IssueGrant {
-                holder: input.holder.clone(),
-                holder_kind: PrincipalKind::User,
-                role: input.role.clone(),
-                target_type: feed_target_type(&input.scope),
-                target_id: input.holder.clone(),
-                starts_at: None,
-                ends_at: Some(ends_at),
-                ends_when: None,
-            },
-        )
-        .await?;
-        Ok(IssuedCalendarFeed {
-            id: text(issued.grant.get("id").unwrap_or(&Value::Null)),
-            token: issued.token,
-            ends_at,
-        })
-    }
-
-    fn grants_table(definition: &Definition) -> Result<&str, Error> {
-        definition
-            .access_table(ACCESS_GRANTS)
-            .map(|t| t.name.as_str())
-            .ok_or_else(|| {
-                Error::Definition("calendar: the ORM has no @accessGrants table".to_owned())
-            })
-    }
-
-    /// A feed's grant by its id, read as the system; none when it is none
-    /// or no feed's.
-    async fn feed_grant<C: GenericClient + Sync>(
-        client: &C,
-        definition: &Definition,
-        id: &str,
-    ) -> Result<Option<Values>, Error> {
-        let system = Repositories::new(client, definition)?.as_system();
-        let grants = system.table(grants_table(definition)?)?;
-        let key = definition.table(grants_table(definition)?)?.key.clone();
-        let filter = Values::from_iter([(key, eq(Value::String(id.to_owned())))]);
-        let grant = match grants
-            .find_one(Some(&filter), &FindOptions::default())
-            .await
-        {
-            Ok(grant) => grant,
-            // An id that is no key of the table is no feed.
-            Err(Error::Invalid(_)) => None,
-            Err(err) => return Err(err),
-        };
-        Ok(grant.filter(|g| {
-            g.get("targetType")
-                .and_then(Value::as_str)
-                .is_some_and(is_calendar_feed)
-        }))
-    }
-
-    fn same_holder(grant: &Values, holder: &str) -> bool {
-        let held = grant
-            .get("holder")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        match (
-            crate::uuid62::parse_uuid(held),
-            crate::uuid62::parse_uuid(holder),
-        ) {
-            (Some(a), Some(b)) => a == b,
-            _ => held == holder,
-        }
-    }
-
-    fn live(grant: &Values) -> bool {
-        grant.get("revokedAt").is_none_or(Value::is_null)
+        shared::issue_in(&PgHost::of(repositories)?, input).await
     }
 
     /// Revokes a feed at `at`: its URL is refused at the next fetch. Only
@@ -914,14 +668,10 @@ mod pg {
         id: &str,
         at: SystemTime,
     ) -> Result<bool, Error> {
-        let Some(grant) = feed_grant(client, definition, id).await? else {
-            return Ok(false);
+        let host = PgHost {
+            repositories: Repositories::new(client, definition)?,
         };
-        if !same_holder(&grant, holder) || !live(&grant) {
-            return Ok(false);
-        }
-        revoke_grant(client, definition, id, at).await?;
-        Ok(true)
+        shared::revoke_in(&host, holder, id, at).await
     }
 
     /// Rotates a feed: revokes it and issues another of the same scope,
@@ -932,45 +682,7 @@ mod pg {
         holder: &str,
         id: &str,
     ) -> Result<Option<IssuedCalendarFeed>, Error> {
-        let (client, definition) = (repositories.client(), repositories.definition());
-        let Some(grant) = feed_grant(client, definition, id).await? else {
-            return Ok(None);
-        };
-        if !same_holder(&grant, holder) || !live(&grant) {
-            return Ok(None);
-        }
-        let now = repositories.session().now.unwrap_or_else(SystemTime::now);
-        revoke_grant(client, definition, id, now).await?;
-        let ends_at = grant
-            .get("endsAt")
-            .and_then(Value::as_str)
-            .and_then(crate::civil::parse_rfc3339);
-        let target_type = grant
-            .get("targetType")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        Ok(Some(
-            issue_calendar_feed(
-                repositories,
-                &IssueCalendarFeed {
-                    holder: holder.to_owned(),
-                    role: text(grant.get("role").unwrap_or(&Value::Null)),
-                    scope: feed_scope_of(target_type),
-                    ends_at,
-                },
-            )
-            .await?,
-        ))
-    }
-
-    /// The principal and scope a feed's token reads as.
-    #[derive(Clone, Debug)]
-    pub struct CalendarFeedOf {
-        /// The holder, a user, with the permissions of the grant's role
-        /// and no grants of its own, so the holder's audiences hold.
-        pub principal: Principal,
-        /// What the feed reads.
-        pub scope: CalendarFeedScope,
+        shared::rotate_in(&PgHost::of(repositories)?, holder, id).await
     }
 
     /// The principal and scope a feed's token reads as (D152), or the
@@ -982,77 +694,10 @@ mod pg {
         token: &str,
         now: SystemTime,
     ) -> Result<Result<CalendarFeedOf, String>, Error> {
-        if !token.starts_with(GRANT_TOKEN_PREFIX) {
-            return Ok(Err("no such feed".to_owned()));
-        }
-        let system = Repositories::new(client, definition)?.as_system();
-        let roles = definition
-            .access_table(ACCESS_ROLES)
-            .map(|t| t.name.clone())
-            .ok_or_else(|| {
-                Error::Definition("calendar: the ORM has no UserRole table".to_owned())
-            })?;
-        let filter = Values::from_iter([(
-            "tokenHash".to_owned(),
-            eq(Value::String(grant_token_hash(token))),
-        )]);
-        let grant = system
-            .table(grants_table(definition)?)?
-            .find_one(Some(&filter), &FindOptions::default())
-            .await?;
-        let Some(grant) = grant else {
-            return Ok(Err("no such feed".to_owned()));
+        let host = PgHost {
+            repositories: Repositories::new(client, definition)?,
         };
-        let target_type = grant
-            .get("targetType")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        if !is_calendar_feed(&target_type) {
-            return Ok(Err("no such feed".to_owned()));
-        }
-        if let Some(ended) = grant_ended(client, definition, &grant, now).await? {
-            return Ok(Err(if ended == "not started" {
-                "the feed has not started".to_owned()
-            } else {
-                "the feed has ended".to_owned()
-            }));
-        }
-        let by_name = Values::from_iter([(
-            "name".to_owned(),
-            eq(grant.get("role").cloned().unwrap_or(Value::Null)),
-        )]);
-        let role = system
-            .table(&roles)?
-            .find_one(Some(&by_name), &FindOptions::default())
-            .await?;
-        let permissions: Vec<String> = role
-            .as_ref()
-            .and_then(|role| role.get("permissions"))
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let id = text(grant.get("id").unwrap_or(&Value::Null));
-        Ok(Ok(CalendarFeedOf {
-            principal: Principal::new(
-                grant
-                    .get("holder")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default(),
-                permissions,
-            )
-            .with_credential(Credential {
-                kind: CredentialKind::Grant,
-                id,
-            }),
-            scope: feed_scope_of(&target_type),
-        }))
+        shared::feed_of_in(&host, token, now).await
     }
 
     /// What [`calendar_routes`] serves from.
@@ -1090,32 +735,16 @@ mod pg {
             }
         }
 
-        fn base(&self) -> String {
-            self.base
-                .as_deref()
-                .unwrap_or("/api/calendar")
-                .trim_end_matches('/')
-                .to_owned()
+        fn settings(&self) -> Settings<'_> {
+            Settings {
+                authenticator: &self.authenticator,
+                base: self.base.as_deref(),
+                options: &self.options,
+                feed_days_before: self.feed_days_before,
+                feed_days_after: self.feed_days_after,
+                now: self.now.as_ref(),
+            }
         }
-
-        fn now(&self) -> SystemTime {
-            self.now.as_ref().map_or_else(SystemTime::now, |now| now())
-        }
-    }
-
-    fn millis(at: SystemTime) -> i64 {
-        match at.duration_since(SystemTime::UNIX_EPOCH) {
-            Ok(since) => i64::try_from(since.as_millis()).unwrap_or(i64::MAX),
-            Err(before) => -i64::try_from(before.duration().as_millis()).unwrap_or(i64::MAX),
-        }
-    }
-
-    fn problem(status: StatusCode, detail: &str) -> Response {
-        error_response(ApiError::new(
-            status,
-            crate::response::status_code_name(status),
-            detail,
-        ))
     }
 
     /// The calendar's routes (D152), as a router the app merges into its
@@ -1130,17 +759,8 @@ mod pg {
     /// - `POST {base}/feeds/{id}/rotate`, `DELETE {base}/feeds/{id}`: the
     ///   caller's own feed.
     pub fn calendar_routes(routes: CalendarRoutes) -> Router {
-        let base = routes.base();
-        let state = Arc::new(routes);
-        let root = if base.is_empty() {
-            "/".to_owned()
-        } else {
-            base.clone()
-        };
-        Router::new()
-            .route(&root, any(serve))
-            .route(&format!("{base}/{{*rest}}"), any(serve))
-            .with_state(state)
+        let base = routes.settings().base();
+        shared::router(&base, Arc::new(routes), any(serve))
     }
 
     async fn serve(State(routes): State<Arc<CalendarRoutes>>, request: Request) -> Response {
@@ -1150,237 +770,21 @@ mod pg {
         }
     }
 
-    fn query_pairs(query: Option<&str>) -> Vec<(String, String)> {
-        query
-            .unwrap_or_default()
-            .split('&')
-            .filter(|pair| !pair.is_empty())
-            .map(|pair| {
-                let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-                (decode(name), decode(value))
-            })
-            .collect()
-    }
-
-    /// A URL component's percent-decoded text, `+` a space.
-    fn decode(text: &str) -> String {
-        let bytes = text.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'+' => out.push(b' '),
-                b'%' if i + 2 < bytes.len() => {
-                    let hex = text
-                        .get(i + 1..i + 3)
-                        .and_then(|h| u8::from_str_radix(h, 16).ok());
-                    match hex {
-                        Some(byte) => {
-                            out.push(byte);
-                            i += 2;
-                        }
-                        None => out.push(b'%'),
-                    }
-                }
-                other => out.push(other),
-            }
-            i += 1;
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    }
-
-    fn feed_answer(base: &str, issued: &IssuedCalendarFeed) -> Value {
-        json!({
-            "data": {
-                "id": issued.id,
-                "token": issued.token,
-                "path": format!("{base}/feed/{}.ics", issued.token),
-                "endsAt": rfc3339_millis(issued.ends_at),
-            }
-        })
-    }
-
     async fn answer(routes: &CalendarRoutes, request: Request) -> Result<Response, ApiError> {
-        let base = routes.base();
-        let (parts, body) = request.into_parts();
-        let path = parts.uri.path();
-        let rest = path.strip_prefix(base.as_str()).unwrap_or(path).to_owned();
+        let settings = routes.settings();
+        let call = shared::call_of(&settings, request).await?;
+        if let shared::Call::Answer(response) = call {
+            return Ok(response);
+        }
         let definition = routes.tables.definition()?;
-        let unreachable = |err: &dyn std::error::Error| {
+        let client = routes.tables.pool().get().await.map_err(|err| {
             ApiError::service_unavailable(format!("the database is unreachable: {err}"))
-        };
-        let client = routes
-            .tables
-            .pool()
-            .get()
-            .await
-            .map_err(|err| unreachable(&err))?;
+        })?;
         let mut repositories = Repositories::new(&client, definition)?;
         if let Some(keys) = routes.tables.keys() {
             repositories = repositories.with_keys(&**keys);
         }
-        let now = routes.now();
-
-        // The feed, which a calendar client fetches with no header.
-        if parts.method == Method::GET {
-            if let Some(token) = rest.strip_prefix("/feed/") {
-                if !token.contains('/') && !token.is_empty() {
-                    let token = decode(token.strip_suffix(".ics").unwrap_or(token));
-                    let resolved = match calendar_feed_of(&client, definition, &token, now).await? {
-                        Ok(resolved) => resolved,
-                        Err(refused) => return Ok(problem(StatusCode::UNAUTHORIZED, &refused)),
-                    };
-                    let at = millis(now);
-                    let before = i64::from(routes.feed_days_before.unwrap_or(31));
-                    let after = i64::from(routes.feed_days_after.unwrap_or(400));
-                    let read = CalendarRead {
-                        from: iso(at - before * DAY_MILLIS),
-                        to: iso(at + after * DAY_MILLIS),
-                        sources: resolved.scope.sources.clone(),
-                        ..CalendarRead::default()
-                    };
-                    let calendar = read_calendar(
-                        &repositories,
-                        Some(&resolved.principal),
-                        &read,
-                        &routes.options,
-                    )
-                    .await?;
-                    let ics =
-                        calendar_ics(&calendar.entries, resolved.scope.detail, at, "Calendar");
-                    return Ok((
-                        StatusCode::OK,
-                        [
-                            (header::CONTENT_TYPE, "text/calendar; charset=utf-8"),
-                            (header::CACHE_CONTROL, "private, max-age=300"),
-                        ],
-                        ics,
-                    )
-                        .into_response());
-                }
-            }
-        }
-
-        let principal = routes.authenticator.authenticate(&parts).await?;
-        let Some(principal) = principal else {
-            return Ok(problem(StatusCode::UNAUTHORIZED, "Authentication required"));
-        };
-        let caller = repositories
-            .acting(crate::orm::routes::acting(Some(&principal)))
-            .with_access(AccessCaller::of(Some(&principal)));
-
-        if parts.method == Method::GET && rest.is_empty() {
-            let pairs = query_pairs(parts.uri.query());
-            let get = |name: &str| {
-                pairs
-                    .iter()
-                    .find(|(n, _)| n == name)
-                    .map(|(_, v)| v.clone())
-            };
-            let (Some(from), Some(to)) = (get("from"), get("to")) else {
-                return Ok(problem(StatusCode::BAD_REQUEST, "from and to are required"));
-            };
-            let sources: Vec<String> = pairs
-                .iter()
-                .filter(|(n, _)| n == "sources")
-                .flat_map(|(_, v)| v.split(',').map(str::to_owned).collect::<Vec<_>>())
-                .filter(|s| !s.is_empty())
-                .collect();
-            let read = CalendarRead {
-                from,
-                to,
-                sources: (!sources.is_empty()).then_some(sources),
-                scope: if get("scope").as_deref() == Some("mine") {
-                    CalendarScope::Mine
-                } else {
-                    CalendarScope::All
-                },
-                limit: None,
-            };
-            let calendar = read_calendar(&caller, Some(&principal), &read, &routes.options).await?;
-            return Ok((StatusCode::OK, Json(json!({ "data": calendar }))).into_response());
-        }
-
-        if parts.method == Method::POST && rest == "/feeds" {
-            let bytes = axum::body::to_bytes(Body::new(body), 1 << 16)
-                .await
-                .unwrap_or_default();
-            let body: Map<String, Value> = serde_json::from_slice(&bytes).unwrap_or_default();
-            let role = body.get("role").and_then(Value::as_str);
-            let detail = match body.get("detail").and_then(Value::as_str) {
-                Some("full") => Some(CalendarDetail::Full),
-                Some("busy") => Some(CalendarDetail::Busy),
-                _ => None,
-            };
-            let (Some(role), Some(detail)) = (role, detail) else {
-                return Ok(problem(
-                    StatusCode::BAD_REQUEST,
-                    "a feed takes role, a UserRole, and detail, full or busy",
-                ));
-            };
-            let days = body
-                .get("days")
-                .and_then(Value::as_f64)
-                .filter(|days| *days > 0.0 && *days <= 3660.0)
-                .unwrap_or(CALENDAR_FEED_DAYS as f64);
-            let sources: Vec<String> = body
-                .get("sources")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let issued = issue_calendar_feed(
-                &caller,
-                &IssueCalendarFeed {
-                    holder: principal.subject.clone(),
-                    role: role.to_owned(),
-                    scope: CalendarFeedScope {
-                        detail,
-                        sources: (!sources.is_empty()).then_some(sources),
-                    },
-                    ends_at: Some(now + Duration::from_secs_f64(days * 86_400.0)),
-                },
-            )
-            .await?;
-            return Ok((StatusCode::CREATED, Json(feed_answer(&base, &issued))).into_response());
-        }
-
-        if let Some(one) = rest.strip_prefix("/feeds/") {
-            let (id, rotate) = match one.strip_suffix("/rotate") {
-                Some(id) => (id, true),
-                None => (one, false),
-            };
-            if !id.is_empty() && !id.contains('/') {
-                let id = decode(id);
-                if parts.method == Method::POST && rotate {
-                    return Ok(
-                        match rotate_calendar_feed(&caller, &principal.subject, &id).await? {
-                            Some(rotated) => {
-                                (StatusCode::OK, Json(feed_answer(&base, &rotated))).into_response()
-                            }
-                            None => problem(StatusCode::NOT_FOUND, "no such feed of yours"),
-                        },
-                    );
-                }
-                if parts.method == Method::DELETE && !rotate {
-                    return Ok(
-                        if revoke_calendar_feed(&client, definition, &principal.subject, &id, now)
-                            .await?
-                        {
-                            StatusCode::NO_CONTENT.into_response()
-                        } else {
-                            problem(StatusCode::NOT_FOUND, "no such feed of yours")
-                        },
-                    );
-                }
-            }
-        }
-        Ok(problem(StatusCode::NOT_FOUND, "no such calendar route"))
+        shared::answer(&settings, PgHost { repositories }, call).await
     }
 
     /// Runs a call of [`calendar_mcp_tool`] as `principal`: its result, or

@@ -77,9 +77,8 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | bucket | one Bucket schema | object storage, private, with signed URLs | nothing (D54) |
 | memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
-| runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
-| deriver | one `@deriver` of a TypeScript or Rust API schema, or of a Go API schema over tables | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, or of its API's tables, through their repositories (D146), until stopped | its API's needs; its API's database (D74, section 8.8) |
-| app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations, identity and engine, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
+| deriver | one `@deriver` of an API schema | a loop that fills the Derived fields of its API's tables, through their repositories (D146), until stopped | its API's needs; its API's database (D74, section 8.8) |
+| app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations and identity, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
 
 A queue is not a deployable: it lives in the database of the DB schema
 that declares it (section 8.8). A second target, and the generic
@@ -91,9 +90,7 @@ realizes it (section 6.1), and the edges it takes part in.
 
 With nothing declared, each API service in a stack is one server, each
 `@job` of an API service is one job, each `@worker` of an API service is
-one worker, and each DB service is one database. Each engine database an
-API connects to is one runner, `<db>-engine-runner`, written in the
-language of the first API, by name, that connects to it (D58). A
+one worker, and each DB service is one database. A
 deployable is declared only to change that:
 
 - to run several APIs in one process;
@@ -682,13 +679,10 @@ line that holds it.
     `concurrency` and `enabled`, and an `env` typed from the handle's
     config type (D53);
   - a DB handle takes the target's `database` settings and no `env`;
-  - a DB handle beside `runner: true` names the engine's runner of the
-    database, which must be an engine database an API connects to, and
-    takes the target's `runner` settings and `enabled`, and no `env`
-    (D58). A runner that is off runs no instance: no reaction, schedule,
-    Timers deadline or event-log retention runs until it is on again,
-    when each reaction reads on from its cursor, a schedule that came due
-    runs once and every overdue deadline fires;
+  - a DB handle beside `runner: true`, which named an engine's runner
+    (D58), is refused: a DB service has no engine types (D103), and a
+    table's deadlines and changes are its API's `@behaviorWorker`'s,
+    which an element names as it names a worker;
   - a Bucket handle takes the target's `bucket` settings and no `env`
     (D54);
   - a MemoryStore handle takes the target's `memoryStore` settings,
@@ -783,9 +777,7 @@ The order comes from the graph:
 The provisioner applies in that order (section 6.5).
 
 An app rolls out in step 3, in the wave after each server of its API as
-well as after its callees (D78). It opens its API's engine only once the
-server has deployed the engine document the app was built with, so in
-that order its first attempt finds the document live.
+well as after its callees (D78).
 
 ### 5.4 Parameterized environments
 
@@ -1513,7 +1505,6 @@ Bootstrap reads the GitHub repository from the git remote.
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
 | memoryStore | a Memorystore for Valkey instance (`gcp.memorystore`, D75, section 8.12) named `<project>-<stack>-<store>`, in the environment's region: `VALKEY_8_0`, cluster mode disabled, one shard, transit encryption `SERVER_AUTHENTICATION`, authorization `IAM_AUTH`, persistence and deletion protection off; its node type and replica count from the settings (section 7.5). It creates its own Private Service Connect endpoint on the environment's network, under a service connection policy for Memorystore (`network.memorystore`, service class `gcp-memorystore`) whose endpoints take addresses from a subnet of their own (`network.memorystore-subnet`, `<stack>-memorystore`, `10.8.16.0/24`); every store of the environment shares both |
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the worker exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account, which holds the Cloud Trace agent role when the runner exports its traces to Cloud Trace, and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's edge lowers as a Go one's: its runtime's `gcs` asks the metadata server for the token and signs through `signBlob` (D54) |
@@ -1870,82 +1861,10 @@ the probes, and each client's `Transport` is `telemetry.Transport`, a
 client span per call that carries the trace context. Off, both are what
 they wrap.
 
-An API whose database is an engine database, a DB service whose types
-compose behaviors (D58), gets the engine. `engine.go`, beside `main.go`,
-opens it on the database, through the engine's Go binding, once per
-database: in the background, as the pool connects when first used, so the
-server starts while the database is not up, retrying a second apart and
-doubling to thirty seconds. Once it opens, it defines and publishes the
-database's engine document (`EngineDocument` of its Go types) in the
-document's namespace, under the engine's lock, writing nothing when the
-live versions have its hash. `/readyz` names `<db> engine` until it has.
-The access policy is `outputs.engine.policy` of the database's config,
-`permission` unless set, and the event log's retention
-`outputs.engine.retention`, none unless set, which every entrypoint on the
-database opens the engine with and the database's runner alone prunes
-with; the engine document's tools carry `outputs.engine.tools.invocation`,
-the invocation policy of each tool or behavior operation the deployment
-marks, which a database that composes `Payments` or `Stock` must give
-each of their operations that move money or stock, and
-`outputs.engine.tools.hidden` with Payments' service operations, the
-operations no agent is offered (D70, amended). The first API on the database, by name, mounts
-the engine's routes, its event stream and its MCP endpoint at
-`outputs.engine.mount`, `/engine/<db>` unless set, on its router, after
-its own routes and behind its middleware: the request log, and the
-identity runtime's CORS for the trusted origins. `engineCaller`
-establishes each request's caller as the API's own routes do: the service
-the API's service authenticator verifies, a refusal of its credential
-answered in the engine's place, and the end user whose session the
-identity runtime authenticates, with their roles' permissions; a request
-with no session lets a verified service stand in (D37). An API that
-authenticates with an auth middleware of its own gives the engine no end
-user, and the build says so. A route takes a 30-second timeout but the
-event stream's and MCP's, which answer 503 `unavailable` until the engine
-opens. Every API on the database holds the engine in its `Deps`, an
-`*engine.Background`, whose `Wait(ctx)` returns the engine once it opens.
-At shutdown the server ends every event stream as it stops taking
-requests, and closes the engine after the requests in flight finish. The
-server links the core's engine archive, unless its engine database
-composes a behavior the core's archive leaves out, the work queue's or an
-extension's: then it links the archive of the project's engine crate,
-`<out>/engine/rust/<db>`, which the database's build writes with its
-`ffi` member, and the checkout's Dockerfile builds that archive in the
-engine stage, the crate's lock file seeded from the engine workspace's.
-The build refuses an engine database that composes an extension's
-behavior no Rust crate implements, and a server whose engine databases
-would each need a project archive of its own, since a binary links one.
-A release's image, which downloads the core's archive, cannot take a
-project's, so it gets no Dockerfile. A Rust server opens the engine as
-section 8.6 says, and so does a TypeScript server, through the engine's
-Node-API addon. Servers of the APIs on one engine database, in whatever
-language each is written, share its engine: each deploys the same
-document, which mints one version however many deploy at once, each reads
-what another wrote and streams what another commits, a session one signed
-in reaches the others, since the user model's tables are the database's,
-and the database has one runner. `TestEngineServersAnswerOneScriptAlike`
-runs one script against a Go, a Rust and a TypeScript server over one
-database and requires their answers to be the same (D58), and
-`TestCommerceServersAnswerOneScriptAlike` does the same for three servers
-over a database whose types compose the commerce behaviors, linked
-through the project's engine crate (D70).
-
-An engine database's runner is an entrypoint of its own,
-`<db>-engine-runner` (section 3.1), in the language of the first API on
-it: a Go one's `main.go`, a TypeScript one's `main.ts` or a Rust one's
-(section 8.6) reads the database's connection field alone, opens the
-engine on it as a server does, deploying nothing, starts the engine's
-runner as the deployable's name, holding each engine type's name as a
-permission, and runs until SIGTERM. On Postgres it runs while it holds the
-runner's lock. A job's and a worker's entrypoint open the engine for their
-API's `Deps` too, deploying nothing.
-
-A server on an engine database some environment places on Cloud SQL
-serves the engine, whose Postgres client takes a URL, a unix socket in a
-directory of its own: `cloudsql.go` carries each connection to the socket
-over one the connector dials, with IAM authentication, and the engine's
-URL names the directory as its host, the IAM user and the database, with
-no password and no TLS of its own. A TypeScript one serves it through the
-Cloud SQL Node connector's local proxy on such a socket (section 8.6).
+A generated server opens no engine (D103's step 7). A DB service has no
+engine types: a table's behaviors run through its repositories, in the
+server's own transactions, its deadlines and change queue in its API's
+`@behaviorWorker`, and no API mounts the engine's routes.
 
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
@@ -2005,17 +1924,8 @@ one of two places (D47, amended):
   superscalar checkout, a Rust stage builds superscalar's archive for the
   image's platform from it, with `tools.env`'s Rust release, the one the
   host's archives are built with, and a second stage builds the version
-  graph's from the crate beside `[paths] versiongraph_go`. An entrypoint
-  that opens the engine (D58) gets a third, which builds the core's engine
-  archive (`superschematic-engine-ffi`) from the Cargo workspace beside
-  `[paths] engine_go`, with the crates it reaches by path at their places
-  in the checkout: the work queue's crate, the commerce crate, the schema
-  IR's and the schema runtime's, the version graph's engine and core, and superscalar's
-  crates with their workspace's manifest, which its core takes its lints
-  from.
-  Without `[paths] engine_go` such an entrypoint gets no Dockerfile from a
-  checkout, and the build says why. A Go stage puts each archive where its
-  binding's cgo flags look.
+  graph's from the crate beside `[paths] versiongraph_go`. A Go stage
+  puts each archive where its binding's cgo flags look.
 - **The release.** Without `[paths] scalar_go`, as in a project that
   takes the runtime modules from the module proxy, the image takes the
   archives the release of superschematic that wrote the Dockerfile ships:
@@ -2149,7 +2059,6 @@ runs an environment on the `local` target (`internal/stack/local`):
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them, and its OpenTelemetry variables but `OTEL_SERVICE_NAME`, so trace export is off unless the shell names a collector (section 8.11). It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, once after the rollout when its settings say `onDeploy`, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
-| runner | an engine database's runner (D58), a process built and run as a worker is, from its entrypoint at `<output-root>/server/<stack>/<db>-engine-runner`: the same node with no port, `kind: runner` and a readiness of `started`, its environment its database's connection string alone. It takes the runner's lock on the environment's Postgres as it does on Cloud SQL, so the servers run no runner of their own here either |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55). A site whose config names a dev server (`site.dev`) is not built unless `stack dev --build-sites`: `bun run <command>` runs in its package with `PORT` its dev port (`site.dev.port`, or one derived as a server's), `SUPERSCHEMATIC_SITE_URL` its origin and `<API>_URL` each API's loopback URL, and once it answers on `localhost:<dev port>` a proxy of the provisioner's serves the site's port: the dev server, WebSocket upgrades among its requests, each API under `/api/<service>` with the prefix taken off, and the config with each API at that path on the page's origin. Its exit stops the environment, as a server's does (D82) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable`, or for a SQLite file `sqlite:<absolute path>`, a reference to the file's node's `url` output, which the provisioner resolves from the state directory |
 | bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential, which the Go, TypeScript and Rust runtimes' GCS implementations reach alike |
@@ -2247,31 +2156,6 @@ fetches the archives as `stack dev` does and prints `export
 CGO_LDFLAGS=...` for a POSIX shell to evaluate, or with the variable's
 name its value alone (D47, amended).
 
-A Go or TypeScript server, job, worker or engine runner on an engine
-database that composes the work queue's or an extension's behavior opens
-the engine built from the project's engine crate, `<out>/engine/rust/<db>`
-(D58), and its entrypoint holds `engine-project.json`, which names the
-crate, the member it takes, `ffi` for Go and `napi` for TypeScript, and
-the engine workspace's lock file. Before it builds or starts the
-entrypoint, the local provisioner builds that member with `cargo build
---release` into the program's Cargo target directory, the Rust
-deployables' (section 8.6), on `tools.env`'s Rust release unless
-`RUSTUP_TOOLCHAIN` is set, the crate's lock file seeded from the engine
-workspace's when it has none, and copies what cargo built into
-`engine/<db>/<member>/<digest>/` under the program directory, named for
-its SHA-256 so a changed archive relinks a Go binary, under the member's
-lock file, which a `stack run` staging at once waits on. `stack dev`
-removes what earlier runs staged but the digest used last before its own,
-which a process may still name; `stack run` removes nothing. A Go build's
-`CGO_LDFLAGS` search the archive's directory first, before the release's
-archives, which hold the core's under the same name; a TypeScript
-process's environment names the addon with `SUPERSCHEMATIC_ENGINE_ADDON`.
-Nothing is set by hand. A Rust entrypoint depends on the crate and builds
-it with its own. A crate that depends on one of the engine's crates by
-version, as a build with that crate's `[paths]` key unset writes it, is
-refused, naming the key: no
-registry serves them, and a release ships none (D58, amended).
-
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
 on one port (`local-distinct-ports`), which names each container by its
@@ -2350,32 +2234,6 @@ changed even when its plan has no steps, before the new server rolls out
 and before a removed server's user goes. Since Postgres drops no role that
 holds privileges, an IAM database user's node abandons the user when it
 goes.
-
-On an engine database (D58) every server, job, worker and the runner
-that connects opens the engine, each as its own IAM database user, and
-the first to open it runs the engine's migrations, which create its
-tables in the schema `engine`; a later engine release, or a publish that
-adds a behavior's storage, changes them from whichever opens it. So the
-job document's privileges gain `engine`, and after the read and write
-grants the job readies the schema for them all. It creates a role of the
-database's own, `<database>_engine` (a hash in its name past Postgres's
-63 bytes), which cannot log in, as `cloudsqlsuperuser`, which may create
-roles where the migrator's IAM user, which inherits no attribute, may
-not; makes the migrator a member that may act as it; creates `engine`
-owned by the role; and grants the role to each connecting deployable's
-IAM database user, taking it back from one that no longer connects, as
-it does the table grants. The engine acts as its schema's owner: when
-another role owns it, one the session's user is a member of, every
-connection takes that role (`SET ROLE`), so every table, index and text
-search configuration any of them creates is the role's, and each may
-change it later. It looks the schema up before it creates one, since
-Postgres checks CREATE on the database first and the IAM users hold none.
-The job also creates the `unaccent` extension the engine's Search needs
-on Postgres in `superschematic_extensions`, which only a
-`cloudsqlsuperuser` member may on Cloud SQL, and gives the role USAGE on
-it; a database that refuses it is reported and the job goes on. The read
-and write grants leave both schemas out. The local target needs none of
-this: every process connects as the container's one superuser.
 
 The runner's image is built once per release, with Cloud Build, from a
 generated Dockerfile that installs the runner with `go install` from its
@@ -2608,15 +2466,11 @@ as they are, with no build step (D51). The pieces mirror Go's:
   with a `!` pattern, each implementation or site whose `workspace:`
   dependencies are neither on disk nor other members (D51, amended); once
   every service is built it leaves out nothing. Where
-  `[paths]` names a checkout of superscalar, the HTTP runtime or the
-  version-graph runtime, or the behavior engine (D58), the root's
-  `overrides` point every dependency on it at the checkout with a `file:`
-  path from the root; a member's own `file:` path is read wrongly by Bun
-  once members sit at different depths. The engine's package depends on
-  the version graph's by a path in its checkout, which an install of the
-  engine from that checkout resolves against the root, so with `[paths]
-  engine_typescript` the root names the version graph's checkout beside
-  it unless `[paths] versiongraph_typescript` names another. The root depends on superscalar itself, which the runtime and
+  `[paths]` names a checkout of superscalar, the HTTP runtime, the
+  behaviors' core or the version-graph runtime, the root's `overrides`
+  point every dependency on it at the checkout with a `file:` path from
+  the root; a member's own `file:` path is read wrongly by Bun once
+  members sit at different depths. The root depends on superscalar itself, which the runtime and
   the API packages import without naming. `bun install` runs in the output
   root, or in a generated package under it; an install inside an
   implementation does not find the root, and the lockfile lives in the
@@ -2770,53 +2624,6 @@ as they are, with no build step (D51). The pieces mirror Go's:
   signal exits at once, as a server's does. It ends its pools before it
   exits. The generated CI's `check` type-checks its package as it does a
   server's (section 11.3).
-- **Engine.** An API whose database is an engine database (D58; section
-  8.1) holds the engine in its `Deps`, `engine`, an `EngineBackground` of
-  the engine's `./server` entry (`@superschematic/engine/server`), which
-  loads the engine's Node-API addon and the HTTP runtime; the API package
-  peers on the engine's package.
-  `engine.wait()` resolves with the engine once it opens, its calls the
-  synchronous engine's, each returning a promise. `main.ts` opens it once
-  per database with `openEngineInBackground`: off the JavaScript thread,
-  as the addon's `openAsync` opens it, so the server starts while the
-  database is down and a Cloud SQL socket the thread carries does not
-  stall, retrying a second apart and doubling to thirty seconds, each
-  failure logged as `engine not open`. Its options are the database's
-  `engineDocument` (the TypeScript types' `./engine` entry): its
-  namespace, meta-schema and tool options, beside the access policy of
-  `outputs.engine.policy`. A server deploys the document's schemas with
-  `engine.deploy()` before it hands the engine out, as the engine's own
-  principal, writing nothing when the live versions have its hash, and
-  `/readyz` names `<db> engine` until then and while the engine's
-  `health()` is not ready. The first API on the database, by name, mounts
-  `engineApp` and `engineMcp` at `outputs.engine.mount` after its own
-  routes: they answer 503 `unavailable` until the engine opens, before
-  any authentication and after the identity service's CORS, take the
-  API's identity service, which authenticates the end user with the
-  claims Go's caller gives and answers the trusted origins' CORS, with
-  `identityRoutes: { sessions: false }`, since the API serves the user
-  model's routes, and its service authenticator, the one its router
-  verifies with, whose verified service stands in for an end user, a
-  refused credential answered in the engine's place. A route takes a
-  30-second timeout but the event stream's and MCP's. A site's CORS for
-  the API matches the engine's routes too (`engineRouteSpecs`). At
-  shutdown the server aborts the mount's `done` signal, which ends every
-  event stream, drains the requests in flight, closes the engine, then
-  ends the pools. On Cloud SQL the engine's URL names the directory of a
-  unix socket the HTTP runtime's `cloudSqlSocket` serves over the Node
-  connector's local proxy, with IAM authentication, as Go's `cloudsql.go`
-  does. A job and a worker open the engine for `Deps` and close it before
-  they exit, deploying nothing; an engine database's runner in TypeScript
-  (section 8.1) is a package of its own, `main.ts` reading the database's
-  connection field alone, starting the engine's runner as the
-  deployable's name, and holding the process open until SIGTERM, when it
-  stops the runner and closes the engine. The core's addon runs the
-  core's behaviors and the work queue's, which `main.ts` names when it
-  opens the engine (`behaviors: [...]`); an engine database that composes
-  an extension's behavior gets the project's engine crate's addon, its
-  `napi` member, which the engine opens on when the environment's
-  `SUPERSCHEMATIC_ENGINE_ADDON` names its file, as the image's engine
-  stage sets it.
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -2843,22 +2650,8 @@ as they are, with no build step (D51). The pieces mirror Go's:
   implementations are the root's copies under `impl/`: the context takes
   their manifests by pattern and the server's own whole, and no
   implementation's own directory. Without either `[paths]` key no Dockerfile is
-  written, and the build says why. An entrypoint that opens the engine
-  gets an engine stage, which builds the core's addon
-  (`superschematic-engine-addon`) from the Cargo workspace beside `[paths]
-  engine_typescript`, with the crates it reaches by path at their places
-  in the checkout, as a Go server's engine stage does; the build stage
-  puts it in the engine package's `native/` and emits the package's
-  `./server` entry (`tsconfig.server.json`, which emits without checking
-  types, so the image installs none of the package's own dependencies)
-  before the workspace's install copies the package. On an engine
-  database that composes an extension's behavior the stage builds the
-  project's engine crate's `napi` member instead, its lock file seeded
-  from the engine workspace's, and the image keeps it at
-  `/engine/<crate>-napi.node`, which `SUPERSCHEMATIC_ENGINE_ADDON` names.
-  Without `[paths] engine_typescript` such an entrypoint gets no
-  Dockerfile. The deploy
-  builds it as it builds Go's, from the Dockerfile at the server's path.
+  written, and the build says why. The deploy builds it as it builds Go's,
+  from the Dockerfile at the server's path.
 
 `stack dev` runs a TypeScript server on Bun beside the Go servers (section
 8.3). acme-shop's storefront is the proof: its implementation is the
@@ -2948,8 +2741,7 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   by name since `server/*/*` holds
   the Go and TypeScript servers too, and Cargo refuses a member without a
   `Cargo.toml`. It excludes `api`, `engine`, `sdk` and `types`, so a
-  generated crate under the output root, a project's engine crate (D58)
-  among them, builds on its own, as before, and `impl`, so a mirror is no
+  generated crate under the output root builds on its own, as before, and `impl`, so a mirror is no
   member, whose dev-dependencies Cargo would resolve. The generated crates
   the servers depend on and the implementations' mirrors are path
   dependencies, not members, and its lockfile, `<output-root>/Cargo.lock`,
@@ -3010,28 +2802,6 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
     rate limits, and on SIGTERM or SIGINT answers `/readyz` 503, stops
     taking connections and gives those in flight ten seconds; a second
     signal exits at once.
-- **Engine.** An API whose database is an engine database (D58) holds the
-  engine in its `Deps` (`engine`, a `superschematic_engine::background::Background`),
-  which `src/engine.rs`, beside `main.rs`, opens through the engine's
-  crate, linked in with the core's behaviors or the project's engine
-  crate's: in the background on a task of the server's runtime, each
-  attempt on the blocking pool, retrying a second apart and doubling to
-  thirty, over the database's connection field, a URL or, for Cloud SQL,
-  the socket Cloud Run mounts with an IAM access token as each new
-  connection's password (`postgres::sync_connection`). The server deploys
-  the `ENGINE_DOCUMENT` of the database's Rust types before `/readyz`,
-  which names `<db> engine`, reports it ready, and merges the engine's
-  routes (`axum::background_router`, 503 `unavailable` until it opens) at
-  `outputs.engine.mount` before the API router's fallback, behind the
-  API's identity session and service caller, with the identity config's
-  trusted origins' CORS and a calling site's; each route but the event
-  stream's and MCP's takes a 30-second timeout (`ENGINE_TIMEOUT`, 504
-  `gateway_timeout` past it), as a Go or a TypeScript server's do. At
-  SIGTERM it ends every event stream as it stops taking connections, then
-  shuts the engine down off the runtime. A job and a worker open the engine for their `Deps`
-  and deploy nothing; the database's runner, when the first API on it is
-  Rust, is a crate of its own whose `main.rs` reads the database's field
-  alone and runs the engine's runner as its deployable.
 - **Image.** The Dockerfile's build stage, on `rust` at the release
   `tools.env` pins, builds the crate in the workspace with `cargo build
   --release --locked`, which fails on a lockfile that does not match the
@@ -3050,9 +2820,8 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   and every implementation's mirror under `impl/` whole, then the
   checkouts of the HTTP runtime, the schema runtime and superscalar's
   crate with its workspace's root manifest, whose lints the crate
-  inherits, and, with `[paths] engine_rust` set, the engine's Cargo
-  workspace with the crates it reaches and the project engine crates under
-  the output root (D58). No implementation's own directory goes in.
+  inherits, and the version graph's Rust engine where the naming file
+  names it. No implementation's own directory goes in.
   Without `[paths] scalar_rust` or `schema_runtime_rust`, or with a
   checkout outside the build context, no Dockerfile is written, and the
   build says why.
@@ -3074,11 +2843,10 @@ Rust API's server and worker, and its job through `stack run` (sections
 8.7 and 8.8): the job puts an object per product in the API's bucket on
 the emulator, the worker reads each and deletes those it handles, and the
 server lists what is left and signs a URL that downloads it (section
-8.9). `TestRustEngineEntrypointServes` builds a Rust server, its job and
-the Rust runner of its engine database, and runs them offline and on
-Postgres (D58).
+8.9).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
-over `shop-db`'s engine type `Inventory` (D70), whose sales admit only
+over `shop-db`'s table `Inventory`, which implements Stock (D70, D103),
+whose sales admit only
 `shop-orders`, which tells it what a placed checkout sold through
 `shop-stock`'s Go SDK with its edge's credential. A sale that leaves a
 product low enqueues `StockLow` in one transaction; `shop-stock`'s Rust
@@ -3106,17 +2874,14 @@ export abstract class Backoffice {}
   file's `[implementation_paths] rust_app`, `apps/{app}` by default,
   which exports `pub async fn serve(parts: <api crate>::apps::<App>Parts)
   -> std::io::Result<()>`. The parts hold the API's `deps`, its
-  `implementations`, the `engine` of an engine database, open, and
+  `implementations` and
   `addr`, every interface at `PORT` (8080 when unset). `serve` binds
   `parts.addr` and serves until the process should exit. The build
   scaffolds a missing crate once, whose `serve` answers every request
   with 501 Not Implemented.
 - **The entrypoint.** `server/<stack>/<app>/`: its `main` builds `Deps`
-  and the implementations as the server's wiring does, waits for the
-  engine, and calls `serve`. The engine opens without deploying: it
-  waits until the live version of each schema has the hash of the
-  document the app was built with, which the API's server deploys (D58,
-  amended). The Dockerfile is the server's, and its context also takes
+  and the implementations as the server's wiring does, and calls `serve`.
+  The Dockerfile is the server's, and its context also takes
   every crate the app's crate reaches by path.
 - **The deployable.** `<api>-<app>` in kebab case, on a Rust API; a Go
   or TypeScript API's app is refused until they follow. Its edges, its
@@ -3846,14 +3611,14 @@ Not built:
   in a queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
 
-The engine's work-queue behaviors (D16) stay the engine's. A stack does
-not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
+A table's work-queue behaviors (D104) run on the behaviors' core, in the
+repositories and the table's `@behaviorWorker`. A stack does not deploy
+the engine.
 
 #### Derivers (D74, D146)
 
-A deriver fills the Derived fields (D73) of the types of an API's
-database: its engine types, or its tables that implement Derived (D103,
-D146). It is declared on an empty class of the API, like a worker, and
+A deriver fills the Derived fields (D73) of the tables of an API's
+database that implement Derived (D103, D146). It is declared on an empty class of the API, like a worker, and
 has no queue: the stale fields are its queue.
 
 ```ts
@@ -3864,14 +3629,11 @@ import { deriver } from "@superschematic/api";
 export class TriageTickets {}
 ```
 
-- **What it derives.** `schemas` names types of the API's database that
-  compose Derived, engine types or tables: every such type when it is
-  absent. An API imports no engine type, so it names them. A deriver
-  fills one kind, engine types through the engine or tables through
-  their repositories. The build refuses an API whose database has no type
-  that composes Derived, a named type that does not compose it, a
-  deriver whose schemas are of both kinds, and a deriver that derives
-  nothing.
+- **What it derives.** `schemas` names tables of the API's database
+  that implement Derived: every such table when it is absent. A deriver
+  fills them through their repositories. The build refuses an API whose
+  database has no table that implements Derived, a named type that does
+  not, and a deriver that derives nothing.
 - **The project's code.** The API generator writes a `Derivers` type with
   one method per derived field of each schema, typed by the field: the
   item's `inputs` are the field's `from` fields with their own types,
@@ -3884,18 +3646,12 @@ export class TriageTickets {}
   config, and holding the answer to the item's `output`, the field's
   JSON Schema.
 - **The deployable.** `<api>-<deriver>` in kebab case, as a worker's
-  name is, in its API's language: TypeScript or Rust, or Go for a
-  deriver of tables. A Go API's deriver of engine types is refused. Its
-  edges, config, secrets and identity are its
-  API's. Its entrypoint opens the engine for Deps as a worker's does,
-  and runs the engine's deriver loop (`runDeriver`,
-  `derive::run_deriver`), which pulls each schema's stale fields, calls
-  the method of each, settles the answers in batches, and waits for a
-  commit when nothing is stale. A method that throws or returns an
-  error settles as a failure, which Derived counts as an attempt.
-- **Over tables** (D146). A deriver of tables opens no engine. Its
-  entrypoint opens the database's repositories as the deployable's name
-  holding each Derived config's `permission` (`withBehaviorCaller` in
+  name is, in its API's language: Go, TypeScript or Rust. Its edges,
+  config, secrets and identity are its API's. A method that throws or
+  returns an error settles as a failure, which Derived counts as an
+  attempt.
+- **Its loop** (D146). The deriver opens no engine. Its entrypoint
+  opens the database's repositories as the deployable's name holding each Derived config's `permission` (`withBehaviorCaller` in
   TypeScript, the ORM's `WithBehaviorCaller` in Go, `with_caller` in a
   transaction of the pool per call in Rust), and runs its HTTP runtime's
   loop (`runDeriver` of `@superschematic/http-runtime/deriver`,
@@ -3908,21 +3664,16 @@ export class TriageTickets {}
   out a table whose pull or settle fails for a reason time cures, a
   second, doubling to thirty; a refusal of the core's other than busy
   ends it with the error. The repositories run on
-  Postgres, so the database lists `postgres` first. A Rust API's
-  derivers fill one kind, since its `Derivers` types the items of the
-  engine's loop or the runtime's.
+  Postgres, so the database lists `postgres` first.
 - **Its principal.** The deployable's name as the subject, holding each
-  derived type's name and each Derived config's `permission`. The
-  engine's policy must admit it: with `{ rules }`, the build refuses a
-  stack whose rules name no `subject` of the deriver that allows. A
-  deriver of tables meets no policy: the core asks the config's
-  permission of its pulls and its settles.
+  Derived config's `permission`. It meets no access policy: the core
+  asks the config's permission of its pulls and its settles.
 - **Settings.** `{ of: Api, deriver: "TriageTickets", enabled?,
   instances?, concurrency? }`: `instances` is 0 or 1, and `concurrency`
   how many answers run at a time.
 - **Targets.** `local` runs a process with no port. gcp runs a Cloud Run
-  worker pool of one instance. cloudflare refuses a deriver, since a
-  Worker cannot open the engine.
+  worker pool of one instance. cloudflare refuses a deriver, whose loop
+  lasts as long as its process, since a Worker runs only per request.
 
 ### 8.9 Buckets
 
@@ -4474,8 +4225,6 @@ never waits for it.
   and its destroy deletes nothing.
 - **cloudflare.** The target has no memoryStore platform, so it refuses a
   store that is on (section 18.15).
-- **Engine.** The engine does not use the store: its runner and sweepers
-  keep the database's polls and locks.
 
 
 ## 9. End-user auth and service auth
@@ -5525,31 +5274,13 @@ The GitHub workflow:
     the root's lockfile (`bun install --frozen-lockfile` or `npm ci`),
     runs `build-all` over the services root, which resolves every
     environment and checks its graph (levels 1 and 3), and compiles each
-    Go server's, job's, worker's and engine runner's entrypoint module
+    Go server's, job's and worker's entrypoint module
     with `go build -mod=mod` (level 2), in that order and each named for
     its kind, so a job or a worker that no longer builds against its
     implementation fails the pull request as a server does. It runs on a push too. A binary the
     release workflow did not build names no digests, and its archives step
     fails.
-  - For a Go server, job, worker or engine runner on an engine database
-    whose engine composes a behavior the core's engine archive does not
-    run, the work queue's or an extension's (D58), `check` sets up the
-    Rust release `tools.env` pins, builds the archive of the project's
-    engine crate after the build, from its `ffi` member at
-    `<schemas-root>/dist/engine/rust/<db>/ffi`, staging it as
-    `libsuperschematic_engine.a`, and compiles the module with it searched
-    before the release's.
-  - For a stack whose naming file's `[paths]` engine keys name a
-    superschematic checkout in the repository (D58, amended), `check`
-    stands up the superscalar checkout the engine's crates reach by path
-    (`scripts/superscalar-dep.sh --checkout` in it) before the build when
-    it builds a project's engine archive or type-checks a TypeScript
-    entrypoint, seeds a project's engine crate's lock file from the engine
-    workspace's, and, when `[paths] engine_typescript` names the
-    checkout's engine package, before the workspace's install builds the
-    `dist/` of the checkout's superscalar binding, HTTP runtime and engine
-    packages, which the workspace takes in place of the published ones.
-  - For a stack with a TypeScript server, job, worker or engine runner,
+  - For a stack with a TypeScript server, job or worker,
     `check` then installs the output root's Bun workspace from the
     lockfile the project commits (section 8.6), `bun install
     --frozen-lockfile` in
@@ -5557,8 +5288,8 @@ The GitHub workflow:
     when the lockfile is missing, where a frozen install alone would
     install without one, or no longer matches the packages the build
     wrote, and says to run `bun install` there after `build-all` and
-    commit it. Then each TypeScript server's, job's, worker's and engine
-    runner's entrypoint package, in that order and each named for its
+    commit it. Then each TypeScript server's, job's and worker's
+    entrypoint package, in that order and each named for its
     kind, and
     the implementation of each API one of them imports type-checks with
     `tsc --noEmit` (level 2), through `bun x --no-install`, so the
@@ -5568,13 +5299,13 @@ The GitHub workflow:
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
     and the workflow does not.
-  - For a stack with a Rust server, job, worker or engine runner, `check` sets up the
+  - For a stack with a Rust server, job or worker, `check` sets up the
     Rust release `tools.env` pins with the runner's `rustup` before the
     build, which brings the output root's Cargo lockfile up to date with
     it (section 8.6). After the build it fails, in a step that names the lockfile,
     when git does not track the lockfile or the build changed it, and says
-    to build every service and commit it. Then each Rust server's, job's,
-    worker's and engine runner's crate compiles with `cargo check
+    to build every service and commit it. Then each Rust server's, job's
+    and worker's crate compiles with `cargo check
     --locked` (level 2), in
     that order and each named for its kind, which checks the
     implementations it depends on. The crates name the runtime checkouts
@@ -6292,11 +6023,8 @@ The package also holds `workers.d.ts`, which declares the
 ambient module only from a file with no import, and its `tsconfig.json`
 type-checks `fetch.ts` with it. The server generator refuses a server or
 a job on a bundle platform whose database lists postgres first, which a
-Worker reaches through no D1 binding, and a worker on one always. It
-also refuses, and resolution refuses first as unrealizable, a server or
-a job on a bundle platform whose API connects to an engine database: its
-entrypoint would open the engine (D58), a Node-API addon, which a
-Worker's isolate cannot load. A job's package gets `scheduled.ts` in
+Worker reaches through no D1 binding, and a worker on one always. A
+job's package gets `scheduled.ts` in
 place of `fetch.ts` (section 18.9).
 
 **`fetch.ts`** (generated) imports `env` from `cloudflare:workers`, which
@@ -6470,10 +6198,8 @@ statements, where the file's handle lends its writer to one piece of work
 at a time. The file is in write-ahead logging, so the store's reads never
 wait, and its writes take their turn with the file's writer, up to the
 busy timeout. The build refuses, by name, what it does not run
-there yet: an engine, which the Rust
-runtime builds over a Postgres pool so far, a worker whose queue's
-message SQLite has no storage for, and a Rust deriver, engine's runner or
-app.
+there yet: a worker whose queue's message SQLite has no storage for, and
+a Rust deriver or app.
 
 acme-shop's `shop-db` lists `postgres` first, so nothing of it changes;
 its `shop-wishlist-db` lists `sqlite` first, for `wishlist-stack`'s
@@ -6989,9 +6715,6 @@ runtime tests run fixture bundles under the `workerd` binary.
   under workerd over a stand-in of the d1 binding, and its second
   version, `testdata/wishlist-v2`, migrates a SQLite file across both
   phases; its README lists the live run's steps.
-- Engine types on Workers, whose binding is a Node-API addon (D58):
-  resolution refuses a server or a job on Workers over an engine
-  database, and a runner has no platform there.
 - Rate limits shared across isolates; Workers' `ratelimit` binding is a
   candidate store.
 - `immutable` caching for a site's hashed files.
@@ -7048,8 +6771,8 @@ rolls nothing out.
 
 Resolution refuses the rest by name: a Go or a TypeScript server, by the
 languages `embedded.process` runs; a database with no sqlite dialect, by
-the dialects `embedded.sqlite` runs; a job, a bucket, a memory store, an
-engine's runner, a deriver and an app, each with the target's reason
+the dialects `embedded.sqlite` runs; a job, a bucket, a memory store, a
+deriver and an app, each with the target's reason
 (`TargetSpec.Unplaced`); and, by the target's policy rules, a domain, a
 parameterized environment, a deployable a settings platform places
 outside the binary, more than one instance of a worker, and a second
@@ -7194,7 +6917,7 @@ the environment's port until Ctrl-C.
 ### 19.5 Not built
 
 - A memory store on the runtime's in-process store, a bucket on a local
-  directory, a job in the process, and an engine on a SQLite file.
+  directory, and a job in the process.
 - An operation that is `@manualRouteRegistration`: `handle` routes none,
   and the build names each.
 - A route's own body limit, rate limit and timeout, which are the

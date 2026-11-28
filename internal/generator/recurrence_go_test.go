@@ -150,18 +150,29 @@ func TestGoRecurrenceEndToEnd(t *testing.T) {
 	}
 }
 
-// TestAGoServerOnSQLiteRefusesRecurrenceAndTheCalendar: with sqlite listed
-// first in fixture-recurrence-db's dialects, the API's Go server is
-// refused, naming Recurrence and each calendar source, which it serves on
-// Postgres alone (D187), as a Rust server is (D188).
-func TestAGoServerOnSQLiteRefusesRecurrenceAndTheCalendar(t *testing.T) {
-	err := runRecurrenceGo(t, t.TempDir(), []any{"sqlite", "postgres"})
-	if err == nil {
-		t.Fatal("the Go server on SQLite was built")
+// TestAGoServerOnSQLiteBuildsRecurrenceAndTheCalendar: with sqlite listed
+// first in fixture-recurrence-db's dialects, the API's Go server is built,
+// as the behaviors' core runs Recurrence in the SQLite repositories'
+// transactions and the SQLite database's CrossTables reads the calendar
+// (#615), and outside -short mode its module vets; a Rust server is still
+// refused them there (D188). The cases themselves run on a SQLite file in
+// ormgen's TestTheGoReadsAcrossTablesOnSQLite.
+func TestAGoServerOnSQLiteBuildsRecurrenceAndTheCalendar(t *testing.T) {
+	outputRoot := t.TempDir()
+	if err := runRecurrenceGo(t, outputRoot, []any{"sqlite", "postgres"}); err != nil {
+		t.Fatalf("the Go server on SQLite: %v", err)
 	}
-	for _, want := range []string{"lists sqlite first", "Contract: @calendarSource", "Filing: Recurrence", "Filing: @calendarSource", "D187"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal lacks %q: %v", want, err)
+	if testing.Short() {
+		return
+	}
+	apiDir := APIDir(outputRoot, "fixture-recurrence-api")
+	env := []string{"CGO_LDFLAGS=" + archiveLDFlags(t)}
+	for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}} {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = apiDir
+		cmd.Env = append(cmd.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("go %s in the generated API module: %v\n%s", strings.Join(args, " "), err, out)
 		}
 	}
 }

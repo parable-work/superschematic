@@ -25,12 +25,11 @@ driver, so a Worker bundles it. It exports the enqueue of the queue client
 on SQLite (queue-sqlite.ts, D53, amended): enqueueStatement, whose
 statement a Worker adds to the batch whose writes caused the message, and
 enqueue, which writes a message in an ORM's transaction in the ORM's
-dialect (queue-orm.ts, D189). A generated worker claims on no D1
-(PlatformSpec.NoQueueClaims), and a Worker is no process that claims until
-it is stopped; claimsOver and workerQueueOf make a queue's claims over a
-SqlDatabase all the same, sqliteQueue's statements, which a Worker's own
-handler may run within an invocation (D151's drain of these queues on D1
-is not built).
+dialect (queue-orm.ts, D189). claimsOver and workerQueueOf make a queue's
+claims over a SqlDatabase, sqliteQueue's statements, each in the
+connection's turn: a generated worker's drain.ts claims with them over its
+D1 binding at each firing of its Cron Trigger and at each wake of its
+Workflow, as it claims on Postgres through Hyperdrive (D151, #702).
 
 It exports the behaviors' adapter (rules.ts, D103), which imports nothing
 from node: or a driver either: a Worker, or a server over openSqlite, runs a
@@ -145,6 +144,9 @@ export {
 // The notifier's routes (D153, D157): each channel slot's relay callbacks and
 // the in-app inbox, which a generated server mounts.
 export { notifierRoutes, slotSegment, type NotifierRoutesOptions } from './notify-routes.js';
+// The notifier's upkeep on a schedule (D153, #702): every adapter's health
+// asked on its own, and the deliveries pruned, by the dispatch worker.
+export { HEALTH_CHECK_EVERY_MS, notifierUpkeep, type NotifierUpkeepOptions } from './notify-upkeep.js';
 // Agent orchestration (D158): the dispatcher of agent runs, their tokens,
 // autonomy, budgets and stop switches, over the @agents tables.
 export {
@@ -195,6 +197,10 @@ export { identityLapsed, partyPrincipal, partyTablesOf, type IdentityStanding, t
 export type * from './orm.js';
 export { RowFeatureError, attachmentBlock, previewObjectOf } from './rowfeatures.js';
 export type * from './rowfeatures.js';
+// The file processor's wiring (D154, D159, #702): what attachments have
+// pending, handed to the environment's files slots, the text and preview
+// recorded with processed.
+export { DEFAULT_PROCESS_LIMIT, DEFAULT_PROCESS_MAX_BYTES, processFiles, type FileProcessingOptions, type FileProcessingRun } from './file-processing.js';
 export { FieldEncryptionError, type FieldEncryptionReason } from './fieldcrypt-error.js';
 export { uuidFromDb, uuidToDb } from './uuid.js';
 export type { FieldKeyring, FieldKeys } from './fieldcrypt.js';

@@ -182,6 +182,9 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	if err := writeOrchestration(generator, outputDir, output); err != nil {
 		return err
 	}
+	if err := writeNotifierSQLite(generator, outputDir, output); err != nil {
+		return err
+	}
 	// fences.go holds the fences of each table with a @fenced field and
 	// the rule by which a write advances them (D119); a schema without one
 	// has none, so a file an earlier build wrote goes.

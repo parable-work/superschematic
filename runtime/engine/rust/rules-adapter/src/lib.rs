@@ -81,6 +81,7 @@ mod run;
 
 #[cfg(feature = "postgres")]
 pub mod postgres;
+pub mod sql;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 

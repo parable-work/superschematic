@@ -9,6 +9,7 @@
 //	superschematic-migrate queue --queue queue.json|gs://bucket/queue.json [--database-url URL | --cloud-sql INSTANCE --cloud-sql-user USER --database NAME] [--result gs://bucket/result.json|result.json]
 //	superschematic-migrate describe --statements statements.json [--database-url URL]
 //	superschematic-migrate inspect [--database-url URL]
+//	superschematic-migrate record [--model] [--database-url URL]
 //	superschematic-migrate version
 //
 // A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN. A job
@@ -56,6 +57,7 @@ const usage = `usage:
       --cloud-sql-user USER --database NAME] [--result result.json|gs://bucket/result.json]
   superschematic-migrate describe --statements statements.json [--database-url URL]
   superschematic-migrate inspect [--database-url URL]
+  superschematic-migrate record [--model] [--database-url URL]
   superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
@@ -100,6 +102,14 @@ tables with their columns, indexes and foreign keys, its views and its
 triggers. It opens the file to read it alone and refuses one that does
 not exist. superschematic migrate plan --from-database reads a file
 built by hand through it.
+
+record prints a runtime database's record (D117), the document apply
+--record writes: the schema documents of its last publish, their layout,
+each type's version and the model they belong to. With --model it prints
+that model, as status --model prints it. It refuses a database no publish
+of runtime mode has reached, and one whose service has a plan in progress
+or is at another model. superschematic migrate export reads a runtime
+database through it.
 `
 
 func main() {
@@ -150,6 +160,8 @@ func runWith(ctx context.Context, args []string, o options) int {
 		err = describe(ctx, args[1:], o)
 	case "inspect":
 		err = inspect(ctx, args[1:], o)
+	case "record":
+		err = record(ctx, args[1:], o)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(o.stdout, usage)
 		return exitOK

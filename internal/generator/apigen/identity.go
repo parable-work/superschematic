@@ -147,6 +147,29 @@ func IdentityRegistration(schema *ir.Schema) *ir.UserSessionsConfig {
 	return nil
 }
 
+// IdentityOAuth returns schema's @userSessions config when it turns the
+// API's OAuth authorization server on (#695), and nil otherwise. Every
+// server's identity wiring hands its oauth to its runtime.
+func IdentityOAuth(schema *ir.Schema) *ir.UserSessionsConfig {
+	for _, set := range schema.OperationSets {
+		if cfg := set.UserSessions; cfg != nil && cfg.OAuth != nil && !cfg.NoLogin {
+			return cfg
+		}
+	}
+	return nil
+}
+
+// IdentityOAuthAdministration reports whether schema's @userAdministration
+// turns the administration set's OAuth grant routes on (#695).
+func IdentityOAuthAdministration(schema *ir.Schema) bool {
+	for _, set := range schema.OperationSets {
+		if cfg := set.UserAdministration; cfg != nil && cfg.OAuth {
+			return true
+		}
+	}
+	return false
+}
+
 // addIdentityErrorResponses adds to an operation's OpenAPI responses the
 // errors the identity runtime answers the user model's operation op with
 // (ir.IdentityOperationErrors): one response per status, whose description

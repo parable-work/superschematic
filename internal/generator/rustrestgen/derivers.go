@@ -10,15 +10,13 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 )
 
-// The derivers of a Rust API (D74): src/deps.rs declares a trait per
-// @deriver class, with a method per derived field of its schemas, typed by
+// The derivers of a Rust API (D146): src/deps.rs declares a trait per
+// @deriver class, with a method per derived field of its tables, typed by
 // the field through the database's Rust types, a struct of the inputs of
 // each, and Derivers, which holds one value of each trait and which the
 // implementation's create_derivers builds. A deriver's entrypoint hands
-// each stale field to its method. A deriver fills engine types, through
-// the engine's loop (D74), or tables that implement Derived, through the
-// HTTP runtime's loop over the database's repositories (D146); deps.rs
-// types the items of one loop, so an API's derivers fill one kind.
+// each stale field to its method, through the HTTP runtime's loop over the
+// repositories of the tables that implement Derived.
 
 // DeriversFunc is the function an implementation of an API with derivers
 // declares in its src/lib.rs, which a deriver's entrypoint calls with the
@@ -42,14 +40,11 @@ type DeriverInfo struct {
 	Concurrency int
 	BatchSize   int
 
-	// Schemas are the engine types or the tables it fills, in order.
-	Schemas []string
-
-	// Tables reports that its schemas are tables that implement Derived
-	// (D146): its entrypoint pulls and settles through the database's
-	// repositories, Repositories[i] the method of the repositories that
-	// opens Schemas[i]'s, and opens no engine.
-	Tables       bool
+	// Schemas are the tables it fills, in order, each a table that
+	// implements Derived (D146): its entrypoint pulls and settles through
+	// the database's repositories, Repositories[i] the method of the
+	// repositories that opens Schemas[i]'s.
+	Schemas      []string
 	Repositories []string
 
 	// Methods are its methods, one per derived field of its schemas, in
@@ -58,7 +53,7 @@ type DeriverInfo struct {
 }
 
 // DeriverMethod is a method of a deriver's trait: the derived field Field
-// of the engine type Schema, the method that answers it, the schema and
+// of the table Schema, the method that answers it, the schema and
 // the field in snake case (ticket_category), the struct of its inputs,
 // Inputs, the Rust type of its value, Value, through the API crate's
 // re-export of its database's types, and the instruction and the model
@@ -106,21 +101,17 @@ func (m DeriverMethod) FromList() string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
-// FieldTypes gives the Rust type of each field of an engine type, as the
+// FieldTypes gives the Rust type of each field of a table, as the
 // database's Rust types declare it holding a value, by field: rustgen's
 // FieldTypes, qualified with DatabaseTypesModule.
 type FieldTypes func(schema string) (map[string]string, error)
 
-// SetDerivers sets the API's derivers, those of its engine database and
-// those that fill tables (D146), sorted by name, their fields typed by
-// types, refusing two methods of one deriver that one name would take.
-func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, tables []apigen.DeriverInfo, types FieldTypes) error {
+// SetDerivers sets the API's derivers, each of which fills tables (D146),
+// sorted by name, their fields typed by types, refusing two methods of one
+// deriver that one name would take.
+func (o *APIOutput) SetDerivers(tables []apigen.DeriverInfo, types FieldTypes) error {
 	o.Derivers = nil
-	var derivers []apigen.DeriverInfo
-	if engine != nil {
-		derivers = append(derivers, engine.Derivers...)
-	}
-	derivers = append(derivers, tables...)
+	derivers := slices.Clone(tables)
 	slices.SortStableFunc(derivers, func(a, b apigen.DeriverInfo) int { return strings.Compare(a.Name, b.Name) })
 	for _, d := range derivers {
 		info := DeriverInfo{
@@ -131,15 +122,12 @@ func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, tables []apigen.Deriv
 			Permissions: d.Permissions,
 			Concurrency: d.Concurrency,
 			BatchSize:   d.BatchSize,
-			Tables:      d.Tables,
 		}
 		methods := map[string]string{}
 		for _, schema := range d.Schemas {
 			info.Schemas = append(info.Schemas, schema.Name)
-			if d.Tables {
-				// The repositories' method of the table, as rustgen names it.
-				info.Repositories = append(info.Repositories, codegen.ToSnakeCase(schema.Name))
-			}
+			// The repositories' method of the table, as rustgen names it.
+			info.Repositories = append(info.Repositories, codegen.ToSnakeCase(schema.Name))
 			fieldTypes, err := types(schema.Name)
 			if err != nil {
 				return fmt.Errorf("rustrestgen: deriver %s of %s: %w", d.Name, o.SchemaName, err)
@@ -174,25 +162,11 @@ func (o *APIOutput) SetDerivers(engine *apigen.EngineInfo, tables []apigen.Deriv
 }
 
 // HasDerivers reports whether the API declares a deriver, for which
-// deps.rs declares Derivers and the scaffold create_derivers.
+// deps.rs declares Derivers, typed with the HTTP runtime's deriver module,
+// and the scaffold create_derivers; the crate's dependency on the
+// database's types then turns on the repositories, which a deriver's
+// entrypoint pulls and settles through (D146).
 func (o *APIOutput) HasDerivers() bool { return o.Deps != nil && len(o.Derivers) > 0 }
-
-// HasTableDerivers reports whether a deriver of the API fills tables
-// (D146): deps.rs then types its items with the HTTP runtime's deriver
-// module, and the crate's dependency on the database's types turns on the
-// repositories, which its entrypoint pulls and settles through.
-func (o *APIOutput) HasTableDerivers() bool {
-	return o.HasDerivers() && slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return d.Tables })
-}
-
-// DeriverJudge names what judges a deriver's answers in a comment: the
-// engine, or the behaviors' core for a deriver of tables.
-func (o *APIOutput) DeriverJudge() string {
-	if o.HasTableDerivers() {
-		return "the behaviors' core"
-	}
-	return "the engine"
-}
 
 // Deriver returns the deriver named name, or nil.
 func (o *APIOutput) Deriver(name string) *DeriverInfo {

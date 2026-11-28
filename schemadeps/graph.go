@@ -45,7 +45,8 @@ type Package struct {
 	Path string `json:"path"`
 	// Service is the name of the schema service whose build produced the
 	// package. build-all sets it from each service's output directories;
-	// it is empty in a graph collected without them.
+	// it is empty in a graph collected without them, and on a runtime
+	// provider package (ProviderKind), which no service builds.
 	Service string   `json:"service,omitempty"`
 	Deps    []string `json:"deps"`
 }

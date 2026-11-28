@@ -179,15 +179,6 @@ func fakePaths(repoRoot string) naming.LocalPaths {
 		SchemaRuntimeGo: filepath.Join(repoRoot, "runtime", "schema", "go"),
 		HTTPRuntimeGo:   filepath.Join(repoRoot, "runtime", "http", "go"),
 		VersionGraphGo:  filepath.Join(repoRoot, "runtime", "versiongraph", "go"),
-		EngineGo:        filepath.Join(repoRoot, "runtime", "engine", "go"),
-		// The engine's crates, which a project's engine crate depends on
-		// (D58).
-		EngineRust:          filepath.Join(repoRoot, "runtime", "engine", "rust", "engine"),
-		EngineBehaviorsRust: filepath.Join(repoRoot, "runtime", "engine", "rust", "behaviors"),
-		EngineWorkQueueRust: filepath.Join(repoRoot, "runtime", "engine-workqueue", "rust"),
-		EngineCommerceRust:  filepath.Join(repoRoot, "runtime", "engine-commerce", "rust"),
-		EngineABIRust:       filepath.Join(repoRoot, "runtime", "engine", "rust", "abi"),
-		EngineNapiRust:      filepath.Join(repoRoot, "runtime", "engine", "rust", "napi"),
 	}
 }
 
@@ -1836,4 +1827,23 @@ func expectServes(t *testing.T, image string) {
 	if logs := docker(t, "logs", container); !strings.Contains(logs, `"msg":"stopped"`) {
 		t.Errorf("the container did not log its graceful stop:\n%s", logs)
 	}
+}
+
+// syncBuilder is a strings.Builder a process writes to while a test reads
+// it.
+type syncBuilder struct {
+	mu sync.Mutex
+	strings.Builder
+}
+
+func (b *syncBuilder) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Builder.Write(p)
+}
+
+func (b *syncBuilder) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Builder.String()
 }

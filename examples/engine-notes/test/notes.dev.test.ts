@@ -1,46 +1,63 @@
-// The notes schema end to end on development mode (D117), as
-// test/notes.test.ts runs it on the engine: superschematic-dev serves the
-// same schema file, and the test drives it over HTTP, the event stream and
-// MCP as the same four callers, under the same policy written as data
-// (src/dev.ts). It holds what the engine holds where development mode
-// answers alike: the policy and the behaviors' permissions, a post beside
-// the note that moves no version of it, a proposal an editor approves, MCP
-// tools as the policy lets each caller call them, and a restart that keeps
-// every note. It adds what this work brings to development mode: a streamed
-// reply whose draft reaches the stream as signals, a caller's typing, and a
-// reader's marker and unread count. src/dev.ts lists what differs.
+// The notes schema end to end on development mode (D117):
+// @superschematic/rules-handler serves it over one SQLite file (bun:sqlite
+// under Bun, node:sqlite under Node.js), behind @hono/node-server on a free
+// port, and the test drives it over HTTP, the event stream and MCP as the
+// four callers of src/dev.ts, each by its bearer token, under the policy
+// written as data. It holds the policy and the behaviors' permissions, a
+// post beside the note that moves no version of it, a proposal an editor
+// approves, a streamed reply a reader reads midway, a reader's marker and
+// unread count, MCP tools as the policy lets each caller call them, and a
+// restart that keeps every note. The signals a streamed reply sends are
+// test/notes.dev-server.test.ts's, since this host publishes none.
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 
-import { Client, StreamableHTTPClientTransport, type CallToolResult } from '@modelcontextprotocol/client';
+import type { SqliteConnection } from '@superschematic/rules-handler';
 
-import { devCallers, startDev, type DevServer } from '../src/dev.ts';
-import { notesSchema } from '../src/server.ts';
+import { listen, notesSchema, openNotesDev, type Listening } from '../src/dev.ts';
+import { openStream } from './stream.ts';
 
 const directory = mkdtempSync(join(tmpdir(), 'engine-notes-dev-'));
 const db = join(directory, 'notes.db');
-const policyFile = join(directory, 'policy.json');
-let server: DevServer;
-const clients: Client[] = [];
+let connection: SqliteConnection & { close(): void };
+let server: Listening;
 
-before(async () => {
-  server = await startDev(db, policyFile);
-  // The schema owner publishes the schema, as the engine's server does when
-  // it starts.
-  assert.equal((await api('dana', 'POST', '/schemas', notesSchema)).status, 200);
-  assert.equal((await api('dana', 'POST', '/schemas/Note/publish')).status, 200);
-});
+/** A SQLite file: bun:sqlite's under Bun, node:sqlite's under Node.js. */
+async function open(path: string): Promise<SqliteConnection & { close(): void }> {
+  if ((globalThis as { Bun?: unknown }).Bun !== undefined) {
+    const { Database } = await import('bun:sqlite' as string);
+    return new Database(path, { create: true });
+  }
+  const { DatabaseSync } = await import('node:sqlite' as string);
+  return new DatabaseSync(path);
+}
+
+/** start opens the file and serves the notes on it. */
+async function start(): Promise<void> {
+  connection = await open(db);
+  server = await listen(await openNotesDev(connection));
+}
+
+/** stop stops serving and closes the file. */
+async function stop(): Promise<void> {
+  await server.close();
+  connection.close();
+}
+
+before(start);
 
 after(async () => {
-  for (const client of clients) {
-    await client.close();
-  }
-  await server.close();
+  await stop();
   rmSync(directory, { recursive: true, force: true });
 });
+
+/** The headers that name a caller of src/dev.ts: its bearer token. */
+function as(caller: string): Record<string, string> {
+  return { authorization: `Bearer ${caller}-token` };
+}
 
 interface Reply {
   status: number;
@@ -54,7 +71,7 @@ async function api(caller: string | null, method: string, route: string, body?: 
   const response = await fetch(`${server.url}/namespaces/default${route}`, {
     method,
     headers: {
-      ...(caller === null ? {} : devCallers[caller]),
+      ...(caller === null ? {} : as(caller)),
       ...(body === undefined ? {} : { 'content-type': method === 'PATCH' ? 'application/merge-patch+json' : 'application/json' }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -69,11 +86,12 @@ function operation(caller: string, name: string, params: unknown): Promise<Reply
   return api(caller, 'POST', `/schemas/Note/instances/launch/operations/${name}`, params);
 }
 
-test('the server serves the published notes schema, and a caller needs to name themselves', async () => {
+test('the server serves the published notes schema, and a caller needs a token it knows', async () => {
   const live = await api('alice', 'GET', '/schemas/Note');
   assert.equal(live.status, 200);
   assert.equal(live.body.version, 1);
   assert.equal((await api(null, 'GET', '/schemas/Note')).status, 401);
+  assert.equal((await api('mallory', 'GET', '/schemas/Note')).status, 401);
 });
 
 test('an author creates a note; a reader may not', async () => {
@@ -85,7 +103,7 @@ test('an author creates a note; a reader may not', async () => {
   assert.equal(created.status, 201);
   assert.equal(created.etag, '"1"');
   assert.deepEqual(
-    [created.body.title, created.body.tags, created.body.workflowStatus, created.body.revisionsRevision],
+    [created.body.title, created.body.tags, created.body.status, created.body.revisionsRevision],
     ['Launch', ['launch'], 'draft', 1]
   );
 });
@@ -129,87 +147,30 @@ test('a reader comments and proposes a change; an editor approves it', async () 
   );
 });
 
-/** openStream reads the namespace's event stream with signals beside its events. */
-async function openStream(caller: string) {
-  const abort = new AbortController();
-  const response = await fetch(`${server.url}/namespaces/default/events?after=head&signals=1&schema=Note`, {
-    headers: { ...devCallers[caller], accept: 'text/event-stream' },
-    signal: abort.signal,
-  });
-  assert.equal(response.status, 200);
-  const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
-  let buffer = '';
-  return {
-    /** next returns the next message's event name and data, comments skipped. */
-    async next(timeoutMs = 5000): Promise<{ event: string | undefined; data: any }> {
-      const deadline = Date.now() + timeoutMs;
-      for (;;) {
-        const end = buffer.indexOf('\n\n');
-        if (end >= 0) {
-          const frame = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          const lines = frame.split('\n');
-          const data = lines.find((line) => line.startsWith('data: '));
-          if (data === undefined) {
-            continue;
-          }
-          const event = lines.find((line) => line.startsWith('event: '))?.slice('event: '.length);
-          return { event, data: JSON.parse(data.slice('data: '.length)) };
-        }
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('no message within the timeout')), Math.max(0, deadline - Date.now()));
-        });
-        try {
-          const { done, value } = await Promise.race([reader.read(), timeout]);
-          if (done) {
-            throw new Error('the stream ended');
-          }
-          buffer += value;
-        } finally {
-          clearTimeout(timer);
-        }
-      }
-    },
-    close: () => abort.abort(),
-  };
-}
-
-test('a streamed reply reaches a reader as signals, and the draft finishes into a message', async () => {
-  // A reader opens the stream before it reads, so it misses no chunk.
-  const stream = await openStream('carol');
+test('a streamed reply: a reader reading midway gets the draft so far, and the draft finishes into a message', async () => {
+  // The stream is open to a reader, and ready once it has caught up. This
+  // host publishes no signals: the draft's chunks reach a stream of
+  // superschematic-dev's (test/notes.dev-server.test.ts).
+  const stream = await openStream(server.url, as('carol'));
   try {
     assert.equal((await stream.next()).event, 'ready');
-    const begun = await operation('bob', 'begin', { thread: 1 });
-    assert.deepEqual([begun.body.id, begun.body.state, begun.body.body], [2, 'composing', '']);
-    for (const text of ['Ships ', 'on the first.']) {
-      assert.equal((await operation('bob', 'appendDraft', { message: 2, text })).status, 200);
-    }
-    const chunks = [await stream.next(), await stream.next()];
-    assert.deepEqual(
-      chunks.map(({ event, data }) => [event, data.behavior, data.name, data.from, data.data]),
-      [
-        ['signal', 'Comments', 'draft', 'bob', { message: 2, offset: 0, text: 'Ships ' }],
-        ['signal', 'Comments', 'draft', 'bob', { message: 2, offset: 6, text: 'on the first.' }],
-      ]
-    );
-    // A reader reading midway gets the draft so far, and who is composing.
-    const midway = await api('carol', 'GET', '/schemas/Note/instances/launch');
-    assert.deepEqual(midway.body.commentsComposing, ['bob']);
-    assert.equal((await operation('carol', 'getMessage', { message: 2 })).body.body, 'Ships on the first.');
-
-    // A caller's typing reaches the stream; a draft is no caller's to send.
-    const typing = await api('carol', 'POST', '/schemas/Note/instances/launch/signals/Comments/typing', { thread: 1 });
-    assert.equal(typing.status, 204);
-    const typed = await stream.next();
-    assert.deepEqual([typed.event, typed.data.name, typed.data.from, typed.data.data], ['signal', 'typing', 'carol', { thread: 1 }]);
-    assert.equal((await api('carol', 'POST', '/schemas/Note/instances/launch/signals/Comments/draft', {})).status, 403);
-
-    const finished = await operation('bob', 'finish', { message: 2 });
-    assert.deepEqual([finished.body.state, finished.body.body, finished.body.thread], ['posted', 'Ships on the first.', 1]);
   } finally {
     stream.close();
   }
+  const begun = await operation('bob', 'begin', { thread: 1 });
+  assert.deepEqual([begun.body.id, begun.body.state, begun.body.body], [2, 'composing', '']);
+  for (const text of ['Ships ', 'on the first.']) {
+    assert.equal((await operation('bob', 'appendDraft', { message: 2, text })).status, 200);
+  }
+  // A reader reading midway gets the draft so far, and who is composing.
+  const midway = await api('carol', 'GET', '/schemas/Note/instances/launch');
+  assert.deepEqual(midway.body.commentsComposing, ['bob']);
+  assert.equal((await operation('carol', 'getMessage', { message: 2 })).body.body, 'Ships on the first.');
+  // A draft is no caller's signal to send.
+  assert.equal((await api('carol', 'POST', '/schemas/Note/instances/launch/signals/Comments/draft', {})).status, 403);
+
+  const finished = await operation('bob', 'finish', { message: 2 });
+  assert.deepEqual([finished.body.state, finished.body.body, finished.body.thread], ['posted', 'Ships on the first.', 1]);
 });
 
 test('a reader marks the conversation read, and unread counts what came after', async () => {
@@ -228,47 +189,76 @@ test('a reader marks the conversation read, and unread counts what came after', 
   assert.deepEqual((await operation('carol', 'follow', { thread: 1, on: false })).body, { thread: 1, following: false });
 });
 
-/** mcp connects the official MCP client to the namespace's endpoint as a caller of src/dev.ts. */
-async function mcp(caller: string): Promise<Client> {
-  const client = new Client({ name: 'engine-notes-dev-test', version: '0.0.0' });
-  const url = new URL(`${server.url}/namespaces/default/mcp`);
-  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { ...devCallers[caller] } } }));
-  clients.push(client);
-  return client;
+let rpcId = 0;
+
+/**
+ * mcp sends one JSON-RPC request to the namespace's MCP endpoint as a
+ * caller of src/dev.ts, as a client of the 2025 revisions does over the
+ * stateless streamable HTTP transport, and resolves to its result or its
+ * error from the one message event the endpoint answers.
+ */
+async function mcp(caller: string, method: string, params: Record<string, unknown> = {}): Promise<{ result?: any; error?: any }> {
+  const response = await fetch(`${server.url}/namespaces/default/mcp`, {
+    method: 'POST',
+    headers: {
+      ...as(caller),
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-protocol-version': '2025-11-25',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
+  });
+  assert.equal(response.status, 200);
+  const data = (await response.text()).split('\n').find((line) => line.startsWith('data: '));
+  assert.ok(data !== undefined, 'the endpoint answers one message event');
+  return JSON.parse(data.slice('data: '.length));
+}
+
+/** tools lists the names of the tools a caller may call. */
+async function tools(caller: string): Promise<string[]> {
+  const listed = await mcp(caller, 'tools/list');
+  return (listed.result.tools as { name: string }[]).map((tool) => tool.name);
 }
 
 test('the MCP tools: each caller lists what the policy lets them call, and calls go through it', async () => {
-  const alice = await mcp('alice');
-  const names = (await alice.listTools()).tools.map((tool) => tool.name);
+  const initialized = await mcp('alice', 'initialize', {
+    protocolVersion: '2025-11-25',
+    capabilities: {},
+    clientInfo: { name: 'engine-notes-dev-test', version: '0.0.0' },
+  });
+  assert.deepEqual([initialized.result.protocolVersion, initialized.result.serverInfo.name], ['2025-11-25', 'engine-notes']);
+
+  const alices = await tools('alice');
   for (const name of ['note_create', 'note_get', 'note_update', 'note_transition', 'note_post', 'note_propose', 'note_approve', 'note_list_revisions']) {
-    assert.ok(names.includes(name), `alice lists ${name}`);
+    assert.ok(alices.includes(name), `alice lists ${name}`);
   }
-  const carol = await mcp('carol');
-  const carols = (await carol.listTools()).tools.map((tool) => tool.name);
+  const carols = await tools('carol');
   assert.ok(carols.includes('note_get') && carols.includes('note_post') && carols.includes('note_propose') && carols.includes('note_mark_read'));
   for (const name of ['note_create', 'note_update', 'note_delete', 'note_transition', 'note_approve']) {
     assert.ok(!carols.includes(name), `carol does not list ${name}`);
   }
-  const read = (await alice.callTool({ name: 'note_get', arguments: { id: 'launch' } })) as CallToolResult;
-  assert.equal((read.structuredContent as { workflowStatus: string }).workflowStatus, 'published');
-  const proposed = (await carol.callTool({ name: 'note_propose', arguments: { id: 'launch', params: { patch: { tags: ['launch', 'q3'] } } } })) as CallToolResult;
-  assert.equal((proposed.structuredContent as { id: number }).id, 2);
+  const read = await mcp('alice', 'tools/call', { name: 'note_get', arguments: { id: 'launch' } });
+  assert.equal(read.result.structuredContent.status, 'published');
+  const proposed = await mcp('carol', 'tools/call', { name: 'note_propose', arguments: { id: 'launch', params: { patch: { tags: ['launch', 'q3'] } } } });
+  assert.equal(proposed.result.structuredContent.id, 2);
   // A refusal is a tool error carrying the HTTP API's problem document.
-  const refused = (await alice.callTool({ name: 'note_approve', arguments: { id: 'launch', params: { proposal: 2 } } })) as CallToolResult;
-  assert.equal(refused.isError, true);
-  assert.equal((refused.structuredContent as { code: string }).code, 'forbidden');
+  const refused = await mcp('alice', 'tools/call', { name: 'note_approve', arguments: { id: 'launch', params: { proposal: 2 } } });
+  assert.equal(refused.result.isError, true);
+  assert.equal(refused.result.structuredContent.code, 'forbidden');
+  // A tool the caller is not offered is an invalid-params error.
+  const unknown = await mcp('carol', 'tools/call', { name: 'note_approve', arguments: { id: 'launch', params: { proposal: 2 } } });
+  assert.equal(unknown.error.code, -32602);
 });
 
 test('a restart keeps every note, publishes a compatible change, and refuses one the stored notes break', async () => {
-  for (const client of clients.splice(0)) {
-    await client.close();
-  }
-  await server.close();
-  server = await startDev(db, policyFile);
+  await stop();
+  await start();
 
   const note = await api('bob', 'GET', '/schemas/Note/instances/launch');
   assert.equal(note.body.body, 'Ships on the first.');
   assert.equal(note.body.commentsMessages, 3);
+  // The restart published nothing: Note is live at the version it was.
+  assert.equal((await api('alice', 'GET', '/schemas/Note')).body.version, 1);
 
   // A new optional field becomes version 2.
   const withPinned = structuredClone(notesSchema) as { types: { Note: { fields: unknown[] } } };

@@ -69,7 +69,10 @@ func Write(doc *schemafile.Document, format Format) ([]byte, error) {
 // catalog: the TypeScript writer leaves what a declared scalar holds of its
 // row to that catalog, as it leaves the core table's to the core, and
 // imports each scalar namespace from the npm package the catalog names for
-// it. A nil catalog is the core's.
+// it. A nil catalog is the core's. A file written to TypeScript on its own,
+// as format --to=ts writes one, writes a General type that composes
+// behaviors on the type as the table it publishes as (D117,
+// tswriter.Context.Tables).
 func WriteWith(doc *schemafile.Document, format Format, catalog registry.ScalarCatalog) ([]byte, error) {
 	switch format {
 	case FormatJSON:
@@ -77,7 +80,7 @@ func WriteWith(doc *schemafile.Document, format Format, catalog registry.ScalarC
 	case FormatYAML:
 		return yamlwriter.Write(doc)
 	case FormatTS:
-		return tswriter.WriteContext(doc, &tswriter.Context{Scalars: catalog})
+		return tswriter.WriteContext(doc, &tswriter.Context{Scalars: catalog, Tables: true})
 	}
 	return nil, fmt.Errorf("unknown format %q", format)
 }
@@ -94,7 +97,7 @@ func WriteFor(doc *schemafile.Document, format Format, reg *registry.Registry) (
 		}
 		return WriteWith(doc, format, catalog)
 	}
-	return tswriter.WriteContext(doc, &tswriter.Context{Scalars: reg.Scalars(), Registry: reg})
+	return tswriter.WriteContext(doc, &tswriter.Context{Scalars: reg.Scalars(), Registry: reg, Tables: true})
 }
 
 // schemaFileExtensions are the extensions Owner paths carry, longest first

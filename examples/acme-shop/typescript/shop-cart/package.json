@@ -1,7 +1,7 @@
 {
   "name": "@acme/shop-cart-implementation",
   "version": "0.0.0",
-  "description": "The implementation of the shop-cart API: a shopper's cart over shop-db's Checkout, and the pickup slots.",
+  "description": "The implementation of the shop-cart API: a shopper's cart over shop-db's Checkout table, and the pickup slots.",
   "private": true,
   "type": "module",
   "main": "index.ts",
@@ -13,7 +13,6 @@
     "@acme/shop-cart-api": "workspace:*",
     "@acme/shop-cart-types": "workspace:*",
     "@acme/shop-db-types": "workspace:*",
-    "@superschematic/engine": "*",
     "@superschematic/http-runtime": "*",
     "superscalar": "*"
   },

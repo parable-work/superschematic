@@ -13,20 +13,6 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// workflowTableMembers are the members of Workflow's config a table's
-// Workflow alone takes: a transition's by, overridePermission and repeat
-// (D104), and finished (D113). An engine type's Workflow refuses each.
-type workflowTableMembers struct {
-	Transitions []struct {
-		From string          `json:"from"`
-		To   string          `json:"to"`
-		By   json.RawMessage `json:"by"`
-	} `json:"transitions"`
-	OverridePermission json.RawMessage `json:"overridePermission"`
-	Repeat             json.RawMessage `json:"repeat"`
-	Finished           json.RawMessage `json:"finished"`
-}
-
 // subjectTypes are the IR types of a field that holds a subject, which a
 // Workflow transition's by may name (D104): the core's
 // superschematic_rules_behaviors::subjects::SUBJECT_TYPES, which
@@ -37,38 +23,6 @@ var subjectTypes = []string{"string", "Identity.UUID", "Identity.UserID"}
 // Identity.UUID or Identity.UserID".
 func subjectTypesNamed() string {
 	return strings.Join(subjectTypes[:len(subjectTypes)-1], ", ") + " or " + subjectTypes[len(subjectTypes)-1]
-}
-
-// checkEngineWorkflowConfig refuses, on an engine type, each member of
-// Workflow's config that a table's Workflow alone takes (D104, D113): each
-// transition's by, in config order, then overridePermission, then repeat,
-// then finished.
-// The declaration is shared, so the configSchema accepts them; the
-// engine's Workflow refuses them too, and the build says so first, naming
-// the table form. A config the configSchema refuses is reported by
-// checkTypeBehaviors and left alone here.
-func checkEngineWorkflowConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	var config workflowTableMembers
-	if len(ref.Config) == 0 || json.Unmarshal(ref.Config, &config) != nil {
-		return
-	}
-	refuse := func(member string) {
-		r.errorf(td.Owner, "type %s: @behavior Workflow names %s, which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission, repeat and finished, so leave it out", td.Name, member)
-	}
-	for _, transition := range config.Transitions {
-		if len(transition.By) > 0 {
-			refuse(fmt.Sprintf("by on the transition from %q to %q", transition.From, transition.To))
-		}
-	}
-	if len(config.OverridePermission) > 0 {
-		refuse("overridePermission")
-	}
-	if len(config.Repeat) > 0 {
-		refuse("repeat")
-	}
-	if len(config.Finished) > 0 {
-		refuse("finished")
-	}
 }
 
 // checkWorkflowConfig holds the by of each transition of a Workflow use on
