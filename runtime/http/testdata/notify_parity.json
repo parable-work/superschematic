@@ -1,5 +1,5 @@
 {
-  "comment": "The notifier's pure parts (D153, D191): addresses is an address normalised by its kind (TypeScript's normaliseAddress, Rust's normalise_address); replies is a reply's words read (readReply, read_reply) and whether its text is shaped as a code (looksLikeCode, looks_like_code); quietHours is how many seconds a wall time waits out quiet hours (quietDelaySeconds at an instant in a zone, whose wall time is wall, and Rust's quiet_delay_seconds of the wall time); trust is a channel's trust over a principal's permissions (replyAllows, reply_allows; narrowedPermissions, narrowed_permissions), a null cap no cap; codeHashes is a code's stored hash (codeHash, code_hash); sameIds is an id in one form (sameId, same_id). runtime/http/typescript's notify-parity.test.ts writes the wants with NOTIFY_PARITY_WRITE=1.",
+  "comment": "The notifier's pure parts (D153, D191): addresses is an address normalised by its kind (TypeScript's normaliseAddress, Rust's normalise_address); replies is a reply's words read (readReply, read_reply) and whether its text is shaped as a code (looksLikeCode, looks_like_code); quietHours is how many seconds a wall time waits out quiet hours (quietDelaySeconds at an instant in a zone, whose wall time is wall, and Rust's quiet_delay_seconds of the wall time); quietHoursAcrossChanges is the same on nights the clocks change inside the window, from an instant in a zone (quietDelaySeconds, Go's QuietDelayAt); trust is a channel's trust over a principal's permissions (replyAllows, reply_allows; narrowedPermissions, narrowed_permissions), a null cap no cap; codeHashes is a code's stored hash (codeHash, code_hash); sameIds is an id in one form (sameId, same_id). runtime/http/typescript's notify-parity.test.ts writes the wants with NOTIFY_PARITY_WRITE=1.",
   "addresses": [
     {
       "kind": "email",
@@ -365,6 +365,113 @@
       "end": "07:00:00",
       "wall": "23:30:00",
       "want": 0
+    }
+  ],
+  "quietHoursAcrossChanges": [
+    {
+      "at": "2027-03-14T03:00:00Z",
+      "zone": "America/New_York",
+      "start": "22:00",
+      "end": "07:00",
+      "want": 28800
+    },
+    {
+      "at": "2027-03-14T06:59:00Z",
+      "zone": "America/New_York",
+      "start": "22:00",
+      "end": "07:00",
+      "want": 14460
+    },
+    {
+      "at": "2027-03-14T07:00:00Z",
+      "zone": "America/New_York",
+      "start": "22:00",
+      "end": "07:00",
+      "want": 14400
+    },
+    {
+      "at": "2027-03-14T06:15:00Z",
+      "zone": "America/New_York",
+      "start": "01:00",
+      "end": "02:30",
+      "want": 2700
+    },
+    {
+      "at": "2027-03-14T07:00:00Z",
+      "zone": "America/New_York",
+      "start": "01:00",
+      "end": "02:30",
+      "want": 0
+    },
+    {
+      "at": "2027-03-14T06:59:00Z",
+      "zone": "America/New_York",
+      "start": "02:30",
+      "end": "04:00",
+      "want": 0
+    },
+    {
+      "at": "2027-03-14T07:00:00Z",
+      "zone": "America/New_York",
+      "start": "02:30",
+      "end": "04:00",
+      "want": 3600
+    },
+    {
+      "at": "2027-11-07T02:00:00Z",
+      "zone": "America/New_York",
+      "start": "22:00",
+      "end": "07:00",
+      "want": 36000
+    },
+    {
+      "at": "2027-11-07T11:59:00Z",
+      "zone": "America/New_York",
+      "start": "22:00",
+      "end": "07:00",
+      "want": 60
+    },
+    {
+      "at": "2027-11-07T05:00:00Z",
+      "zone": "America/New_York",
+      "start": "00:30",
+      "end": "01:30",
+      "want": 1800
+    },
+    {
+      "at": "2027-11-07T05:45:00Z",
+      "zone": "America/New_York",
+      "start": "00:30",
+      "end": "01:30",
+      "want": 0
+    },
+    {
+      "at": "2027-11-07T06:15:00Z",
+      "zone": "America/New_York",
+      "start": "01:30",
+      "end": "03:00",
+      "want": 6300
+    },
+    {
+      "at": "2027-03-27T22:30:00Z",
+      "zone": "Europe/Paris",
+      "start": "23:00",
+      "end": "07:00",
+      "want": 23400
+    },
+    {
+      "at": "2027-10-30T21:30:00Z",
+      "zone": "Europe/Paris",
+      "start": "23:00",
+      "end": "07:00",
+      "want": 30600
+    },
+    {
+      "at": "2027-04-03T13:00:00Z",
+      "zone": "Australia/Lord_Howe",
+      "start": "22:00",
+      "end": "07:00",
+      "want": 27000
     }
   ],
   "trust": [

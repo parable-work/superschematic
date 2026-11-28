@@ -123,8 +123,8 @@ while the run lives, since a provider checks it as it returned it; a read
 of the transcript and the transcript the run leaves hold it redacted.
 */
 
-/** The triggers of a run (D158). */
-export type AgentTrigger = 'route' | 'assigned' | 'schedule' | 'principal' | 'inbound';
+/** The triggers of a run (D158): reply is a reply the notifier hands its interpreter (#602), acting for its sender. */
+export type AgentTrigger = 'route' | 'assigned' | 'schedule' | 'principal' | 'inbound' | 'reply';
 
 
 /** Who asked for a run, or whom it acts for. */
@@ -781,6 +781,17 @@ export function createAgents(options: AgentsOptions): Agents {
     if (outcome !== 'done' && run.trigger === 'assigned' && run.triggerTable && run.triggerKey && options.onReturn) {
       await orm.transaction((tx: any) => options.onReturn!(tx, { run, row: { table: String(run.triggerTable), key: String(run.triggerKey) } }));
     }
+    await replyEnded(run, outcome, detail);
+  };
+
+  /** A run that interpreted a reply (#602) has ended: the notifier ends a reply it did not act on, and tells its sender. */
+  const replyEnded = async (run: Values, outcome: string, detail?: string | null): Promise<void> => {
+    if (run.trigger !== 'reply' || !options.notifier) return;
+    try {
+      await options.notifier.replyRunEnded({ reply: ((run.input as Values | null) ?? {}).reply, outcome, detail: detail ?? null });
+    } catch (err) {
+      log.warn("a reply run's end was not told", { run: String(run.id), detail: err instanceof Error ? err.message : String(err) });
+    }
   };
 
   const cancel = async (runId: string, outcome = 'cancelled', detail?: string): Promise<void> => {
@@ -803,6 +814,7 @@ export function createAgents(options: AgentsOptions): Agents {
     }
     const refused = await runs().createOne(runFields(request, definition, []));
     await moveRun(orm, String(refused.id), 'cancelled', { outcome, detail, endedAt: now() });
+    await replyEnded(refused, outcome, detail);
     if (request.trigger === 'assigned' && request.subjectTable && request.subjectKey && options.onReturn) {
       const row = { table: request.subjectTable, key: request.subjectKey };
       await orm.transaction((tx: any) => options.onReturn!(tx, { run: { agent: definition.id, trigger: 'assigned' }, row }));

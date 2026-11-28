@@ -83,6 +83,7 @@ puts one in the caller's transaction.
 | `assigned` | The app assigns a row and requests a run about it. A paused agent's row goes back to its queue (`onReturn`). |
 | `schedule` | A Schedules run or a Recurrence event, through a route or the app's Workers method. |
 | `principal` | A person asks, naming whom the run acts for. |
+| `reply` | A reply no keyword reads, which a notifier given `interpret: { agent }` hands over ([a reply an agent reads](/superschematic/guides/notifications/#a-reply-an-agent-reads), #602). The run acts for the sender, about the notice's record, and answers through `notifier.replyTool`. |
 | `inbound` | A party's message ([outside parties](/superschematic/guides/parties/#act-on-a-run-request), D157): `createInbound` puts `{ trigger: "inbound", party, message, grant }` on the `@runRequests` queue, and `inbound.runWorker(pool, m => agents.handle(m))` hands it over as it is. It names no agent; the definition whose `inbound` is set takes it. Its scope is the grant's target, the party's row and the message's. |
 
 A run's principal may not request a run: only the dispatcher starts one.
