@@ -1,0 +1,125 @@
+import { AutoGenerate, Comments, Relation, Schedules, User, UserRole, accessGrants, channelIdentities, conversations, key, notifier, party, queue, runRequests, searchable, unique } from "@superschematic/db";
+import { Nullable } from "@superschematic/schema";
+import { Contact, Generic, Identity, Temporal } from "superscalar";
+
+// A person who signs in.
+export abstract class Account implements User<{ login: "email" }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @unique
+  email: Contact.Email;
+}
+
+@channelIdentities()
+export abstract class ChannelIdentity {}
+
+@notifier("channelTrust")
+export abstract class ChannelTrust {}
+
+// The conversations with parties and their messages (D157), and the queue
+// of run requests an inbound message from a party with a grant puts on,
+// which the agent dispatcher drains (D158).
+@conversations("conversations")
+export abstract class Conversation {}
+
+// A customer outside the user table, a party (D157), who reaches a task
+// through a grant and whose messages start an agent run.
+@party<Customer>({ title: "name" })
+export abstract class Customer {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: string;
+}
+
+@notifier("deliveries")
+export abstract class Delivery {}
+
+// The grants a customer and an agent run reach rows through (D156).
+@accessGrants()
+export abstract class Grant {}
+
+// An invoice of a task: paying it moves money, which an agent only asks to.
+export abstract class Invoice {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  task: Relation<Task, { onDelete: "CASCADE" }>;
+
+  amount: Generic.Int64;
+
+  paid: Generic.Int64;
+}
+
+@conversations("messages")
+export abstract class Message {}
+
+// The notifier's tables (D153): it routes a schedule's run to an agent and
+// an approval to those who may give it.
+@notifier("inbox")
+export abstract class Notice {}
+
+@notifier("preferences")
+export abstract class NoticePreference {}
+
+@notifier("routes")
+export abstract class NoticeRoute {}
+
+@queue()
+@notifier("dispatch")
+export abstract class NoticeWork {}
+
+@notifier("replies")
+export abstract class Reply {}
+
+// A named set of permissions; a role a grant names lists the rows it
+// reaches from the grant's target (D156). An agent's role is one of these.
+export abstract class Role implements UserRole {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @unique
+  name: Identity.Slug;
+
+  permissions: string[];
+
+  reaches: Nullable<string[]>;
+}
+
+@queue()
+@runRequests()
+export abstract class RunRequest {}
+
+// One message per row whose indexed text changed (D155).
+@queue({ key: ["sourceTable", "sourceKey"], onDuplicate: "skip", serialize: true })
+export abstract class SearchIndexing {}
+
+// A task an agent may work on. A schedule on it wakes an agent; a person
+// and an agent discuss it in its thread; an agent may be assigned to it.
+@searchable<Task>({ title: "title", body: "details", queue: SearchIndexing, comments: false })
+export abstract class Task implements Schedules<Task, { kinds: ["after", "every"]; max: 5; outcomes: ["started", "skipped"] }>, Comments<Task, {}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  title: string;
+
+  details: Nullable<string>;
+
+  state: string;
+
+  assignee: Nullable<string>;
+
+  createdAt: Temporal.DateTime;
+}
+
+// A note on a task, which a run on the task reaches through its role.
+@searchable<TaskNote>({ title: "text", queue: SearchIndexing })
+export abstract class TaskNote {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  task: Relation<Task, { onDelete: "CASCADE" }>;
+
+  text: string;
+}
