@@ -1573,6 +1573,16 @@ type {{ $ops }} struct{ r *{{ $repo }} }
 func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 {{- else }}
 func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, id {{ $r.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if $.HeldByAccess }}
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := {{ $v }}.keyArg(id); err != nil {
+		var none {{ .ResultReturn }}
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, {{ .Writes }}); err != nil {
+		var none {{ .ResultReturn }}
+		return none, behaviorOutOfReach(err, {{ printf "%q" $r.TypeName }}, {{ $r.WireKey "id" }}, id)
+	}
+	{{- end }}
 {{- end }}
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -1587,6 +1597,12 @@ func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, id {{ $r.PrimaryKeyType }
 		if err != nil {
 			return err
 		}
+		{{- if and $.HeldByAccess .AnswersRow }}
+		// The core reads every row; its answer keeps to the caller (D156).
+		if raw, err = sqliteKeepAnsweredRow(ctx, tx, {{ printf "%q" $r.TypeName }}, {{ $v }}.quoted, raw, {{ printf "%q" .AnswersRow }}); err != nil {
+			return err
+		}
+		{{- end }}
 		{{- else }}
 		opts, err := o.r.operationOptions(ctx)
 		if err != nil {

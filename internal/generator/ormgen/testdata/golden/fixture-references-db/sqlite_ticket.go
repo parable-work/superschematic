@@ -677,6 +677,14 @@ type ticketSQLiteCommentsOperations struct{ r *TicketSQLiteRepository }
 // Post runs comments's post in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Post(ctx context.Context, id types.IdentityUUID, params TicketCommentsPostParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -703,6 +711,14 @@ func (o ticketSQLiteCommentsOperations) Post(ctx context.Context, id types.Ident
 // Edit runs comments's edit in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Edit(ctx context.Context, id types.IdentityUUID, params TicketCommentsEditParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -729,6 +745,14 @@ func (o ticketSQLiteCommentsOperations) Edit(ctx context.Context, id types.Ident
 // DeleteMessage runs comments's deleteMessage in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) DeleteMessage(ctx context.Context, id types.IdentityUUID, params TicketCommentsDeleteMessageParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -755,6 +779,14 @@ func (o ticketSQLiteCommentsOperations) DeleteMessage(ctx context.Context, id ty
 // Purge runs comments's purge in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Purge(ctx context.Context, id types.IdentityUUID, params TicketCommentsPurgeParams) (*TicketCommentsPurgeResult, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsPurgeResult
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsPurgeResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsPurgeResult
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -781,6 +813,14 @@ func (o ticketSQLiteCommentsOperations) Purge(ctx context.Context, id types.Iden
 // React runs comments's react in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) React(ctx context.Context, id types.IdentityUUID, params TicketCommentsReactParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -807,6 +847,14 @@ func (o ticketSQLiteCommentsOperations) React(ctx context.Context, id types.Iden
 // Unreact runs comments's unreact in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Unreact(ctx context.Context, id types.IdentityUUID, params TicketCommentsUnreactParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -833,6 +881,14 @@ func (o ticketSQLiteCommentsOperations) Unreact(ctx context.Context, id types.Id
 // Pin runs comments's pin in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Pin(ctx context.Context, id types.IdentityUUID, params TicketCommentsPinParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -859,6 +915,14 @@ func (o ticketSQLiteCommentsOperations) Pin(ctx context.Context, id types.Identi
 // Unpin runs comments's unpin in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Unpin(ctx context.Context, id types.IdentityUUID, params TicketCommentsUnpinParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -885,6 +949,14 @@ func (o ticketSQLiteCommentsOperations) Unpin(ctx context.Context, id types.Iden
 // Resolve runs comments's resolve in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Resolve(ctx context.Context, id types.IdentityUUID, params TicketCommentsResolveParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -911,6 +983,14 @@ func (o ticketSQLiteCommentsOperations) Resolve(ctx context.Context, id types.Id
 // Reopen runs comments's reopen in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) Reopen(ctx context.Context, id types.IdentityUUID, params TicketCommentsReopenParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -937,6 +1017,14 @@ func (o ticketSQLiteCommentsOperations) Reopen(ctx context.Context, id types.Ide
 // ListMessages runs comments's listMessages in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) ListMessages(ctx context.Context, id types.IdentityUUID, params TicketCommentsListMessagesParams) (*TicketCommentsListMessagesResult, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsListMessagesResult
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, false); err != nil {
+		var none *TicketCommentsListMessagesResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsListMessagesResult
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -963,6 +1051,14 @@ func (o ticketSQLiteCommentsOperations) ListMessages(ctx context.Context, id typ
 // GetMessage runs comments's getMessage in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) GetMessage(ctx context.Context, id types.IdentityUUID, params TicketCommentsGetMessageParams) (*TicketCommentsCommentMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, false); err != nil {
+		var none *TicketCommentsCommentMessage
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsCommentMessage
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -989,6 +1085,14 @@ func (o ticketSQLiteCommentsOperations) GetMessage(ctx context.Context, id types
 // ListEdits runs comments's listEdits in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) ListEdits(ctx context.Context, id types.IdentityUUID, params TicketCommentsListEditsParams) (*TicketCommentsListEditsResult, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsListEditsResult
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, false); err != nil {
+		var none *TicketCommentsListEditsResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsListEditsResult
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -1015,6 +1119,14 @@ func (o ticketSQLiteCommentsOperations) ListEdits(ctx context.Context, id types.
 // ListReactions runs comments's listReactions in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) ListReactions(ctx context.Context, id types.IdentityUUID, params TicketCommentsListReactionsParams) (*TicketCommentsListReactionsResult, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsListReactionsResult
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, false); err != nil {
+		var none *TicketCommentsListReactionsResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsListReactionsResult
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
@@ -1041,6 +1153,14 @@ func (o ticketSQLiteCommentsOperations) ListReactions(ctx context.Context, id ty
 // ListPinned runs comments's listPinned in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) ListPinned(ctx context.Context, id types.IdentityUUID, params TicketCommentsListPinnedParams) (*TicketCommentsListPinnedResult, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsListPinnedResult
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, false); err != nil {
+		var none *TicketCommentsListPinnedResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
 	var out *TicketCommentsListPinnedResult
 	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
 		opts, err := o.r.operationOptions(ctx)
