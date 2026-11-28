@@ -66,9 +66,8 @@ changed declaration cannot reach the compiler without its implementation's
 copy.
 
 Examples:
-  superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
-  superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
-  superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
+  superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations
+  superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations --check
   my-schematic behaviors --extension my --out crates/my-rules/declarations
   my-schematic behaviors --extension my --out crates/my-rules/declarations --check`,
 		Args: cobra.NoArgs,

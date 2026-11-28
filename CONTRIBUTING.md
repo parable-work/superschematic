@@ -266,7 +266,7 @@ agent or a bot with write access counts.
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the Go modules           |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule, and the docs' scalar page matches the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
-| `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`, the commerce crate's `runtime/engine-commerce/rust/declarations`) match the core registry; `make behaviors` rewrites them |
+| `make behaviors-check` | The copies of the core's behavior declarations in the behaviors' core's crate (`runtime/engine/rust/rules-behaviors/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
 | `make cli`            | `bin/superschematic` and `bin/superschematic-migrate` alone, over superscalar's archive, built or, with no `cargo` on `PATH`, prebuilt ([Without Rust](#without-rust)) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |

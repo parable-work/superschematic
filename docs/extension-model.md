@@ -1363,18 +1363,12 @@ declarations are registered only in its own binary: an extension's copy
 comes from it, `acme-schematic behaviors --extension acme` for acme's,
 whose acme.Rating no crate implements, so acme keeps no copy. The core's
 copies come from
-the core binary, each into the Rust crate that implements it (D58): `make
-behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
-with `--package @superschematic/engine`, the work queue's
-`runtime/engine-workqueue/rust/declarations` with `--package
-@superschematic/engine-workqueue`, the commerce crate's
-`runtime/engine-commerce/rust/declarations` with `--package
-@superschematic/engine-commerce` and the behaviors' core's
-`runtime/engine/rust/rules-behaviors/declarations` with `--package
-@superschematic/rules` (the behaviors no engine implements, which
-`rules-behaviors` reads in place), so each crate carries only the
-declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
+the core binary, all of them into the behaviors' core's crate: `make
+behaviors` writes `runtime/engine/rust/rules-behaviors/declarations` with
+no `--package`, and `rules-behaviors` reads the copies of the behaviors it
+implements in place (D103, #587; the engine's crates carried their own
+packages' copies until the engine went), and `make behaviors-check`, part
+of `make test` and CI's go job, fails on a stale copy. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space
