@@ -22,8 +22,8 @@ use http::{Method, StatusCode};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use superschematic_http_runtime::mcp::{
-    reached, ConfirmationStore, EndpointOptions, MemoryConfirmationStore, Mount, ServerInfo,
-    MCP_PATH,
+    reached, CallOutcome, ConfirmationStore, EndpointOptions, EndpointTool,
+    MemoryConfirmationStore, Mount, ServerInfo, Tool, ToolError, MCP_PATH,
 };
 use superschematic_http_runtime::{
     block_on, error_response, handle, request_ids, ApiError, Authenticator, OperationInfo,
@@ -862,4 +862,59 @@ fn a_body_past_the_transports_limit_is_the_transports_to_refuse() {
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     let answer: Value = serde_json::from_slice(response.body()).expect("JSON");
     assert_eq!(answer["error"]["code"], -32000, "{answer}");
+}
+
+/// A tool of the endpoint that is no route's (#617), named `name`: it
+/// answers who called it and what it was given.
+struct Echo(&'static str);
+
+#[async_trait]
+impl EndpointTool for Echo {
+    fn tool(&self) -> Tool {
+        serde_json::from_value(json!({
+            "name": self.0,
+            "description": "Answers its caller.",
+            "inputSchema": {"type": "object"},
+            "annotations": {"readOnlyHint": true},
+        }))
+        .expect("a tool")
+    }
+
+    async fn call(
+        &self,
+        principal: &Principal,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<CallOutcome, ToolError> {
+        Ok(CallOutcome::Result(
+            json!({"as": principal.subject, "arguments": arguments}),
+        ))
+    }
+}
+
+#[test]
+fn an_endpoint_tool_is_listed_beside_the_routes_and_runs_as_the_caller() {
+    let ran = Ran::default();
+    let tools = tools();
+    let options = keyed().with_tools([Arc::new(Echo("echo")) as Arc<dyn EndpointTool>]);
+    let router = mount(&tools, &ran).router(&options).expect("a mount");
+    let listed = Client::bearer("ada").rpc(&router, "tools/list", json!({}));
+    let names: Vec<&str> = listed["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("a name"))
+        .collect();
+    assert_eq!(names, ["get_item", "sync_items", "export_items", "echo"]);
+    let got = Client::bearer("ada").call(&router, "echo", json!({"q": "pump"}));
+    assert_eq!(
+        got["structuredContent"],
+        json!({"as": "ada", "arguments": {"q": "pump"}})
+    );
+    assert!(ran.lock().expect("the log").is_empty());
+    // A tool of the endpoint's own may not take a route's tool's name.
+    let clashing = keyed().with_tools([Arc::new(Echo("get_item")) as Arc<dyn EndpointTool>]);
+    let refused = mount(&tools, &ran)
+        .router(&clashing)
+        .expect_err("a refusal");
+    assert!(refused.contains("get_item"), "{refused}");
 }

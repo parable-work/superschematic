@@ -131,6 +131,9 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 	if output.MCP != nil {
 		files = append(files, filepath.Join("src", filepath.FromSlash(MCPFile)))
 	}
+	if output.HasWiring() {
+		files = append(files, filepath.Join("src", WiringFile))
+	}
 
 	generated := make(map[string]string, len(files))
 	goldenDir := filepath.Join("testdata", "golden", name)

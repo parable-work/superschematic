@@ -1888,7 +1888,7 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 		}
 		held = schema != nil && (len(schema.AudienceTables()) > 0 || schema.AccessGrantsTable() != nil)
 	}
-	if !r.Schema.HasTableOperations() && !graphs && !held {
+	if !r.Schema.HasTableOperations() && !graphs && !held && !r.rustWires(db) {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {
