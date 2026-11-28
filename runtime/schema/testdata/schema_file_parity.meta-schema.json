@@ -8002,6 +8002,16 @@
       },
       "type": "object"
     },
+    "TeamDef": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "TeamMembersDef": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
     "TraitConfigSchema": {
       "additionalProperties": false,
       "properties": {
@@ -8317,6 +8327,12 @@
         },
         "tasks": {
           "$ref": "#/$defs/TasksDecl"
+        },
+        "team": {
+          "$ref": "#/$defs/TeamDef"
+        },
+        "teamMembers": {
+          "$ref": "#/$defs/TeamMembersDef"
         },
         "traitConfig": {
           "$ref": "#/$defs/TraitConfigSchema"

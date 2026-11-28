@@ -189,14 +189,20 @@ pub mod sqlite {
     /// The teams `ids` are members of, directly or through another team,
     /// once each, hyphenated, read through the definition's `@teamMembers`
     /// table on `connection` (#735).
-    pub fn teams_of(connection: &Connection, definition: &Definition, ids: &[uuid::Uuid]) -> Result<Vec<String>, Error> {
+    pub fn teams_of(
+        connection: &Connection,
+        definition: &Definition,
+        ids: &[uuid::Uuid],
+    ) -> Result<Vec<String>, Error> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
         let statement = teams_statement(definition)?;
         let starts: Vec<String> = ids.iter().map(|id| id.hyphenated().to_string()).collect();
-        let param = serde_json::to_string(&starts).map_err(|err| Error::Database(err.to_string()))?;
-        let fail = |err: rusqlite::Error| Error::Database(format!("read the caller's teams: {err}"));
+        let param =
+            serde_json::to_string(&starts).map_err(|err| Error::Database(err.to_string()))?;
+        let fail =
+            |err: rusqlite::Error| Error::Database(format!("read the caller's teams: {err}"));
         let mut prepared = connection.prepare(statement).map_err(fail)?;
         let rows = prepared
             .query_map([param], |row| row.get::<_, String>(0))

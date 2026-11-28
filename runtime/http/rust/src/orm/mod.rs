@@ -1992,6 +1992,19 @@ mod tests {
     }
 
     #[test]
+    fn an_audience_admits_a_caller_by_the_teams_it_belongs_to() {
+        let user = "11111111-1111-4111-8111-111111111111";
+        let team = "33333333-3333-4333-8333-333333333333";
+        let outer = "44444444-4444-4444-8444-444444444444";
+        let mut principal = Principal::new(user, Vec::<String>::new());
+        principal.teams = Some(vec![team.to_owned(), outer.to_owned()]);
+        assert_eq!(
+            AccessCaller::of(Some(&principal)).audience_ids(),
+            [user, team, outer]
+        );
+    }
+
+    #[test]
     fn a_behavior_operation_writes_unless_the_definition_names_it_a_read() {
         // A caller who sees a row runs a read; every other operation, and
         // every one of a definition that names none, needs write reach
