@@ -13,7 +13,9 @@ guide covers it in full.
 
 The channels are the SMS relay and the mail relay of
 `examples/runtime-providers`. Swapping either for another adapter is the
-environment's config alone.
+environment's config alone. An adapter for a service of another shape is
+a package the app writes
+([Set up your own provider](https://parable-work.github.io/superschematic/guides/runtime-providers/#set-up-your-own-provider)).
 
 ## What it shows
 

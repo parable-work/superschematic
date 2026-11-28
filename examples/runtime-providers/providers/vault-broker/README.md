@@ -12,7 +12,7 @@ reference, `vault://<vault>/<item>/<field>`.
   `Injection` for a browser fill or a request header.
 
 The service API it calls is `GET /v1/vaults/{vault}/items` and
-`GET /v1/vaults/{vault}/items/{item}`, with a Bearer token. That is the
-shape of 1Password Connect, which this broker could front with a token
-the password manager itself limits to the named vaults. The example's
-test talks to a stub of it.
+`GET /v1/vaults/{vault}/items/{item}`, with a Bearer token. A password
+manager's service API of that shape is what this broker could front,
+with a token the password manager itself limits to the named vaults. The
+example's test talks to a stub of it.

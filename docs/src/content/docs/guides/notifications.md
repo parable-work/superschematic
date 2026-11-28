@@ -82,7 +82,11 @@ build fills, one empty class per part, and the channel identities:
 The inbox, the deliveries, the routes and the dispatch queue are
 required. The notifier runs on Postgres. A database that declares any of
 this needs a channel adapter: the build refuses an environment that runs
-an API over it with no channel slot set.
+an API over it with no channel slot set. The examples' adapters,
+`examples/runtime-providers`' SMS and mail relays, send to stand-in
+services in their tests; an app whose service takes another shape writes
+its own adapter
+([set up your own provider](/superschematic/guides/runtime-providers/#set-up-your-own-provider)).
 
 ## Raise an event
 

@@ -49,6 +49,20 @@ guide covers them in full.
   its principal, `extension:<name>`, with the narrow role its package
   declares: sms-relay-a's is `messages.relay`.
 
+## Use a real service
+
+The packages here run with no account: the sandbox runs a local process,
+the model is a stub, and the tests put a stand-in behind every other
+provider's HTTP client. An app that wants a container runtime, a model
+API, or a channel of another shape writes a provider package for it,
+starting from the package here of the same interface, which serves as its
+skeleton. The runtime providers guide's
+[Set up your own provider](https://parable-work.github.io/superschematic/guides/runtime-providers/#set-up-your-own-provider)
+gives the steps for each interface, in TypeScript, Go and Rust: the
+members and what each must do, the manifest, the API's providers, its
+settings and secrets per environment, swapping it for the stub in one
+environment alone, and its tests.
+
 ## Run it
 
 From the repository root, after `make setup`:
