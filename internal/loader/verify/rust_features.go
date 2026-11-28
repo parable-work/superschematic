@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -80,15 +79,6 @@ func RustServerFeatures(schema *ir.Schema) []RustFeature {
 		}
 	}
 	return out
-}
-
-func sortedTypes(schema *ir.Schema) []string {
-	names := make([]string, 0, len(schema.Types))
-	for name := range schema.Types {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // rustRefusal is the message of a feature the Rust outputs refuse.
