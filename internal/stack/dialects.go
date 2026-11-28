@@ -13,10 +13,9 @@ import (
 //     database must resolve to that dialect;
 //   - a Rust one's is too (D116), a pool for postgres and the runtime's
 //     SQLite file for sqlite, with the repositories of that dialect;
-//   - a Go server's and job's Deps.DB is the ORM of their database's first
-//     dialect too (D116), over a pool or the SQLite file, and a Go worker
-//     claims its queue on Postgres alone, so its database must resolve to
-//     postgres.
+//   - a Go server's, job's and worker's Deps.DB is the ORM of their
+//     database's first dialect too (D116), over a pool or the SQLite file,
+//     and a Go worker claims its queue on that dialect (#717).
 //
 // A TypeScript one's Deps.orm is its database's repositories on that
 // dialect too (D116), and a TypeScript API over the user model keeps its
@@ -45,11 +44,7 @@ func (r *resolver) checkDatabaseDialects() {
 					from.Kind, from.Name, from.Kind, db, first, r.envName(), db, e.to.res.Name, placed)
 			}
 		case "", registry.APILanguageGo:
-			switch {
-			case from.Kind == ir.DeployableWorker && placed != registry.SQLDialectPostgres:
-				r.fail(CodeUnrealizable, "%s %s is a %s %s on %s, and environment %s places %s on %s, a %s database; a Go worker claims its queue on Postgres alone (D64, D116)",
-					from.Kind, from.Name, registry.APILanguageGo, from.Kind, db, r.envName(), db, e.to.res.Name, placed)
-			case placed != first:
+			if placed != first {
 				r.fail(CodeUnrealizable, "%s %s is a %s %s on %s, whose DB service lists %s first, and environment %s places %s on %s, a %s database; a Go API's Deps.DB is the ORM of its database's first dialect (D64, D116)",
 					from.Kind, from.Name, registry.APILanguageGo, from.Kind, db, first, r.envName(), db, e.to.res.Name, placed)
 			}

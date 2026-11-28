@@ -2509,9 +2509,11 @@ version on SQLite, and its history by the SQLite DDL's row triggers
 (D189). The Go repository reads no history there, as the TypeScript one
 reads none: `GetVersion`, `GetVersions`, `ListVersions`, `GetAsOf` and the
 `ListAsOfBy...` reads answer `ErrSQLiteUnsupported`. The generated Go
-server's wiring of the notifier and its workers over a database that
-lists `sqlite` first is a follow-up: the implementation builds them over
-`Deps.DB` itself.
+server and its workers wire them over a database that lists `sqlite`
+first as over a pool (#717): the API package's `Wire`, `Authenticator`,
+`Routes` and runtime queues take the ORM's `SQLiteDatabase`, and every
+worker, the app's `@worker`, a table's behavior worker and the runtime's
+own, claims its queue on the SQLite file.
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
