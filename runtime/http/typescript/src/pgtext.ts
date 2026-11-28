@@ -118,3 +118,16 @@ export function parseInterval(text: string): bigint {
   }
   return nanos;
 }
+
+/**
+ * A TIMESTAMP's text, which Postgres writes with a space, as a wall
+ * date-time's (Temporal.LocalDateTime): 2026-10-31T09:00:00, and a
+ * fraction of a second after it when not zero. Text of any other shape,
+ * infinity among it, is as Postgres wrote it.
+ */
+export function localDateTimeText(text: string): string {
+  const m = /^(\d{4,}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d+))?$/u.exec(text);
+  if (!m) return text;
+  const fraction = (m[3] ?? '').replace(/0+$/u, '');
+  return `${m[1]}T${m[2]}${fraction ? `.${fraction}` : ''}`;
+}

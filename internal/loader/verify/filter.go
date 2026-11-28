@@ -207,6 +207,10 @@ func FilterFieldKind(schema, itemSchema *ir.Schema, in Input, item *ir.TypeDef, 
 		return ir.FilterKindDateTime, ""
 	case sqlutil.FilterDate:
 		return ir.FilterKindDate, ""
+	case sqlutil.FilterLocalDateTime:
+		// The repositories filter a wall date-time; a list's filter has
+		// no kind for one on the wire yet.
+		return "", "which holds " + label + ", a wall date-time; FilterBy does not compare one yet"
 	}
 	return "", "which holds " + label + "; a filter compares one text, number, time or boolean"
 }

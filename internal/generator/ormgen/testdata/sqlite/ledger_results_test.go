@@ -299,11 +299,14 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 	// ones, and pages across a column's nulls.
 	reviewed := types.TemporalDateTime(time.Date(2026, 10, 25, 9, 15, 0, 0, time.UTC))
 	metadata := types.GenericJSON(`{"source":"bank","n":1}`)
-	entry, err := entries.CreateOne(ctx, &types.Entry{Id: keyPtr(11), Account: types.Account{Id: keyPtr(cash)}, AmountCents: -1250, BookedOn: "2026-10-25", Memo: "Coffee", Tags: []string{"food"}, ReviewedAt: &reviewed, Metadata: &metadata})
+	// A wall date-time is its text on both databases, the seconds always
+	// and a fraction only when it is not zero.
+	settles, settlesLate := types.TemporalLocalDateTime("2026-10-26T09:30:00"), types.TemporalLocalDateTime("2026-10-27T17:00:00.25")
+	entry, err := entries.CreateOne(ctx, &types.Entry{Id: keyPtr(11), Account: types.Account{Id: keyPtr(cash)}, AmountCents: -1250, BookedOn: "2026-10-25", Memo: "Coffee", Tags: []string{"food"}, ReviewedAt: &reviewed, SettlesAt: &settles, Metadata: &metadata})
 	call("createEntry", entry, err)
 	entryRows, err := entries.CreateMany(ctx, []*types.Entry{
 		{Id: keyPtr(12), Account: types.Account{Id: keyPtr(bank)}, AmountCents: 500, BookedOn: "2026-10-26", Tags: []string{}, ExternalId: "x1", Kind: types.EntryKind_Credit},
-		{Id: keyPtr(13), Account: types.Account{Id: keyPtr(card)}, Transfer: &types.Account{Id: keyPtr(cash)}, AmountCents: -75, BookedOn: "2026-10-27", Tags: []string{"a", "b"}, Memo: "Transfer"},
+		{Id: keyPtr(13), Account: types.Account{Id: keyPtr(card)}, Transfer: &types.Account{Id: keyPtr(cash)}, AmountCents: -75, BookedOn: "2026-10-27", Tags: []string{"a", "b"}, Memo: "Transfer", SettlesAt: &settlesLate},
 	})
 	call("createEntries", entryRows, err)
 	entry, err = entries.CreateOne(ctx, &types.Entry{Id: keyPtr(19), Account: types.Account{Id: keyPtr(99)}, AmountCents: 1, BookedOn: "2026-10-28", Tags: []string{}})
@@ -335,6 +338,14 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 	lte := time.Date(2026, 10, 25, 11, 15, 0, 0, time.FixedZone("", 2*3600))
 	entryList, total, err = entries.FindMany(ctx, &EntryFilter{ReviewedAt: &DateTimeFilter{Lte: &lte}}, &EntryFindOptions{Fields: allEntries, SkipCount: true})
 	call("findEntriesReviewed", map[string]any{"rows": entryList, "total": total}, err)
+	entryList, total, err = entries.FindMany(ctx, &EntryFilter{SettlesAt: &DateFilter{Gte: str("2026-10-26T09:30:00"), Lt: str("2026-10-27T17:00:00.25")}}, byAmount)
+	call("findEntriesSettling", map[string]any{"rows": entryList, "total": total}, err)
+	entryList, total, err = entries.FindMany(ctx, &EntryFilter{SettlesAt: &DateFilter{Between: &DateRange{Start: "2026-10-27T00:00:00", End: "2026-10-27T23:59:59"}}}, byAmount)
+	call("findEntriesSettlingBetween", map[string]any{"rows": entryList, "total": total}, err)
+	entryList, total, err = entries.FindMany(ctx, &EntryFilter{SettlesAt: &DateFilter{IsNull: &no, NotIn: []string{"2026-10-28T00:00:00"}}}, &EntryFindOptions{Fields: allEntries, OrderBy: []EntryOrderBy{{Field: EntryOrderBySettlesAt, Desc: true}}})
+	call("findEntriesBySettling", map[string]any{"rows": entryList, "total": total}, err)
+	entryList, total, err = entries.FindMany(ctx, &EntryFilter{SettlesAt: &DateFilter{Ne: str("2026-10-26T09:30:00")}}, byAmount)
+	call("findEntriesNotSettling", map[string]any{"rows": entryList, "total": total}, err)
 	entryList, total, err = entries.FindMany(ctx, &EntryFilter{
 		AmountCents: &Int64Filter{Ne: cents(1), NotIn: []int64{500, -75}},
 		BookedOn:    &DateFilter{Ne: str("2026-10-26")},

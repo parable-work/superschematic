@@ -351,6 +351,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkIndexOptions(schema, r)
 	checkVectorColumns(schema, r)
 	checkDefaultNow(schema, r)
+	checkLocalDateTime(schema, r)
 	checkSeedRoles(schema, in, r)
 	checkSeedRows(schema, in, r)
 	checkQueueMessageScalars(schema, r)

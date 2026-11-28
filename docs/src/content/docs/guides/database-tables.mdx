@@ -57,6 +57,8 @@ The field's type decides its column:
 | `Generic.Decimal` | `NUMERIC`, or `NUMERIC(p,s)` with `Validate`'s `precision` and `scale` |
 | `Embedding.Vector` with `Validate`'s `dimensions` | pgvector's `vector(n)`, and the DDL enables the `vector` extension |
 | `Temporal.DateTime` | `TIMESTAMPTZ` |
+| `Temporal.Date`, `Temporal.Time` | `DATE`, `TIME` |
+| `Temporal.LocalDateTime` | `TIMESTAMP`, with no zone |
 | `Temporal.Duration` | `INTERVAL` |
 | `Geo.Location` | `POINT`, x the longitude and y the latitude |
 | `string`, an enum | `TEXT` |
@@ -68,6 +70,21 @@ The field's type decides its column:
 A field is `NOT NULL` unless it is `Nullable<T>`. A required array column
 defaults to the empty array `'{}'`, whatever its element type, and a
 required `JSONB` column has no default.
+
+A `Temporal.LocalDateTime` is a wall date-time: a date and a time of day
+with no zone, the nine o'clock an appointment keeps when the clocks
+change. It names no instant, so it is never a `Date`: a row holds its
+text, `2026-10-31T09:00:00`, the seconds always and a fraction of a second
+only when it is not zero, in Go, TypeScript and Rust, on Postgres and on
+SQLite, where its column is `TEXT`. Its filter is a date's, `gt`, `gte`,
+`lt`, `lte` and `between` among it, each value the text. Give a
+repository the canonical text, which the type's parser returns: Postgres
+reads `2026-10-31 09:00` as the same value, and SQLite holds and compares
+the text it is given. `Default<T, "now">` is refused on one, since a wall
+clock reads the time in a zone and the type names none. A list or a key
+of them in a table, a queue's message, a projection, a version graph's
+entity, a `FilterBy` field and a table that composes a behavior do not
+carry one yet, and the build says so.
 
 The DDL says what the schema says about a column's values too, so a row
 written outside the generated code, by a script, a trigger or by hand, is
@@ -2665,6 +2682,7 @@ its own:
 A row holds each column by its member, in the form the TypeScript types
 hold it: a UUID in base62, the wire form, a `Generic.Int64` a number, a
 `Temporal.DateTime` a `Date`, a `Temporal.Date` its `YYYY-MM-DD` text, a
+`Temporal.LocalDateTime` its `YYYY-MM-DDTHH:MM:SS` text, a
 JSON column the JSON value it holds, a JSON string staying a string and
 `null` the JSON null in a column that may not be null. The HTTP runtime's
 value codec converts each, by the column's type and never by the value's,

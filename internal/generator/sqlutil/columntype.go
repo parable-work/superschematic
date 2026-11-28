@@ -12,7 +12,8 @@ import (
 // stores columns by, with the builtins string, number and boolean. Scalars
 // with an explicit TypeMappings["sql"] entry use it (via the shared codegen
 // mapping); scalars without one are inferred from their semantic traits
-// (UUID-like -> UUID, datetime-like -> TIMESTAMPTZ, ...) before bottoming
+// (UUID-like -> UUID, datetime-like -> TIMESTAMPTZ, a wall date-time ->
+// TIMESTAMP, ...) before bottoming
 // out on the host-language primitive.
 func ScalarSQLTypes(schema *ir.Schema) map[string]string {
 	mapping := codegen.BuildScalarSQLMapping(schema)
@@ -41,6 +42,8 @@ func sqlTypeFromTraits(traits codegen.ScalarTraits) string {
 		return "TIMESTAMPTZ"
 	case traits.IsDateLike:
 		return "DATE"
+	case traits.IsLocalDateTimeLike:
+		return "TIMESTAMP"
 	case traits.IsTimeLike:
 		return "TIME"
 	case traits.IsDurationLike, traits.IsIntegerLike:

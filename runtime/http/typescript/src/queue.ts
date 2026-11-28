@@ -12,7 +12,7 @@ import {
   type QueueDefinition,
 } from './queue-core.js';
 import { servePostgresClaims, type QueuePool, type QueueQueryable } from './queue-orm.js';
-import { parseArray, parseInterval, parsePoint } from './pgtext.js';
+import { localDateTimeText, parseArray, parseInterval, parsePoint } from './pgtext.js';
 
 export { ClaimLostError, formatDuration, parseDuration } from './queue-core.js';
 export { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
@@ -232,7 +232,8 @@ function claimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): QueueCl
  * type is not what pg makes of them. A 64-bit integer is a number, as the
  * TypeScript types hold Generic.Int64 and every integer scalar, a date
  * its YYYY-MM-DD text, Temporal.Date's, where pg would make a Date at local
- * midnight, a POINT the location {lat, lon}, Geo.Location's, where pg would
+ * midnight, a TIMESTAMP its wall reading's text, Temporal.LocalDateTime's,
+ * where pg would make a Date of it in the process's zone, a POINT the location {lat, lon}, Geo.Location's, where pg would
  * make {x, y}, an INTERVAL the canonical text of its duration,
  * Temporal.Duration's, where pg would make an object of its parts, and a
  * json or jsonb column its text, which claimOf decodes once by the field.
@@ -246,6 +247,8 @@ const overrides: Readonly<Record<number, (value: string) => unknown>> = {
   1016: value => parseArray(value).map(element => (element === null ? null : Number(element))),
   1082: value => value,
   1182: value => parseArray(value),
+  1114: localDateTimeText,
+  1115: value => parseArray(value).map(element => (element === null ? null : localDateTimeText(element))),
   1186: value => formatDuration(parseInterval(value)),
 };
 
