@@ -125,6 +125,12 @@ type EndpointInfo struct {
 	// other: the router's handler runs it through the graph's facade
 	// (src/graphs.rs), and its namespace's trait has no method for it.
 	Graph *GraphInfo
+
+	// RowFeature is the row feature operation the endpoint is (#723), nil
+	// for every other: the router's handler runs it through the
+	// repositories' references and attachments (src/rowfeatures.rs), and
+	// its namespace's trait has no method for it.
+	RowFeature *RowFeatureInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -1028,6 +1034,14 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 				return nil, err
 			}
 		}
+		// A row feature operation's handler runs it through the
+		// repositories' references and attachments (#723): its namespace
+		// has no method for it either.
+		if info.Behavior == nil && info.Table == nil && info.Graph == nil {
+			if info.RowFeature, err = rowFeatureInfo(endpoint, info); err != nil {
+				return nil, err
+			}
+		}
 		if !info.RouterServed() {
 			namespaceSet[info.Namespace] = struct{}{}
 		}
@@ -1217,6 +1231,8 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{output.BehaviorsTemplate(), "behaviors.rs", output.HasBehaviors()},
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
+		{"rowfeatures.tmpl", RowFeaturesFile, output.HasRowFeatureOperations()},
+		{"files.tmpl", FilesFile, output.HasFileProcessing()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
 		{"wiring.tmpl", WiringFile, output.HasWiring()},
 	} {

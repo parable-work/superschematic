@@ -111,7 +111,7 @@ pub(super) async fn read_in<H: CalendarHost>(
             {
                 continue;
             }
-            if let Some(permission) = options.permissions.get(&source.name) {
+            if let Some(permission) = source.permission_under(options) {
                 if !principal.is_some_and(|p| p.permissions.contains(permission)) {
                     continue;
                 }

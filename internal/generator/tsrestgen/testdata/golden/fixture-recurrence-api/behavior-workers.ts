@@ -37,7 +37,7 @@ import type { WorkerQueue } from '@superschematic/http-runtime/worker';
 import { filingChangeQueue, filingDeadlineQueue, filingEventQueue } from '@schemas/fixture-recurrence-db-types/queues';
 import type { FixtureRecurrenceDbOrm, FixtureRecurrenceDbTx } from '@schemas/fixture-recurrence-db-types/orm';
 import type { FilingEvent } from '@schemas/fixture-recurrence-db-types';
-import type { FilingRecurrenceMissedPayload, FilingRecurrenceOpenedPayload, FilingRecurrenceRemindedPayload } from '@schemas/fixture-recurrence-api-types/types';
+import type { FilingRecurrenceDuePayload, FilingRecurrenceMissedPayload, FilingRecurrenceOpenedPayload, FilingRecurrenceRemindedPayload } from '@schemas/fixture-recurrence-api-types/types';
 import type { Workers } from './deps';
 
 /** The caller FilingDeadlines' commands run as (D103). */
@@ -141,6 +141,9 @@ async function filingDeadlinesEvent(workers: Workers, tx: FixtureRecurrenceDbTx,
   }
   if (message.useId === 'Recurrence' && message.kind === 'reminded') {
     return workers.filingDeadlinesRecurrenceReminded({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as FilingRecurrenceRemindedPayload }, tx, signal);
+  }
+  if (message.useId === 'Recurrence' && message.kind === 'due') {
+    return workers.filingDeadlinesRecurrenceDue({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as FilingRecurrenceDuePayload }, tx, signal);
   }
   if (message.useId === 'Recurrence' && message.kind === 'missed') {
     return workers.filingDeadlinesRecurrenceMissed({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as FilingRecurrenceMissedPayload }, tx, signal);

@@ -27,9 +27,10 @@ import (
 // scenarios written by hand in their format where the engine recorded
 // none, core-workflow-principals.json, core-freezes-and-sign-offs.json,
 // core-retries-waits.json, core-periods-and-presence.json, core-seats.json,
-// core-reconcile.json, core-schedules.json and core-pool.json (D104), whose
-// transcripts hold each command's row version too, and core-schedules' and
-// core-pool's the events each command wrote; core-pool's (Pool's row-less
+// core-reconcile.json, core-schedules.json and core-pool.json (D104), and
+// core-recurrence.json (#601), whose transcripts hold each command's row
+// version too, and core-schedules', core-pool's and core-recurrence's the
+// events each command wrote; core-pool's (Pool's row-less
 // pick and its recheck events, D104) and core-lease's expireHolder hold
 // commands without a row, each run through Execute with no row to read
 // back, its result or refusal and the rows its calls wrote compared
@@ -100,6 +101,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
+	{"../../engine/testdata/rules/core-recurrence.transcript.json", 88},
 	{"../../engine/testdata/rules/core-rollups.transcript.json", 180},
 	{"../../engine/testdata/rules/core-dependencies.transcript.json", 266},
 	{"../../engine/testdata/rules/core-numbering.transcript.json", 104},

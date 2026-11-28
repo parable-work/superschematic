@@ -78,16 +78,20 @@ type AudienceCascade struct {
 	Children []AudienceChild
 }
 
-// AudienceChild is a table that inherits from a cascade's table: its
-// name, quoted name, its audience column and its foreign key to the parent.
+// AudienceChild is a table that inherits from a cascade's table: its type
+// and name, quoted name, its audience column and its foreign key to the
+// parent. Queue is the queue its @audience names (#734), on which the
+// cascade enqueues the parent instead of resolving the child's rows; nil
+// resolves them in the writer's transaction.
 type AudienceChild struct {
-	Table                               string
+	Origin, Table                       string
 	QuotedTable, Audience, ParentColumn string
+	Queue                               *SearchQueue
 }
 
 // buildAudience builds the triggers of the schema's @audience tables from
 // the tables as sqlgen built them, sorted by table.
-func buildAudience(tableTypes []*ir.TypeDef, tables []Table) ([]AudienceTrigger, []AudienceCascade, error) {
+func buildAudience(schema *ir.Schema, tableTypes []*ir.TypeDef, tables []Table) ([]AudienceTrigger, []AudienceCascade, error) {
 	byType := map[string]*Table{}
 	for i := range tables {
 		// A type's own table: a join or a history table names its type
@@ -164,7 +168,15 @@ func buildAudience(tableTypes []*ir.TypeDef, tables []Table) ([]AudienceTrigger,
 				}
 				cascades[parent.Name] = cascade
 			}
-			cascade.Children = append(cascade.Children, AudienceChild{Table: t.Table, QuotedTable: t.QuotedTable, Audience: t.Audience, ParentColumn: t.ParentColumn})
+			child := AudienceChild{Origin: td.Name, Table: t.Table, QuotedTable: t.QuotedTable, Audience: t.Audience, ParentColumn: t.ParentColumn}
+			if name := td.Audience.Queue; name != "" {
+				queue, err := messageQueueOf(schema, name, ir.AudienceResolveFields)
+				if err != nil {
+					return nil, nil, fmt.Errorf("sqlgen: @audience on %s: %w", td.Name, err)
+				}
+				child.Queue = &queue
+			}
+			cascade.Children = append(cascade.Children, child)
 		}
 		for _, name := range []string{t.TriggerName, "trg_" + table.Name + cascadeSuffix} {
 			if len(name) > sqlutil.PostgresIdentifierLimit {
@@ -294,12 +306,19 @@ func (c AudienceCascade) Trigger() Trigger {
 
 // FunctionSQL renders the cascade: when an update changes the row's
 // resolved columns, each child row that inherits is updated with no
-// change, so its own trigger resolves it again.
+// change, so its own trigger resolves it again; or, for a child table
+// whose @audience names a queue, the parent is enqueued on it, whose
+// worker resolves them after the commit (#734).
 func (c AudienceCascade) FunctionSQL() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "BEGIN\n  -- The children that inherit the audience of %s (D156), resolved\n  -- again when its own resolved audience changes.\n", c.Origin)
 	fmt.Fprintf(&b, "  IF NEW.%s IS DISTINCT FROM OLD.%s OR NEW.%s IS DISTINCT FROM OLD.%s THEN\n", c.Effective, c.Effective, c.EffectiveAgents, c.EffectiveAgents)
 	for _, child := range c.Children {
+		if child.Queue != nil {
+			fmt.Fprintf(&b, "    -- %s's rows are resolved by its queue's worker, after the commit.\n", child.Origin)
+			b.WriteString(child.Queue.enqueue(child.Origin, "NEW."+c.Key, "    "))
+			continue
+		}
 		fmt.Fprintf(&b, "    UPDATE %s SET %s = %s WHERE %s = NEW.%s AND %s = 'inherit';\n",
 			child.QuotedTable, child.Audience, child.Audience, child.ParentColumn, c.Key, child.Audience)
 	}

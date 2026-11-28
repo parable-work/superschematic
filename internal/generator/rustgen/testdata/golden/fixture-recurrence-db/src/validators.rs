@@ -532,7 +532,7 @@ pub fn parse_filing_event(value: Value, unknown_fields: rt::UnknownFields) -> Re
 }
 
 /// The fields `FilingRecurrenceOccurrences` declares, by their wire names.
-pub const FILING_RECURRENCE_OCCURRENCES_FIELDS: &[&str] = &["filing", "key", "due", "dueAt", "opensAt", "remindAt", "overdueAt", "state", "revision", "shifted", "moved", "changedAt", "remindedAt", "completedAt", "completedByTable", "completedByKey", "completedByPrincipal", "note"];
+pub const FILING_RECURRENCE_OCCURRENCES_FIELDS: &[&str] = &["filing", "key", "due", "dueAt", "opensAt", "remindAt", "overdueAt", "state", "revision", "shifted", "moved", "changedAt", "remindedAt", "fellDueAt", "completedAt", "completedByTable", "completedByKey", "completedByPrincipal", "note"];
 
 /// Validates a JSON value as `FilingRecurrenceOccurrences`. A null value passes; the errors
 /// are empty when the value is valid.
@@ -613,6 +613,12 @@ pub fn validate_filing_recurrence_occurrences(value: &Value) -> ValidationErrors
         let field = value.get("remindedAt");
         if !rt::is_absent(field) {
             errors.set_result("remindedAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    {
+        let field = value.get("fellDueAt");
+        if !rt::is_absent(field) {
+            errors.set_result("fellDueAt", scalars::validate_temporal_date_time(field));
         }
     }
     {

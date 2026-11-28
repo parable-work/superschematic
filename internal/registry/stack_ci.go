@@ -275,6 +275,10 @@ type CIRendererSpec struct {
 type CITasksRequest struct {
 	Service string
 	File    *tasks.File
+	// TaskFile is the path the task file is committed at, from the
+	// repository root (outputs.tasks.install), or "" for a service that
+	// installs none. A workflow that plans reads the file there.
+	TaskFile string
 }
 
 // RegisterCIRenderer adds a CI renderer. It refuses a malformed or

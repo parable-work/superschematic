@@ -269,7 +269,7 @@ func TestTheSchemasHoldTheTypes(t *testing.T) {
 func TestAPlanIsReadAsAFileIs(t *testing.T) {
 	key := strings.Repeat("ab", 32)
 	plan := &Plan{
-		Version: PlanVersion, KeyVersion: "1:sha1", Commit: strings.Repeat("1", 40), Order: []string{"build", "smoke"},
+		Version: PlanVersion, KeyVersion: "2:sha1", Commit: strings.Repeat("1", 40), Order: []string{"build", "smoke"},
 		Tasks: map[string]PlanTask{
 			"build": {WorkHash: key, Key: &key, Inputs: []PlanInput{{Kind: InputPath, Digest: key, Files: 3}}},
 			"smoke": {WorkHash: key, After: []string{"build"}},

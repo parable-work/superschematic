@@ -10,8 +10,8 @@
 # $TASK_OUTPUTS/<output>, and reads one it uses from
 # $TASK_USES/<task>/<output>.
 #
-# Every run runs every task. A workflow keeps no pass by its input key: a
-# forge that reads the plan (superschematic tasks plan) does.
+# Every run runs every task. With sections.github.reuse the workflow plans
+# the commit and keeps each task's pass under its input key.
 
 name: repo-tasks
 

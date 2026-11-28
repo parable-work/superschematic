@@ -9,5 +9,5 @@ same token; `status` and `inbound` check the signature and read them.
 Its principal's role is `messages.relay`: a relay that calls the app with
 its own key may relay messages and do nothing else.
 
-A JSON SMS API with signed webhooks, such as Telnyx's, is the shape this
+An SMS API that takes JSON and signs its webhooks is the shape this
 adapter could front. The example's test talks to a stub.

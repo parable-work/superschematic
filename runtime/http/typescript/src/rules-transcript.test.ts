@@ -70,7 +70,12 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // tableOperation, a step with no key, whose expect holds no row and whose
 // others are every row its change set wrote) that reads the table's rows
 // across it, with its Budget's meters for Capacity, and whose rechecks are
-// events of the table's queue; core-lease's holds expireHolder, the other
+// events of the table's queue; core-recurrence's, written by hand for
+// Recurrence (#601), whose occurrences are a sub-table of the row keyed by
+// their nominal wall time, whose open, remind, due, overdue and plan are
+// deadlines of the row's queue, each fire's events in the table's event
+// queue, and whose plan reads a holiday table's rows and a relation's row;
+// core-lease's holds expireHolder, the other
 // command without a row, whose calls expire each lease a holder holds. Each
 // scenario gets a table per type and database, its own fields' columns
 // beside the owned columns the layout rule gives each use of any version
@@ -136,6 +141,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-reconcile', floor: 58 },
   { file: 'core-schedules', floor: 161 },
   { file: 'core-pool', floor: 82 },
+  { file: 'core-recurrence', floor: 88 },
   { file: 'core-rollups', floor: 180 },
   { file: 'core-dependencies', floor: 266 },
   { file: 'core-numbering', floor: 104 },

@@ -151,11 +151,11 @@ func digestsOf(repo *Repository, commit, dir string) (*rootDigests, error) {
 		if err != nil {
 			return nil, fmt.Errorf("service %s: %w", service, err)
 		}
-		if out.inputs[service], err = InputDigest(tree, set.Paths); err != nil {
+		if out.inputs[service], err = InputDigest(tree, set.Paths, set.Values...); err != nil {
 			return nil, err
 		}
 		// The root's own files are the same in every service's set.
-		if out.shared, err = InputDigest(tree, set.Shared); err != nil {
+		if out.shared, err = InputDigest(tree, set.Shared, set.Values...); err != nil {
 			return nil, err
 		}
 		if out.own[service], err = InputDigest(tree, ownPaths(tree, root.ServiceDir(service))); err != nil {

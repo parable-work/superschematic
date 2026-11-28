@@ -1,6 +1,6 @@
 {
   "commit": "1111111111111111111111111111111111111111",
-  "keyVersion": "1:sha1",
+  "keyVersion": "2:sha1",
   "order": [
     "lint",
     "schema-build",
@@ -28,18 +28,18 @@
           "kind": "path"
         }
       ],
-      "key": "e59e093cb2ce6279bb63e32e580c2363997013b515faea2f039be694e459c14d",
+      "key": "ecd3761bd07ef4a7d7d4a7d10819f77ffae86b46f0ab6de8c063f1dcd5c8b833",
       "workHash": "de01c0115184212e135b3746b2fc91f5180bc28b65af3228b72c42e0dfddd487"
     },
     "schema-build": {
       "inputs": [
         {
-          "digest": "a1bf6f67724eddb3fd03fc9f769cb12750030ac95a977c6b284cf880ef64f6ca",
-          "files": 9,
+          "digest": "6d5f090e5fc94d471fc7bc9f6a0f938ddb182292995536d093d5bc49894cd25f",
+          "files": 8,
           "kind": "schema"
         }
       ],
-      "key": "98f610fb35d860f84962bf2454b7aa9ec83934938a2266ab21061196e3867f7b",
+      "key": "8c3e8f160217f9292dfce74b28bc2fb1fce989f7d62ece6a733dfe4806dfc9ec",
       "workHash": "407b20a24c624f4c5493caf054526c57144f65f906cc105c76455ad1f8b443e9"
     },
     "smoke": {
@@ -65,7 +65,7 @@
           "kind": "path"
         }
       ],
-      "key": "ea30a578101145ed7fa65c836c0206ccb6794bce4b70f42b38439b96bafd5921",
+      "key": "5e35cbad834daa96ba737b6803a2a2c3e368d0c9edc20ac50b317f1a76cc4507",
       "sections": {
         "forge": {
           "tier": "pr"

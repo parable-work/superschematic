@@ -119,7 +119,82 @@ func TestSchemaResolverLeavesOutWhatABuildWrites(t *testing.T) {
 
 	set, err := SchemaInputSet(MemoryTree(FormatSHA1, files), SchemaRoots(MemoryTree(FormatSHA1, files))[1], "shop-api")
 	require.NoError(t, err)
-	require.Equal(t, []string{"schemas/services/_drafts/notes.md", "schemas/superschematic.toml", "schemas/tsconfig.base.json"}, set.Shared)
+	require.Equal(t, []string{"schemas/services/_drafts/notes.md", "schemas/tsconfig.base.json"}, set.Shared)
+}
+
+// TestASchemaInputReadsTheNamingFileByWhatItSays: the naming file enters
+// a schema input by what it says. An edit to a comment, to the layout, to
+// the order of its keys or to [deps] changes no digest; an edit to a
+// value changes it; and a root with no naming file says what an empty
+// one says.
+func TestASchemaInputReadsTheNamingFileByWhatItSays(t *testing.T) {
+	const input = `{"service":"shop-api","root":"schemas"}`
+	digestWith := func(content *string) string {
+		t.Helper()
+		files := testFiles()
+		delete(files, "schemas/superschematic.toml")
+		if content != nil {
+			files["schemas/superschematic.toml"] = MemoryFile{Data: []byte(*content)}
+		}
+		res, err := resolve(t, files, ir.TaskSchemaInput, input)
+		require.NoError(t, err)
+		require.NotContains(t, res.Paths, "schemas/superschematic.toml")
+		sum, err := InputDigest(MemoryTree(FormatSHA1, files), res.Paths, res.Values...)
+		require.NoError(t, err)
+		return sum
+	}
+	text := func(s string) *string { return &s }
+
+	base := digestWith(text("npm_scope = \"@acme\"\ngo_module_root = \"example.com/acme\"\n"))
+	require.Equal(t, base, digestWith(text("# what the packages are called\ngo_module_root   = \"example.com/acme\"\n\nnpm_scope = \"@acme\"\n")), "a comment and the layout")
+	require.Equal(t, base, digestWith(text("npm_scope = \"@acme\"\ngo_module_root = \"example.com/acme\"\n\n[deps]\ncopy = \"docs/deps.json\"\n")), "[deps]")
+	require.NotEqual(t, base, digestWith(text("npm_scope = \"@other\"\ngo_module_root = \"example.com/acme\"\n")), "a value")
+	require.NotEqual(t, base, digestWith(text("npm_scope = \"@acme\"\ngo_module_root = \"example.com/acme\"\n\n[cache]\ninputs = [\"go.mod\"]\n")), "[cache] inputs")
+
+	// No naming file, an empty one, and one that holds [deps] alone.
+	none := digestWith(nil)
+	require.Equal(t, none, digestWith(text("")))
+	require.Equal(t, none, digestWith(text("# nothing yet\n[deps]\ncopy = \"docs/deps.json\"\n")))
+	require.NotEqual(t, none, base)
+	// A table's keys in another order, and a table written inline.
+	tables := digestWith(text("[sql]\ncolumn_checks = \"off\"\ncolumn_defaults = \"off\"\n"))
+	require.Equal(t, tables, digestWith(text("sql = { column_defaults = \"off\", column_checks = \"off\" }\n")))
+	require.NotEqual(t, tables, none)
+
+	// A key this binary does not know is part of what the file says, and
+	// no error: the build that reads the file refuses it, and a walk over
+	// a history reads the naming file of a commit an older binary built.
+	require.NotEqual(t, base, digestWith(text("npm_scope = \"@acme\"\ngo_module_root = \"example.com/acme\"\nno_such_key = 1\n")))
+	// A file that is no TOML says nothing a resolver can read.
+	files := testFiles()
+	files["schemas/superschematic.toml"] = MemoryFile{Data: []byte("npm_scope = \n")}
+	_, err := resolve(t, files, ir.TaskSchemaInput, input)
+	require.ErrorContains(t, err, "naming: parse schemas/superschematic.toml")
+}
+
+// TestAnInputDigestCoversItsValues: a value enters the digest by its name
+// and its bytes, beside the files, and no name is given twice.
+func TestAnInputDigestCoversItsValues(t *testing.T) {
+	tree := MemoryTree(FormatSHA1, testFiles())
+	paths := []string{"go.mod"}
+	plain, err := InputDigest(tree, paths)
+	require.NoError(t, err)
+	one, err := InputDigest(tree, paths, registry.TaskValue{Name: "naming a b", Data: []byte("x")})
+	require.NoError(t, err)
+	require.NotEqual(t, plain, one)
+	other, err := InputDigest(tree, paths, registry.TaskValue{Name: "naming a b", Data: []byte("y")})
+	require.NoError(t, err)
+	require.NotEqual(t, one, other)
+	renamed, err := InputDigest(tree, paths, registry.TaskValue{Name: "naming c", Data: []byte("x")})
+	require.NoError(t, err)
+	require.NotEqual(t, one, renamed)
+
+	_, err = InputDigest(tree, paths, registry.TaskValue{Name: "a", Data: nil}, registry.TaskValue{Name: "a", Data: nil})
+	require.ErrorContains(t, err, `gave the value "a" twice`)
+	_, err = InputDigest(tree, paths, registry.TaskValue{Name: "a\nb"})
+	require.ErrorContains(t, err, "a value's name is one line")
+	_, err = InputDigest(tree, paths, registry.TaskValue{})
+	require.ErrorContains(t, err, "a value's name is one line and not empty")
 }
 
 func sorted(list []string) []string {

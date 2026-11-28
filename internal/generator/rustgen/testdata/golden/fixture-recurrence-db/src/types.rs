@@ -18,7 +18,8 @@ pub struct Contract {
 /// a while after it was last done, or a while before its contract ends. Each
 /// occurrence opens two weeks before it is due, reminds three days before,
 /// and is missed a day after. A filing's due dates move to the next business
-/// day of its holiday calendar. Each occurrence is on the calendar.
+/// day of its holiday calendar. Each occurrence is on the calendar, for a
+/// caller who may work filings (#601).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Filing {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,6 +142,9 @@ pub struct FilingRecurrenceOccurrences {
     /// When its remind deadline fired, in epoch milliseconds; absent before.
     #[serde(default, rename = "remindedAt", skip_serializing_if = "Option::is_none")]
     pub reminded_at: Option<TemporalDateTime>,
+    /// When its due deadline fired while it was neither done nor skipped, in epoch milliseconds; absent before (#601).
+    #[serde(default, rename = "fellDueAt", skip_serializing_if = "Option::is_none")]
+    pub fell_due_at: Option<TemporalDateTime>,
     /// When it was completed, in epoch milliseconds; absent unless done.
     #[serde(default, rename = "completedAt", skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<TemporalDateTime>,
