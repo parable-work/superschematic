@@ -1,0 +1,37 @@
+{
+  "name": "Worker",
+  "role": "EmbeddedStruct",
+  "behaviors": [
+    {
+      "name": "Workflow",
+      "config": {
+        "states": ["idle", "busy", "missing", "stopped"],
+        "transitions": [
+          { "from": "idle", "to": "busy" },
+          { "from": "busy", "to": "idle" },
+          { "from": "idle", "to": "missing" },
+          { "from": "busy", "to": "missing" },
+          { "from": "missing", "to": "idle" },
+          { "from": "idle", "to": "stopped" },
+          { "from": "busy", "to": "stopped" },
+          { "from": "missing", "to": "stopped" }
+        ]
+      }
+    },
+    {
+      "name": "Presence",
+      "config": {
+        "ttlMs": 30000,
+        "principalField": "subject",
+        "onMissed": { "transition": "missing", "from": ["idle", "busy"] },
+        "onBeat": { "transition": "idle", "from": ["missing"] },
+        "releaseLeases": ["jobs"],
+        "sweepMs": 5000
+      }
+    }
+  ],
+  "fields": [
+    { "name": "subject", "typeRef": { "name": "string" }, "required": true },
+    { "name": "name", "typeRef": { "name": "string" } }
+  ]
+}

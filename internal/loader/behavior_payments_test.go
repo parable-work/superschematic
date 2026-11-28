@@ -39,7 +39,7 @@ func TestPaymentsFixtureLoads(t *testing.T) {
 		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
 	}
 	order, refund := db.Types["Order"], db.Types["Refund"]
-	if order == nil || order.IsEngineType() || !order.Optimistic || refund == nil || !refund.Optimistic {
+	if order == nil || len(order.TypeBehaviors()) > 0 || !order.Optimistic || refund == nil || !refund.Optimistic {
 		t.Fatalf("Order = %s, Refund = %s", marshal(t, order), marshal(t, refund))
 	}
 	uses := func(td *ir.TypeDef) []string {

@@ -47,10 +47,7 @@ type FieldShape struct {
 // <Base>Patch), which only an operation's schemas refer to.
 type Narrowing struct {
 	Aliases []Alias
-	// Fields are the behavior's fields by name: every declared field but
-	// one the type's form keeps none of (an engine type's Retries'
-	// retryAt, failingSince and keyedBy, D104), which a consumer leaves
-	// out.
+	// Fields are the behavior's fields by name: every declared field.
 	Fields map[string]FieldShape
 	// Params and Results are each operation's, by name.
 	Params  map[string]any
@@ -70,24 +67,12 @@ type Narrowing struct {
 	// Variants is a Variants config, which types the instance's own fields.
 	Variants *Variants
 	// Vetoes are the codes of the declaration's vetoes a caller of the type
-	// may meet, in declaration order: all of them, but for a code the
-	// type's form never answers (an engine type's Workflow answers no
-	// not_principal or stale, D104).
+	// may meet, in declaration order.
 	Vetoes []string
-	// Refused are the operations of the declaration a type's form refuses
-	// every call of, in declaration order: an engine type's Budget refuses
-	// observe (D104). A client of the type offers none of them.
-	Refused []string
 	// Permissions are the permissions the config names under members whose
 	// names do not say so (Seats' take and assign), sorted, each once, which
 	// behaviorops lists beside ConfigPermissions' (D104).
 	Permissions []string
-}
-
-// Offers reports whether a client of the type offers the operation: one
-// its form does not refuse every call of (Refused).
-func (n Narrowing) Offers(operation string) bool {
-	return !slices.Contains(n.Refused, operation)
 }
 
 // Variants is Variants' config: Field holds the type Types names for the
@@ -120,7 +105,6 @@ var coreNarrowers = map[string]narrower{
 	"Rollups":      narrowRollups,
 	"Variants":     narrowVariants,
 	"Approvals":    narrowApprovals,
-	"Constants":    narrowConstants,
 	"Numbering":    narrowNumbering,
 	"Timers":       narrowTimers,
 	"Derived":      narrowDerived,
@@ -308,10 +292,8 @@ func setField(n *Narrowing, name string, schema map[string]any, present bool) er
 
 // Workflow: the status and transition's states are the config's; when the
 // status was entered is absent on an instance from before Workflow kept it.
-// On a table, the state transition's caller read (from) is one of them too,
-// and unchanged keeps its declared boolean (D104); an engine type's
-// Workflow refuses from and never answers unchanged, not_principal or
-// stale, so its types have none of them.
+// The state transition's caller read (from) is one of them too, and
+// unchanged keeps its declared boolean (D104).
 func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 	states := stringsOf(config["states"])
 	state := target.Base + "State"
@@ -329,18 +311,6 @@ func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 		if err := setOperationProperty(n.Results, "transition", nil, name, ref(state, "")); err != nil {
 			return err
 		}
-	}
-	if target.Instance == nil || target.Instance.IsEngineType() {
-		// An engine type's Workflow refuses from and never answers
-		// unchanged (D104): its generated clients offer neither.
-		if err := deleteProperty(n.Params["transition"], "from"); err != nil {
-			return fmt.Errorf("operation transition: %w", err)
-		}
-		if err := deleteProperty(n.Results["transition"], "unchanged"); err != nil {
-			return fmt.Errorf("operation transition: %w", err)
-		}
-		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "not_principal" || code == "stale" })
-		return nil
 	}
 	return setOperationProperty(n.Params, "transition", nil, "from", ref(state, ""))
 }
@@ -608,10 +578,11 @@ func narrowRevisions(n *Narrowing, _ map[string]any, target Target) error {
 // type's own. The create parameters are the engine's narrowing
 // (dependenciesCreateParams).
 func narrowDependencies(n *Narrowing, config map[string]any, target Target) error {
-	// A blocker names an engine type by its schema, and a table's by the
-	// table, which the core defaults to the table itself (D104's step 4).
+	// A blocker of a General schema's type names it by its schema, and a
+	// table's by the table, which the core defaults to the table itself
+	// (D104's step 4).
 	self := target.Schema
-	if target.Instance != nil && target.Instance.Role == ir.RoleDBTable && !target.Instance.IsEngineType() {
+	if target.Instance != nil && target.Instance.Role == ir.RoleDBTable {
 		self = target.Instance.Name
 	}
 	schemas := stringsOf(config["schemas"])
@@ -972,10 +943,7 @@ func EnumValues(enum *ir.EnumDef) []string {
 // fields a gate pins (D200): an object of the fields the gates' pinOn name,
 // each any JSON, and no read when no gate pins a field, so a table's types
 // never hold an object of no named members, which the TypeScript
-// repositories cannot write. An engine type's Approvals refuses version
-// and read, takes no requirement of D200's and never answers stale,
-// not_counted or countsToward, so its types name the states inline and
-// have none of them.
+// repositories cannot write.
 func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
 	gates, _ := config["gates"].(map[string]any)
 	states := SortedKeys(gates)
@@ -986,13 +954,9 @@ func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
 			"properties": map[string]any{"signedBy": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
 		}
 	}
-	table := target.Instance != nil && !target.Instance.IsEngineType()
-	state := func() map[string]any { return EnumOf(states) }
-	if table {
-		gate := target.Base + "Gate"
-		n.Aliases = append(n.Aliases, Alias{Name: gate, Doc: fmt.Sprintf("A state %s's Approvals gates.", An(target.Base)), Schema: EnumOf(states)})
-		state = func() map[string]any { return ref(gate, "") }
-	}
+	gate := target.Base + "Gate"
+	n.Aliases = append(n.Aliases, Alias{Name: gate, Doc: fmt.Sprintf("A state %s's Approvals gates.", An(target.Base)), Schema: EnumOf(states)})
+	state := func() map[string]any { return ref(gate, "") }
 	for _, op := range []string{"signOff", "withdrawSignOff"} {
 		if err := setOperationProperty(n.Params, op, nil, "state", state()); err != nil {
 			return err
@@ -1001,46 +965,24 @@ func narrowApprovals(n *Narrowing, config map[string]any, target Target) error {
 			return err
 		}
 	}
-	if !table {
-		for _, param := range []string{"version", "read"} {
-			if err := deleteProperty(n.Params["signOff"], param); err != nil {
-				return fmt.Errorf("operation signOff: %w", err)
+	pinned := map[string]any{}
+	for _, state := range states {
+		members, _ := gates[state].(map[string]any)
+		fields, _ := members["pinOn"].([]any)
+		for _, field := range fields {
+			if name, ok := field.(string); ok {
+				pinned[name] = map[string]any{"description": fmt.Sprintf("The value of %s as the signer read it.", name)}
 			}
 		}
-		if err := deleteProperty(n.Results["signOff"], "countsToward"); err != nil {
-			return fmt.Errorf("operation signOff's result: %w", err)
+	}
+	if len(pinned) == 0 {
+		if err := deleteProperty(n.Params["signOff"], "read"); err != nil {
+			return fmt.Errorf("operation signOff: %w", err)
 		}
-		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "stale" || code == "not_counted" })
-	} else {
-		pinned := map[string]any{}
-		for _, state := range states {
-			gate, _ := gates[state].(map[string]any)
-			fields, _ := gate["pinOn"].([]any)
-			for _, field := range fields {
-				if name, ok := field.(string); ok {
-					pinned[name] = map[string]any{"description": fmt.Sprintf("The value of %s as the signer read it.", name)}
-				}
-			}
-		}
-		if len(pinned) == 0 {
-			if err := deleteProperty(n.Params["signOff"], "read"); err != nil {
-				return fmt.Errorf("operation signOff: %w", err)
-			}
-		} else if err := setOperationProperty(n.Params, "signOff", nil, "read", map[string]any{"type": "object", "additionalProperties": false, "properties": pinned}); err != nil {
-			return err
-		}
+	} else if err := setOperationProperty(n.Params, "signOff", nil, "read", map[string]any{"type": "object", "additionalProperties": false, "properties": pinned}); err != nil {
+		return err
 	}
 	return setField(n, "gates", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true)
-}
-
-// Constants: an engine type's Constants refuses oneWay and never answers
-// one_way (D104), so its vetoes have none; a table's keeps the
-// declaration's.
-func narrowConstants(n *Narrowing, _ map[string]any, target Target) error {
-	if target.Instance == nil || target.Instance.IsEngineType() {
-		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "one_way" })
-	}
-	return nil
 }
 
 // Assignment: the assignee's subject, absent when unassigned.
@@ -1078,9 +1020,9 @@ var leaseEnds = []string{"release", "abandon", "ttl", "maxHold", "holder"}
 // first; the token, active and the expiries are always there. On a table,
 // expireHolder's count of each reason is the alias <Base>ExpireHolderReasons
 // (JobLeaseExpireHolderReasons), which the API and the repositories name
-// (D104); an engine type's keeps its declaration's shape.
+// (D104).
 func narrowLease(n *Narrowing, _ map[string]any, target Target) error {
-	if target.Instance != nil && !target.Instance.IsEngineType() {
+	if target.Instance != nil {
 		reasons, err := at(n.Results["expireHolder"], "properties", "reasons")
 		if err != nil {
 			return fmt.Errorf("operation expireHolder: %w", err)
@@ -1126,19 +1068,12 @@ func narrowPresence(n *Narrowing, _ map[string]any, _ Target) error {
 	)
 }
 
-// retriesTableFields are the fields of Retries a table keeps and an engine
-// type does not (D104): when the row may run again, since when it has
-// failed, and the keyField value its counts were made under.
-var retriesTableFields = []string{"retryAt", "failingSince", "keyedBy"}
-
 // Retries: the attempts by class hold every class of the config; the best
 // score is absent when no scored result is kept. On a table the config's
 // failure classes are the alias <Base>Class, which recordAttempt's failure
 // names, and the row keeps when it may run again, since when it has failed
 // and the keyField value its counts were made under, each absent until set
-// (D104); an engine type's Retries keeps none of the three, never answers
-// retryAt, backing_off or throttled, and refuses the members that would, so
-// its types have none of them.
+// (D104).
 func narrowRetries(n *Narrowing, config map[string]any, target Target) error {
 	classes, _ := config["classes"].(map[string]any)
 	names := SortedKeys(classes)
@@ -1157,19 +1092,6 @@ func narrowRetries(n *Narrowing, config map[string]any, target Target) error {
 		typedField{"stuck", boolean(), true},
 	); err != nil {
 		return err
-	}
-	if target.Instance == nil || target.Instance.IsEngineType() {
-		for _, name := range retriesTableFields {
-			if _, ok := n.Fields[name]; !ok {
-				return fmt.Errorf("the declaration has no field %s", name)
-			}
-			delete(n.Fields, name)
-		}
-		if err := deleteProperty(n.Results["recordAttempt"], "retryAt"); err != nil {
-			return fmt.Errorf("operation recordAttempt: %w", err)
-		}
-		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "backing_off" || code == "throttled" })
-		return nil
 	}
 	class := target.Base + "Class"
 	n.Aliases = append(n.Aliases, Alias{Name: class, Doc: fmt.Sprintf("A failure class of %s's Retries.", An(target.Base)), Schema: EnumOf(names)})
@@ -1401,8 +1323,7 @@ func narrowPool(n *Narrowing, config map[string]any, target Target) error {
 			return err
 		}
 	}
-	if target.Instance == nil || target.Instance.IsEngineType() {
-		// No engine type composes Pool: the build refuses it there.
+	if target.Instance == nil {
 		return nil
 	}
 	match := target.Base + "Match"
@@ -1501,24 +1422,19 @@ var (
 // meter with no limit holds null for its limit and what remains of it. On
 // a table the config's meters are the alias <Base>Meter, which every
 // operation's meter names, and recordUsage's, setLimit's and observe's
-// results; an engine type's Budget refuses every observe (D104), which its
-// clients therefore leave out (Refused).
+// results.
 func narrowBudget(n *Narrowing, config map[string]any, target Target) error {
 	meters, _ := config["meters"].(map[string]any)
-	if target.Instance == nil || target.Instance.IsEngineType() {
-		n.Refused = append(n.Refused, "observe")
-	} else {
-		meter := target.Base + "Meter"
-		n.Aliases = append(n.Aliases, Alias{Name: meter, Doc: fmt.Sprintf("A meter of %s's Budget.", An(target.Base)), Schema: EnumOf(SortedKeys(meters))})
-		for _, op := range budgetMeterOperations {
-			if err := setOperationProperty(n.Params, op, nil, "meter", ref(meter, "")); err != nil {
-				return err
-			}
+	meter := target.Base + "Meter"
+	n.Aliases = append(n.Aliases, Alias{Name: meter, Doc: fmt.Sprintf("A meter of %s's Budget.", An(target.Base)), Schema: EnumOf(SortedKeys(meters))})
+	for _, op := range budgetMeterOperations {
+		if err := setOperationProperty(n.Params, op, nil, "meter", ref(meter, "")); err != nil {
+			return err
 		}
-		for _, op := range budgetMeterResults {
-			if err := setOperationProperty(n.Results, op, nil, "meter", ref(meter, "")); err != nil {
-				return err
-			}
+	}
+	for _, op := range budgetMeterResults {
+		if err := setOperationProperty(n.Results, op, nil, "meter", ref(meter, "")); err != nil {
+			return err
 		}
 	}
 	nullable := func() map[string]any { return map[string]any{"type": []any{"integer", "null"}} }

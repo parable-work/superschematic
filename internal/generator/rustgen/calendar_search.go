@@ -11,11 +11,12 @@ import (
 
 // The calendar (D152) and search across tables (D155) as the Rust
 // repositories read them (D188): a table's @calendarSource declarations
-// and its @searchable index, members of the table in the Postgres
-// definition (orm::Table's calendar and searchable), which the runtime's
-// orm::calendar and orm::search_tables read. They hold what tsgen's
-// calendar.go and searchable.go write into orm.ts, member for member, so
-// the two runtimes read the same tables and columns.
+// and its @searchable index, members of the table in the Postgres and the
+// SQLite definitions (orm::Table's calendar and searchable), which the
+// runtime's orm::calendar and orm::search_tables read, on SQLite through
+// their sqlite modules (#615). They hold what tsgen's calendar.go and
+// searchable.go write into orm.ts and orm-sqlite.ts, member for member,
+// so the two runtimes read the same tables and columns.
 
 // rustCalendarSource is orm::calendar::CalendarSource.
 type rustCalendarSource struct {
@@ -133,6 +134,24 @@ type rustSearchable struct {
 	Audience  *rustSearchAudience `json:"audience,omitempty"`
 	Comments  *rustSearchComments `json:"comments,omitempty"`
 	Files     *rustSearchFiles    `json:"files,omitempty"`
+	// FTS is the FTS5 table of the index's words on SQLite (D186), which
+	// a search there matches and ranks in place of Document.
+	FTS string `json:"fts,omitempty"`
+}
+
+// sqliteSearchable is a @searchable table's index on SQLite (D186), as
+// tsgen's sqliteSearchable writes it: Postgres's, its words the FTS5 table
+// beside the index in place of the weighed document, and its key's type
+// SQLite's. Nil for nil.
+func sqliteSearchable(postgres *rustSearchable) *rustSearchable {
+	if postgres == nil {
+		return nil
+	}
+	s := *postgres
+	s.Document = ""
+	s.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
+	s.KeyType = "text"
+	return &s
 }
 
 type rustSearchAudience struct {

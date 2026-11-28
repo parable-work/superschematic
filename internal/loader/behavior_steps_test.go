@@ -42,7 +42,7 @@ func TestStepsFixturesLoad(t *testing.T) {
 		"Step":  {"Dependencies:Dependencies", "status:Workflow"},
 	} {
 		td := db.Types[name]
-		if td == nil || td.IsEngineType() || !td.Optimistic {
+		if td == nil || len(td.TypeBehaviors()) > 0 || !td.Optimistic {
 			t.Fatalf("%s = %s", name, marshal(t, td))
 		}
 		var uses []string

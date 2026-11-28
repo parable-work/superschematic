@@ -10,12 +10,15 @@ publish.workspace = true
 
 [features]
 default = []
-# PgStore: the development layout in a schema of a Postgres database.
-postgres = ["dep:postgres", "dep:superschematic-engine-pg"]
+# PgStore: the development layout in a schema of a Postgres database, and
+# with the server feature a move of one to a Postgres runtime database.
+postgres = ["dep:postgres", "dep:superschematic-engine-pg", "superschematic-rules-runtime?/postgres"]
 # The routes over HTTP as an axum router (rules_dev::server), with the
 # event stream and the MCP endpoint, and the superschematic-dev binary that
 # serves them. The handler's router is transport-free; this is its binding.
-server = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:bytes", "dep:http", "dep:async-trait", "dep:superschematic-http-runtime"]
+# The binary's move subcommand publishes a store to runtime mode (D117)
+# through superschematic-rules-runtime.
+server = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:bytes", "dep:http", "dep:async-trait", "dep:superschematic-http-runtime", "dep:superschematic-rules-runtime"]
 
 [[bin]]
 name = "superschematic-dev"
@@ -51,6 +54,9 @@ async-trait = { version = "0.1.89", optional = true }
 # The MCP endpoint's transport (D81, D116): the stateless streamable HTTP
 # transport over a tool set, which the generated Rust servers serve with.
 superschematic-http-runtime = { path = "../../../http/rust", optional = true }
+# Runtime mode, which superschematic-dev move publishes a development store
+# to, its rows replayed when asked (D117).
+superschematic-rules-runtime = { path = "../rules-runtime", optional = true }
 
 [dev-dependencies]
 # The transcripts the replay reads.

@@ -15,6 +15,17 @@
 //! caller when it names none; with neither, it is 401. Anyone who reaches
 //! the server is whoever they say, so it listens on 127.0.0.1 unless told
 //! otherwise.
+//!
+//! `move` publishes a store's schemas to runtime mode (D117), a runtime
+//! database's first publish, and with `--rows` replays its rows there as
+//! creates, each with its own fields and its id, listing the ones refused
+//! (`superschematic_rules_runtime::Runtime::publish_from`). It prints the
+//! publish's answer as JSON. The store is read and left as it was.
+//!
+//! ```text
+//! superschematic-dev move --to FILE|URL (--db FILE | --postgres URL --schema NAME)
+//!                         [--service NAME] [--rows] [--allow HAZARD]...
+//! ```
 
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -25,7 +36,7 @@ use superschematic_rules_dev::server::{dev_callers, router, Options};
 use superschematic_rules_dev::Dev;
 use superschematic_rules_handler::{Policy, Store};
 
-const USAGE: &str = "usage: superschematic-dev [--db FILE | --memory] [--listen ADDR] [--policy JSON|@FILE] [--as SUBJECT] [--permissions P1,P2] [--postgres URL --schema NAME]";
+const USAGE: &str = "usage: superschematic-dev [--db FILE | --memory] [--listen ADDR] [--policy JSON|@FILE] [--as SUBJECT] [--permissions P1,P2] [--postgres URL --schema NAME]\n       superschematic-dev move --to FILE|URL (--db FILE | --postgres URL --schema NAME) [--service NAME] [--rows] [--allow HAZARD]...";
 
 struct Args {
     db: Option<String>,
@@ -147,7 +158,150 @@ async fn shutdown() {
     }
 }
 
+const MOVE_USAGE: &str = "usage: superschematic-dev move --to FILE|URL (--db FILE | --postgres URL --schema NAME) [--service NAME] [--rows] [--allow HAZARD]...";
+
+/// What `move` takes: the store, the runtime database it moves to, and the
+/// publish's service, rows and allowed hazards.
+struct MoveArgs {
+    db: Option<String>,
+    postgres: Option<String>,
+    schema: String,
+    to: String,
+    service: Option<String>,
+    rows: bool,
+    allow: Vec<String>,
+}
+
+fn move_args(mut given: impl Iterator<Item = String>) -> Result<MoveArgs, String> {
+    let mut args = MoveArgs {
+        db: None,
+        postgres: None,
+        schema: "superschematic_dev".to_owned(),
+        to: String::new(),
+        service: None,
+        rows: false,
+        allow: Vec::new(),
+    };
+    while let Some(flag) = given.next() {
+        let mut value = || given.next().ok_or_else(|| format!("{flag} needs a value"));
+        match flag.as_str() {
+            "--db" => args.db = Some(value()?),
+            "--postgres" => args.postgres = Some(value()?),
+            "--schema" => args.schema = value()?,
+            "--to" => args.to = value()?,
+            "--service" => args.service = Some(value()?),
+            "--rows" => args.rows = true,
+            "--allow" => args.allow.push(value()?),
+            "--help" | "-h" => return Err(MOVE_USAGE.to_owned()),
+            other => return Err(format!("unknown flag {other}\n{MOVE_USAGE}")),
+        }
+    }
+    if args.to.is_empty() {
+        return Err(format!(
+            "move needs --to, the runtime database\n{MOVE_USAGE}"
+        ));
+    }
+    if args.db.is_some() == args.postgres.is_some() {
+        return Err(format!(
+            "move reads one store: --db FILE or --postgres URL\n{MOVE_USAGE}"
+        ));
+    }
+    Ok(args)
+}
+
+/// Publishes a store's schemas to the runtime database, and its rows with
+/// --rows.
+fn moved<S: Store>(
+    runtime: &mut superschematic_rules_runtime::Runtime,
+    store: &mut S,
+    mut publish: superschematic_rules_runtime::Publish,
+    rows: bool,
+) -> Result<serde_json::Value, superschematic_rules::Refusal> {
+    if rows {
+        return runtime.publish_from(store, &publish);
+    }
+    publish.documents = superschematic_rules_runtime::development_documents(store)?;
+    runtime.publish(&publish)
+}
+
+fn run_move(args: MoveArgs) -> Result<serde_json::Value, String> {
+    use superschematic_rules_runtime::{Publish, Runtime};
+    let refused = |refusal: superschematic_rules::Refusal| refusal.message;
+    // A store that is not there is refused before the runtime database is
+    // opened, which would create a file.
+    if let Some(path) = &args.db {
+        if !std::path::Path::new(path).exists() {
+            return Err(format!("--db {path}: no such development store"));
+        }
+    }
+    let postgres_url = args.to.starts_with("postgres://") || args.to.starts_with("postgresql://");
+    let mut runtime = if postgres_url {
+        #[cfg(feature = "postgres")]
+        {
+            Runtime::postgres(&args.to).map_err(refused)?
+        }
+        #[cfg(not(feature = "postgres"))]
+        {
+            return Err("a Postgres runtime database needs the postgres feature".to_owned());
+        }
+    } else {
+        Runtime::open(&args.to).map_err(refused)?
+    };
+    let publish = Publish {
+        service: args.service,
+        allow: args.allow,
+        ..Publish::default()
+    };
+    let declarations = superschematic_rules_handler::Declarations::ported();
+    match (args.db, args.postgres) {
+        (Some(path), _) => {
+            let mut store = superschematic_rules_dev::SqliteStore::open(&path, &declarations)
+                .map_err(|error| format!("--db {path}: {error}"))?;
+            moved(&mut runtime, &mut store, publish, args.rows).map_err(refused)
+        }
+        (None, Some(url)) => {
+            #[cfg(feature = "postgres")]
+            {
+                let mut store =
+                    superschematic_rules_dev::PgStore::open(&url, &args.schema, &declarations)
+                        .map_err(refused)?;
+                moved(&mut runtime, &mut store, publish, args.rows).map_err(refused)
+            }
+            #[cfg(not(feature = "postgres"))]
+            {
+                let _ = url;
+                Err("--postgres needs the postgres feature".to_owned())
+            }
+        }
+        (None, None) => Err(MOVE_USAGE.to_owned()),
+    }
+}
+
 fn main() -> ExitCode {
+    let mut given = std::env::args().skip(1).peekable();
+    if given.peek().map(String::as_str) == Some("move") {
+        given.next();
+        let args = match move_args(given) {
+            Ok(args) => args,
+            Err(message) => {
+                eprintln!("{message}");
+                return ExitCode::from(2);
+            }
+        };
+        return match run_move(args) {
+            Ok(answer) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&answer).unwrap_or_default()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("superschematic-dev move: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let args = match args() {
         Ok(args) => args,
         Err(message) => {

@@ -552,7 +552,8 @@ pub struct Many {
 /// key in the keys of its source's rows of the WHERE `%s`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Audience {
-    /// The effective audience's column, a `UUID[]`.
+    /// The effective audience's column: a `UUID[]` on Postgres, a JSON
+    /// array of the ids' text on SQLite.
     pub effective: String,
     /// The effective agent access's column: `followRole`, `readOnly` or
     /// `none`.
@@ -1700,7 +1701,10 @@ impl AccessCaller {
 /// them, or with `write` write them. A caller with no id, an anonymous one
 /// or one whose subject is no UUID, sees the rows everyone may. A
 /// projection's probe holds the view to its source's rows that do.
-/// Postgres alone: an audience is a `UUID[]` compared by array overlap.
+/// On Postgres an audience is a `UUID[]` compared by array overlap; on
+/// SQLite it is a JSON array of the ids' hyphenated text, which a trigger
+/// keeps and `json_each` reads (D182, #611), sqlutil's
+/// `SQLiteAudienceContains`.
 pub fn audience_conditions(
     definition: &Definition,
     audience: &Audience,
@@ -1708,12 +1712,6 @@ pub fn audience_conditions(
     args: &mut Vec<Bound>,
     write: bool,
 ) -> Result<Vec<String>, Error> {
-    if definition.dialect != Dialect::Postgres {
-        return Err(Error::Definition(format!(
-            "an audience (D156) is a UUID[] column a read compares by array overlap, which {} has none of",
-            definition.dialect
-        )));
-    }
     let ids = caller.audience_ids();
     let mut parts = Vec::new();
     if ids.is_empty() {
@@ -1730,11 +1728,16 @@ pub fn audience_conditions(
             });
             placeholders.push(plan::fill(&definition.clauses.placeholder, &[&args.len()])?);
         }
-        parts.push(format!(
-            "({effective} IS NULL OR {effective} && ARRAY[{ids}]::uuid[])",
-            effective = audience.effective,
-            ids = placeholders.join(", ")
-        ));
+        let ids = placeholders.join(", ");
+        let effective = &audience.effective;
+        parts.push(match definition.dialect {
+            Dialect::Postgres => {
+                format!("({effective} IS NULL OR {effective} && ARRAY[{ids}]::uuid[])")
+            }
+            Dialect::Sqlite => format!(
+                "({effective} IS NULL OR EXISTS (SELECT 1 FROM json_each({effective}) WHERE json_each.value IN ({ids})))"
+            ),
+        });
     }
     if caller.kind == PrincipalKind::Agent {
         parts.push(if write {

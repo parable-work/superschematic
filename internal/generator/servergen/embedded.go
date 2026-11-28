@@ -430,8 +430,8 @@ type EmbeddedStore struct {
 
 // PlanEmbedded plans the crate of an environment's one binary. It refuses
 // by name what the binary does not hold: a database that is no SQLite
-// file, an engine, a bucket, a memory store that is on, and two servers
-// that bind one variable to two values.
+// file, a bucket, a memory store that is on, and two servers that bind one
+// variable to two values.
 func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 	where := fmt.Sprintf("stack %s: environment %s builds as one binary (D116)", in.Stack, in.Environment)
 	if in.Paths.MigrateRust == "" {
@@ -495,8 +495,6 @@ func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 	switch {
 	case len(server.Databases) > 0:
 		return nil, fmt.Errorf("%s, and %s is on %s, which is no SQLite file: its DB service lists another dialect first", where, server.APIs[0].Service, server.Databases[0].Service)
-	case len(server.Engines) > 0:
-		return nil, fmt.Errorf("%s, and %s connects to %s, an engine database, whose engine the binary does not open: an engine on a SQLite file is not built", where, server.Engines[0].API.Service, server.Engines[0].Service)
 	case len(server.Buckets) > 0:
 		return nil, fmt.Errorf("%s, and an API of it lists bucket %s, which the binary does not keep: a bucket on a local directory is not built", where, server.Buckets[0].Service)
 	}

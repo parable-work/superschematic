@@ -21,7 +21,8 @@ import (
 // The static archives of the release outside a container (D47, amended).
 // A Go build of the code a release generates, in a project whose naming
 // file names no superscalar checkout ([paths] scalar_go), links
-// superscalar's archive, the version graph's and the engine's through cgo,
+// superscalar's archive, the version graph's and the behaviors' core's
+// through cgo,
 // and no module the module proxy serves carries them. The generated CI's
 // check job and a server's Dockerfile download the release's tarball and
 // point CGO_LDFLAGS at it; stack dev and stack run do the same for the go
@@ -102,8 +103,8 @@ func newEnvCmd(*app) *cobra.Command {
 		Long: `Env prints the variables a go build of the code this release of
 superschematic generates needs on this machine, in a project whose naming
 file names no superscalar checkout ([paths] scalar_go). Such code links
-superscalar's static archive, the version graph's and the engine's through
-cgo, and no module the module proxy serves carries them. Env downloads the
+superscalar's static archive, the version graph's and the behaviors'
+core's through cgo, and no module the module proxy serves carries them. Env downloads the
 release's archives for this machine's platform once, checks them against
 the digest this binary names, keeps them in the user's cache directory, and
 prints CGO_LDFLAGS pointing cgo's linker at them, as a line a POSIX shell

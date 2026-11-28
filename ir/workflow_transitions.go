@@ -12,7 +12,7 @@ const WorkflowBehavior = "Workflow"
 
 // ExpandTransitions is ExpandTransitionLists for a use: a Workflow a table
 // composes, on a field or by implements (D103). Any other use is left as
-// it is: an engine type's @behavior takes the schema package's config,
+// it is: a General schema's @behavior takes the schema package's config,
 // whose transitions list no states.
 func (ref *BehaviorRef) ExpandTransitions() error {
 	if ref == nil || ref.Name != WorkflowBehavior || len(ref.Config) == 0 {

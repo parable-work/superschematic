@@ -358,3 +358,67 @@ fn a_runtime_declaring_a_declarative_behavior_runs_it_through_its_core() {
         refusal.message
     );
 }
+
+/// Development mode's General documents publish as the tables `format
+/// --to=ts` writes them as (D117, decision 3).
+#[test]
+fn general_documents_publish_as_their_tables() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    common::moves::general_documents_publish_as_their_tables(&opener(file("general")), &binaries);
+}
+
+/// The jobs example's General documents publish as the service named.
+#[test]
+fn general_documents_publish_as_the_service_named() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    common::moves::named_general_documents_publish(&opener(file("named")), &binaries);
+}
+
+/// A development store in memory moves to an empty runtime file with its
+/// rows (decision 5).
+#[test]
+fn a_development_store_moves_with_its_rows() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let mut dev = superschematic_rules_dev::Dev::memory().expect("a development store");
+    common::moves::development_moves_with_its_rows(&opener(file("move")), &binaries, &mut dev);
+}
+
+/// A development file's schemas publish to runtime mode, its rows left
+/// behind.
+#[test]
+fn a_development_file_publishes_its_schemas() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let mut dev =
+        superschematic_rules_dev::Dev::open(file("development")).expect("a development file");
+    common::moves::development_documents_publish(&opener(file("schemas")), &binaries, &mut dev);
+}
+
+/// A replayed create runs its rules: a batch stamps its steps again.
+#[test]
+fn a_replayed_create_makes_its_rows_again() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let mut dev = superschematic_rules_dev::Dev::memory().expect("a development store");
+    common::moves::a_create_makes_its_rows_again(&opener(file("stamped")), &binaries, &mut dev);
+}
+
+/// A runtime file exports as a compiled DB service whose first plan from
+/// the recorded model is empty.
+#[test]
+fn a_runtime_file_exports_to_compiled() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let path = file("export");
+    let url = path.to_str().expect("a path").to_owned();
+    common::moves::exports_to_compiled(&opener(path), &binaries, &url, "sqlite");
+}

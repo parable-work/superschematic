@@ -169,9 +169,6 @@ func (r run) embeddedAPI(stackName string, d *ir.ResolvedDeployable, service str
 	if err != nil {
 		return servergen.RustAPIInput{}, err
 	}
-	if routes.Engine != nil {
-		return servergen.RustAPIInput{}, fmt.Errorf("stack %s: server %s serves %s, which connects to %s, an engine database, and runs inside a binary (D116), which opens no engine: an engine on a SQLite file is not built", stackName, d.Name, service, routes.Engine.Database)
-	}
 	dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, service)
 	impl, err := servergen.ReadRustImplementation(r.Options.Naming, service, dir)
 	if err != nil {

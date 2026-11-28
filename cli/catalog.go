@@ -34,8 +34,8 @@ its extensions included:
                 and its type in Go, TypeScript, Python and Rust
   decorators    every decorator, with its TypeScript declaration, where it may
                 sit and the kinds that may use it, and the type wrappers
-  behaviors     every engine behavior, its config, and the fields and
-                operations it adds to a type
+  behaviors     every behavior, its config, what it requires, and the
+                fields and operations it adds to a type
   capabilities  each thing a backend needs, the declaration that gives it,
                 what the build generates and what is left to write
 

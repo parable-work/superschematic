@@ -243,6 +243,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		}); err != nil {
 			return nil, nil, err
 		}
+		if err := refuseEngineOutputs(cfg); err != nil {
+			return nil, nil, err
+		}
 		vin = *tsInput
 		vin.Naming = o.naming
 		vin.Registry = reg
@@ -302,6 +305,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 			cfg, err = schemaconfig.ReadFile(servicePath, reg)
 			return err
 		}); err != nil {
+			return nil, nil, err
+		}
+		if err := refuseEngineOutputs(cfg); err != nil {
 			return nil, nil, err
 		}
 		schema = cfg.NewSchema()

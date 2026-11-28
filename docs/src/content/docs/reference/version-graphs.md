@@ -1419,5 +1419,4 @@ SQLite ones among them, on the default Python and on 3.9.
   the TypeScript, Go and Rust servers serve them, on Postgres.
 - Who may commit, seal, merge, tag or release is the application's policy.
   `Sweep` collects discarded drafts and prunes history, but nothing runs it
-  unless a service calls it or `RunSweeper`, or the engine's runner does
-  for a `Branches` schema whose config gives `sweep`.
+  unless a service calls it or `RunSweeper`.

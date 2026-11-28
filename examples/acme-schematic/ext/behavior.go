@@ -14,23 +14,13 @@ import (
 const RatingBehavior = Name + ".Rating"
 
 // ratingDeclaration is the behavior's declaration: one JSON file beside
-// this package, which embeds it. The compiler checks every type that lists
-// the behavior against it; the engine runs the acme-behaviors crate (D58)
-// over the copy `acme-schematic behaviors` writes from this registration.
+// this package, which embeds it, derived from rating.behavior.ts's class.
+// The compiler checks every type that lists the behavior against it, and
+// its rules are the declarative vocabulary's, which the behaviors' core
+// interprets (D103's step 5), so no crate implements it.
 //
 //go:embed rating.behavior.json
 var ratingDeclaration json.RawMessage
-
-// ratingCrate is the Rust crate that implements acme.Rating (D58),
-// crates/behaviors in this module, the project the schemas root sits in:
-// the projectengine generator writes, for a schema that composes the
-// behavior, an engine crate that depends on it there and registers its
-// Rating.
-var ratingCrate = registry.BehaviorRust{
-	Crate:    "acme-behaviors",
-	Path:     "crates/behaviors",
-	Register: "acme_behaviors::Rating",
-}
 
 // registerBehavior declares acme.Rating. A type composes it with
 // @behavior("acme.Rating", { maxStars: 5 }), whose config
@@ -38,5 +28,5 @@ var ratingCrate = registry.BehaviorRust{
 // behaviors: [{name: acme.Rating, config: {maxStars: 5}}] in the data
 // forms.
 func registerBehavior(r *registry.Registry) error {
-	return r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Rust: ratingCrate, Declaration: ratingDeclaration})
+	return r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDeclaration})
 }

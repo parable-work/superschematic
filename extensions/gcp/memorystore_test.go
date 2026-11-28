@@ -308,7 +308,7 @@ func TestMemoryStoreConnectorsOfEachWorkload(t *testing.T) {
 	for i := range services {
 		switch services[i].Name {
 		case "shop-db":
-			services[i].Engine, services[i].Derived = true, []string{"Ticket"}
+			services[i].DerivedTables = []string{"Ticket"}
 		case stacktest.ShopOrders.Name:
 			services[i].Language = registry.APILanguageTypeScript
 			services[i].Derivers = []ir.Deriver{{Name: "TriageTickets", Concurrency: 3}}

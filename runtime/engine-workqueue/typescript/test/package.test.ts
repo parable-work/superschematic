@@ -1,7 +1,8 @@
 // The package as a deployment uses it: its behaviors register with an
 // engine through the plug-in interface, carry the declarations the core
-// binary writes, and run the document the core binary builds in the CLI
-// smoke (fixture-workqueue-json), whose jobs compose Workflow, Lease,
+// binary writes, and run the document the core binary built in the CLI
+// smoke (fixture-workqueue-json) before D103 folded Queue and Links, the
+// engine's copy of it, whose jobs compose Workflow, Lease,
 // Assignment, Queue, Budget and Retries: workers claim them in order, each
 // claim reserving its budget, hold and renew their leases and record their
 // attempts, and the runner puts a job whose time ran out back in the
@@ -25,10 +26,14 @@ const other: Principal = { subject: 'otto', permissions: [] };
 const lead: Principal = { subject: 'lena', permissions: ['jobs.assign'] };
 const runner: Principal = { subject: 'runner', permissions: [] };
 
-/** fixtureType reads one type's file of fixture-workqueue-json as a schema of its own. */
+/**
+ * fixtureType reads one type's file of fixture-workqueue-json as a schema of
+ * its own: the engine's copy (runtime/engine/testdata/documents), since the
+ * loader refuses Queue and Links, which D103 folded into schema features.
+ */
 function fixtureType(name: string, file: string): Record<string, unknown> {
   const type = JSON.parse(
-    readFileSync(new URL(`../../../../internal/loader/testdata/services/fixture-workqueue-json/src/${file}.schema.json`, import.meta.url), 'utf8')
+    readFileSync(new URL(`../../../engine/testdata/documents/fixture-workqueue-json/${file}.schema.json`, import.meta.url), 'utf8')
   ) as { name: string };
   return { kind: 'General', name, types: { [type.name]: type } };
 }

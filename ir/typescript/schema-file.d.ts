@@ -107,8 +107,8 @@ export interface BehaviorRef {
   /**
    * True for a use a DB table implements (D103), `implements Timers<Ticket,
    * Config>`: anchored on the type, on a table that stays a table. A use on
-   * the whole type without it is @behavior's, which makes the type an engine
-   * type.
+   * the whole type without it is @behavior's, which a General schema takes
+   * (D16) and a DB type does not.
    */
   implements?: boolean;
   /**
@@ -177,7 +177,6 @@ export interface DeployableRef {
   deployable?: string;
   deriver?: string;
   job?: string;
-  runner?: boolean;
   service?: ServiceRef;
   worker?: string;
 }
@@ -997,8 +996,7 @@ export interface TypeDef {
   audience?: AudienceDef;
   /**
    * The behaviors the type composes, in the order their checks run. A registry
-   * admits the behaviors it registers: the core's, which the engine
-   * implements, and its extensions'.
+   * admits the behaviors it registers: the core's and its extensions'.
    */
   behaviors?: BehaviorRef[];
   bundles?: BundleRef[];

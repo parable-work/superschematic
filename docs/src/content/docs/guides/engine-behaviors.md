@@ -1,16 +1,20 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level and namespace operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering, Approvals, Derived and Provenance behaviors.
+description: Compose the core's behaviors on a General type in TypeScript or JSON; read their fields under each behavior's name; label a type's instances, states and transitions with @display; create parameters; schema-level and namespace operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; the core's Dependencies, Rollups, Reactions, Constants, Variants, Timers, StateRules, Numbering, Approvals, Derived and Provenance behaviors; and Links, Search and Branches, which schema features replace.
 sidebar:
   order: 7
 ---
 
-[The engine](/superschematic/guides/engine/) guide builds a notes server
-with `Workflow`, `Comments` and `Revisions`. This page covers the rest of
-the behaviors the engine runs with no extension, and the mechanisms the
-newer ones lean on: parameters a create gives its behaviors, operations
-that run on a whole schema or across a namespace, and the runner that
-does work after a change commits.
+[A server with no build](/superschematic/guides/engine/) builds a notes
+server on development mode with `Workflow`, `Comments` and `Revisions`.
+This page covers the rest of the behaviors the core runs with no
+extension, and the mechanisms the newer ones lean on: parameters a create
+gives its behaviors, operations that run on a whole schema or across a
+namespace, and the runner that does work after a change commits. Many of
+its examples are the engine's (`@superschematic/engine`, D58), which no
+example runs any more and a later step removes; a DB table composes the
+same behaviors with `implements` and field types
+([Database tables](/superschematic/guides/database-tables/)).
 
 The
 [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
@@ -30,12 +34,10 @@ in the engine's `behaviors` option (`workQueueBehaviors`, from
 `@superschematic/engine-workqueue`). Four, `Stock`, `Calendar`,
 `Holds` and `Payments`, are commerce (D70): the core declares them with
 the package `@superschematic/engine-commerce`, the core's addon carries
-them and a project's engine crate links them, and an engine runs them
-once a deployment names them (`commerceBehaviors`), as a generated
-server does. The last six, `Seats`, `Reconcile`, `Schedules`, `Pool`,
-`Recurrence` and `Aliased`, no engine runs: the behaviors' core
-implements them for a DB table alone, and the build refuses an engine
-type that composes one, naming the table form.
+them, and an engine runs them once a deployment names them
+(`commerceBehaviors`). The last six, `Seats`, `Reconcile`, `Schedules`,
+`Pool`, `Recurrence` and `Aliased`, no engine runs: the behaviors' core
+implements them for a DB table.
 
 A DB table that implements a behavior, or types a field as one, stays a
 table (D103): its rules run in the behaviors' core, the Rust library every
@@ -48,26 +50,35 @@ version graph and a `@queue` in place of `Links`, `Search`, `Branches` and
 `Assignment` is not on the core yet
 ([Beyond plain tables](/superschematic/guides/database-tables/#beyond-plain-tables)).
 
+`Links`, `Search`, `Queue` and `Branches` are no behaviors any more: D103
+folds each into a schema feature, a relation, `@searchField`, `@queue`
+and `@versioned`. Their declarations stay registered while the engine is
+in the tree, so `json-schema` still lists them, but the build refuses a
+type that composes one, in every kind, naming its replacement
+([Links](#links), [Search](#search), [Branches](#branches)). Where a
+config below names a link, a General schema on development mode names a
+relation of the type, by its field, and a table its to-one relation.
+
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
 | `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
 | `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; blocks beside a message's body (refs, action cards, code anchored at a revision, which `moveAnchor` moves, and attachments the deployment stores); a reply streamed as it is written (`begin`, `appendDraft`, `finish`), the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft`, each reader's read markers and follows, the pinned messages (`listPinned`), who a message was written for when its author acted for someone, and across the namespace an inbox, a search of the messages' bodies and the deliveries a notifier or an agent dispatcher claims | | [The engine](/superschematic/guides/engine/#comments); on a table, [A row's conversation](/superschematic/guides/database-tables/#a-rows-conversation) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
-| `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
+| `Links` | folded: a relation, `Relation<T>` | | [Links](#links) |
 | `Rollups` | values computed from the instances that link here, optionally gating the type's Workflow transitions | | [Rollups](#rollups) |
-| `Search` | full-text search over the type's text fields, vector search over embeddings an outside embedder computes, and a search across a namespace's schemas | | [Search](#search) |
+| `Search` | folded: `@searchField`, and an `Embedding.Vector` field | | [Search](#search) |
 | `Reactions` | rules that move statuses after a change commits | `Workflow` | [Reactions](#reactions) |
 | `Constants` | fields that keep the value their create gives them, unless a caller holds the config's permission | | [Constants and Variants](#constants-and-variants) |
 | `Variants` | a JSON field typed by another field's value | | [Constants and Variants](#constants-and-variants) |
-| `Branches` | a version graph on each instance: drafts that merge into a primary line, commits and releases, the latest in its `release` field | | [Branches](#branches) |
+| `Branches` | folded: `@versioned` tables of a version graph | | [Branches](#branches) |
 | `StateRules` | own fields a Workflow state requires to enter it, and ones it freezes while an instance is in it | `Workflow` | [StateRules](#staterules) |
 | `Approvals` | sign-offs by distinct principals that a move into a state waits for, consumed by a change of the instance | `Workflow` | [Approvals](#approvals) |
 | `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
 | `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
 | `Derived` | own fields a model outside the engine fills from other own fields, under an instruction the schema holds, which a deriver pulls and settles by hash; a person's write wins | `Workflow` for a field that names states | [Derived](#derived) |
 | `Provenance` | who set each own field last and through what, with the confidence the writer gave, and a review that holds a source's writes until a person accepts them | `Workflow` for a gate | [Provenance](#provenance) |
-| `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
+| `Lease`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, worker heartbeats, stamped children, budgets and retries; `Queue` is folded into `@queue` and a claim, and `Assignment` is a bundle on a table | varies | [Work queues](/superschematic/guides/work-queues/) |
 | `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it | `Workflow` for `Holds` | [Selling and booking](/superschematic/guides/commerce/) |
 | `Seats`, `Reconcile` | a DB table's alone: named seats on a row, each holding the subjects seated in it, and the state a provider last reported, which moves the row's Workflow field | `Workflow` for `Reconcile` | [A row's seats](/superschematic/guides/database-tables/#a-rows-seats-and-a-field-that-follows-observations) |
 | `Schedules`, `Pool` | a DB table's alone: runs after a delay, at an interval or on a cron line, and a pool of members `pick` chooses from | | [A row's schedules](/superschematic/guides/database-tables/#a-rows-schedules), [A pool of members](/superschematic/guides/database-tables/#a-pool-of-members) |
@@ -107,11 +118,7 @@ In the JSON data form the engine reads:
         { "from": "doing", "to": "done" },
         { "from": "todo", "to": "dropped" },
         { "from": "doing", "to": "dropped" } ] } },
-  { "name": "Dependencies", "config": { "schemas": ["tasks", "documents"], "gatedStates": ["done"] } },
-  { "name": "Links", "config": { "links": {
-      "spec": { "schema": "documents", "pinned": true },
-      "parent": { "schema": "tasks" },
-      "project": { "schema": "projects", "required": true } } } }
+  { "name": "Dependencies", "config": { "schemas": ["tasks", "documents"], "gatedStates": ["done"] } }
 ]
 ```
 
@@ -132,13 +139,6 @@ import { Validate, behavior } from "@superschematic/schema";
   ],
 })
 @behavior("Dependencies", { schemas: ["tasks", "documents"], gatedStates: ["done"] })
-@behavior("Links", {
-  links: {
-    spec: { schema: "documents", pinned: true },
-    parent: { schema: "tasks" },
-    project: { schema: "projects", required: true },
-  },
-})
 export abstract class Task {
   title: Validate<string, { maxLength: 200 }>;
 }
@@ -165,8 +165,7 @@ behavior's:
   "data": { "title": "Build", "status": "draft" },
   "behaviors": {
     "Workflow": { "status": "doing", "enteredAt": 1790790700324 },
-    "Dependencies": { "blocked": false },
-    "Links": { "targets": { "project": { "schema": "projects", "id": "launch" } } } } }
+    "Dependencies": { "blocked": false } } }
 ```
 
 Here the type declares a `status` of its own beside Workflow's, and each
@@ -186,12 +185,11 @@ same.
   own field's name never holds a dot.
 - **Every entry.** Each behavior on the type that declares a field has an
   entry, `{}` while none has a value; a field with no value is absent.
-  A behavior that adds no field, such as `Search` or `Constants`, has
-  none.
+  A behavior that adds no field, such as `Constants`, has none.
 - **Volatile fields.** A field the engine computes at a read, from other
   instances, the clock or the config, or from what operations beside the
   instance keep, moves with no event of its own instance:
-  `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
+  `Dependencies.blocked`, `Rollups.values`,
   `Lease.active`, `Budget.meters`, and Comments' `messages`,
   `lastMessageAt`, `threads`, `composing` and `unread`. Its declaration
   says `"volatile": true`, and so does the describe document. Comments'
@@ -211,9 +209,7 @@ same.
   a typing indicator or a draft's next chunk, is a signal, not a field:
   the engine hands it to the event streams opened with signals and keeps
   nowhere ([signals](/superschematic/guides/engine/#signals)). A read
-  never returns one, and the generated types below hold none; the
-  [typed client](/superschematic/guides/engine/#typed-wrappers-for-your-schemas)
-  types their data.
+  never returns one, and the generated types below hold none.
 
 ### In the generated types
 
@@ -222,9 +218,7 @@ type that composes behaviors, each language's types write
 `<Type>Behaviors` beside the type itself, which stays the own fields, the
 read's `data`. It has a member per behavior that declares a field, under
 the behavior's name, holding those fields as the type's config narrows
-them, as [`engine-client`](/superschematic/reference/cli/#engine-client---out-filets-schema-file)
-types them: Workflow's status is one of the type's states, Links' targets
-holds each link of the config with its target's schema, Timers' deadlines
+them: Workflow's status is one of the type's states, Timers' deadlines
 each deadline of the config. A field a read can leave out is optional.
 For the `Task` above, in TypeScript (`types/behaviors.ts`):
 
@@ -240,19 +234,6 @@ export interface TaskBehaviors {
   readonly Dependencies: {
     readonly blocked: boolean;
   };
-  readonly Links: {
-    readonly targets: {
-      parent?: { id: string; schema: 'tasks' };
-      project: { id: string; schema: 'projects' };
-      spec?: {
-        id: string;
-        latest?: number;
-        revision?: number;
-        schema: 'documents';
-        stale?: boolean;
-      };
-    };
-  };
 }
 ```
 
@@ -263,7 +244,6 @@ named by its path:
 type TaskBehaviors struct {
 	Workflow     TaskWorkflow     `json:"Workflow"`
 	Dependencies TaskDependencies `json:"Dependencies"`
-	Links        TaskLinks        `json:"Links"`
 }
 
 type TaskWorkflow struct {
@@ -285,315 +265,45 @@ of several types, such as a rollup's (`{ "over": true }` past its limit).
 
 A General schema whose types compose behaviors builds: its types write
 `<Type>Behaviors`, and nothing else of its build reads a behavior. A DB
-schema's builds too, and gets an engine document (below). An API's own
-type cannot compose a behavior, and the API generators do not serve an
-engine type yet, so an API that imports or projects one fails its build,
-naming the first generator that would run
-([`build`](/superschematic/reference/cli/#build-service-dir)).
+type composes behaviors as a table, with `implements` and field types,
+and `@behavior` on one is refused ([Engine types](#engine-types)). An
+API's own type cannot compose a behavior.
 
 ## Engine types
 
-A type of a DB schema that composes a behavior is an engine type (D58).
-Its instances are the engine's, kept in the engine's own tables: in a
-stack, the DB service's database, under a Postgres schema of the
-engine's (`engine` unless configured), where the generated servers open
-the engine. So `sql` writes no table for it, `orm`
-no repository, and a migration plan (D27) never creates, alters or drops
-one. Tables and engine types share one schema:
-
-```json
-"Customer": { "name": "Customer", "role": "DBTable", "fields": [ ... ] },
-"Address": { "name": "Address", "role": "DBTable", "jsonField": true, "fields": [ ... ] },
-"Ticket": {
-  "name": "Ticket", "role": "DBTable",
-  "behaviors": [
-    { "name": "Workflow", "config": { "states": ["open", "resolved"], "transitions": [{ "from": "open", "to": "resolved" }] } },
-    { "name": "Links", "config": { "links": { "account": { "schema": "Account", "required": true } } } }
-  ],
-  "fields": [
-    { "name": "title", "typeRef": { "name": "string" }, "required": true },
-    { "name": "shipTo", "typeRef": { "name": "Address" } },
-    { "name": "customerId", "typeRef": { "name": "Identity.UUID" } }
-  ]
-}
-```
-
-An engine type's fields hold primitives, scalars, enums, lists and value
-types: `@jsonField` types, which a table holds as a JSON column too, and
-types a General dependency declares. It reaches another engine type's
-instances through `Links`, which names the type as its schema, and a
-table's row through the row's key in a plain field. The build refuses,
-before its generators run, an engine type that reaches a table or
-another engine type through a field, a table that references an engine
-type, an engine type that declares what only a table has (`@versioned`,
-`@optimistic`, a version graph, the `User` trait, a queue, a
-`@stateMachine` or a `@fenced`) or a field the
-database generates (`AutoGenerate`: the engine gives each instance its
-id), and a map or a union, which the engine does not validate. Each
-message names the way out.
-
-### The engine document
-
-The `enginedoc` generator writes what a server puts into the engine for
-the DB service: `engine/<service>.json` in its Go types module, which the
-Go types also hold as `EngineDocument`, the TypeScript types as
-`engineDocument` (imported from `<types package>/engine`, so a client of
-the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
-
-```json
-{
-  "version": 1,
-  "namespace": "support-db",
-  "tools": {
-    "invocationPolicy": { "key": "invocationPolicy", "values": ["auto", "ask"], "default": "auto" },
-    "keys": { "scalar": "x-superschematic-scalar", "guidance": "superschematic/operation-guidance", "parameters": [] }
-  },
-  "behaviors": [
-    { "name": "Links", "package": "@superschematic/engine" },
-    { "name": "Workflow", "package": "@superschematic/engine" }
-  ],
-  "schemas": [
-    { "name": "Account", "kind": "General", "types": { "Account": { ... } } },
-    { "name": "Ticket", "kind": "General", "scalars": { ... }, "types": { "Ticket": { ... }, "Address": { ... } } }
-  ],
-  "metaSchema": { "$defs": { ... } }
-}
-```
-
-- **`namespace`** is the engine namespace the documents are defined and
-  published in: `outputs.engine.namespace` in the service's config, else
-  the service's name, which must then be an engine namespace name
-  (lowercase letters, digits and hyphens).
-- **`schemas`** holds one schema-file document per engine type, the form
-  `format --to=json` writes: `kind: General`, named after the type, with
-  the type, the value types it reaches, and the enums and scalars they
-  use, and no imports. A scalar the core's catalog holds is its name and
-  language primitive; any other is its whole definition.
-- **`metaSchema`** is what this binary's `json-schema` prints, so a
-  document that carries an extension's decorators loads; **`tools`** are
-  the invocation policy and the vendor keys the binary registers (D11),
-  the engine's `tools` option; **`behaviors`** names each behavior the
-  types compose and the package that implements it, and for an
-  extension's behavior the Rust crate its registration names
-  (`"crate"`), which the project's engine crate compiles in (below).
-
-A TypeScript server opens the engine with it:
+A DB type that composed a behavior with `@behavior` was an engine type
+(D58), whose rows the engine kept. There are none now (D103's step 7): a
+DB type composes its behaviors as a table, with `implements` and field
+types, and stays a table, its rules run by the behaviors' core in the
+generated repositories and servers
+([Database tables](/superschematic/guides/database-tables/)). The build
+refuses `@behavior` on a DB type, and `outputs.engine`, naming the table
+form, and nothing lowers one for you: rewrite the type as a table.
 
 ```ts
-import { engineDocument } from '@schemas/support-db-types/engine';
-
-const engine = openEngine({
-  path, policy,
-  metaSchema: engineDocument.metaSchema,
-  tools: engineDocument.tools,
-  namespaces: { names: [engineDocument.namespace] },
-});
-const target = { namespace: engineDocument.namespace };
-for (const schema of engineDocument.schemas) engine.schemas.define(system, schema, target);
-for (const schema of engineDocument.schemas) engine.schemas.publish(system, schema.name as string, target);
+// Was @behavior("Workflow", { ... }) on a DB type.
+export abstract class Ticket {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  status: Workflow<{ states: ["open", "resolved"]; transitions: [{ from: "open"; to: "resolved" }] }>;
+}
 ```
-
-Every document is defined before any is published, since a link may name
-a type the document defines after it.
 
 ### In a generated server
 
-A generated Go, TypeScript or Rust server whose API's database is an
-engine database does this itself (D58): it opens the engine on the
-database in the background, deploys the document before `/readyz` reports
-the engine ready, and mounts the engine's routes, its event stream and its
-MCP endpoint at `/engine/<db>`, behind the API's identity and service
-callers. The API's `Deps` holds the engine: in Go an
-`*engine.Background`, whose `Wait(ctx)` returns it once it opens; in
-TypeScript an `EngineBackground` of `@superschematic/engine/server`, whose
-`wait()` resolves with it, every call a promise, the server opening it
-through the engine's Node-API addon and mounting `engineApp` and
-`engineMcp` on its Hono app; in Rust a
-`superschematic_engine::background::Background`, whose `wait().await`
-does, an engine to call off the async threads (`spawn_blocking`). Three
-more keys of the database's `outputs.engine` say how:
-
-```json
-{
-  "outputs": {
-    "engine": {
-      "namespace": "support",
-      "mount": "/engine/support",
-      "policy": "permission",
-      "retention": { "maxAgeMs": 2592000000 }
-    }
-  }
-}
-```
-
-- **`mount`** is where the servers of the APIs on the database mount the
-  engine's routes: one or more path segments, `/engine/<service>` unless
-  set, never under `/api` or at `/healthz` or `/readyz`.
-- **`policy`** is the access policy they open the engine with:
-  `"permission"` unless set, which allows an action on a type to a caller
-  holding `<Type>.<action>` (`Ticket.read`, `Ticket.write`,
-  `Ticket.define`, `Ticket.publish`), the permissions the API's
-  `permissions.json` then lists, and to a caller [acting for
-  someone](/superschematic/guides/engine/#callers-and-the-access-policy)
-  only when it also holds `actFor`; `"allowAll"`, for tests and local
-  use; or `{ "rules": [...] }`, the engine's ordered rules, where only a
-  rule that names `actingFor` allows a caller acting for someone, and a
-  deny that leaves it out refuses such a caller as it refuses one acting
-  as itself.
-- **`retention`** is how long the event log keeps events, as the engine's
-  `retention` option reads it (see the runner below): `maxAgeMs`,
-  `maxEvents` or both, and `maxHoldMs`, `everyMs` and `batchSize`, each
-  an integer in the engine's range, which the build checks. Unset, the
-  log keeps every event. Every server, job, worker and runner on the
-  database opens the engine with it, and the runner alone prunes. A
-  client that resumes a read or an event stream from a cursor the runner
-  pruned past gets 410 `cursor_expired`, with the floor and the head to
-  start again from.
-
-The engine's routes take the server's 30-second timeout, a 504
-`gateway_timeout` past it, in each language, but the event stream and
-MCP, whose responses last as long as their clients. A write answered 504
-may still have committed, so a client reads it back before it tries
-again.
-
-The engine's runner, which runs reactions, schedules and Timers'
-deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
-in the language of the first API on the database: a Cloud Run worker pool
-on gcp, a process of its own under `stack dev`. It acts as its deployable's
-name, holding each engine type's name as a permission, and with
-`retention` it prunes the log, while it holds the runner's lock, never
-past an event a reaction has yet to handle. A live event stream holds
-nothing: one whose client stops reading for longer than retention keeps
-ends, and its reconnect gets the 410.
-
-Several APIs may share an engine database, each served in its own
-language. Their servers share the engine: each deploys the same document,
-which mints one version however many start at once, and each answers the
-engine's routes, its event stream and MCP as the others do, reading what
-another wrote and streaming what another commits. A Go, a Rust and a
-TypeScript server over one database answer one script alike, a test the
-release candidate runs.
-
-A Topcoat app (D44) whose API's database is an engine database keeps the
-engine in-process on SQLite: the crate the Topcoat extension writes has
-`engine::open(path)`, which opens the engine on a SQLite file and deploys
-the document, and its setup method takes the engine and mounts its
-routes at `/engine`, behind the API's `Authenticator`:
-
-```rust
-let engine = shop_orders_topcoat::engine::open("shop.engine.db")?;
-let app = Router::builder()
-    .discover()
-    .shop_orders(implementations, page_authenticator, engine)
-    .build();
-```
-
-With the crate's pages on, its console also pages the engine's types at
-`<prefix>/engine`, each behavior in a panel and each operation as a form,
-every call the signed-in caller's ([Engine
-pages](/superschematic/guides/topcoat/#engine-pages)).
+No generated server opens the engine. A table's behaviors are the API's
+operations, served beside its other routes, and its deadlines and changes
+the API's behavior worker's
+([API routes](/superschematic/guides/api-routes/)).
 
 ### The project's engine crate
 
-The Rust engine (D58) runs an extension's behavior from a Rust crate
-that implements the engine's `Behavior` trait, which the extension's
-`BehaviorSpec` names (`Rust`: the crate, its path in the project and
-the expression that registers it). When a DB or General schema's types
-compose such a behavior, or one of the work queue's or the commerce
-ones, which the core's engine archive leaves out, the `projectengine` generator writes the
-project's engine crate, `engine/rust/<service>`, named
-`<rust_crate_prefix><service>-engine`:
-
-```rust
-pub fn behaviors() -> BehaviorSet {
-    superschematic_engine_behaviors::core()
-        .with(acme_behaviors::Rating)
-}
-```
-
-It depends on the engine's crates, at the `[paths]` keys `engine_rust`,
-`engine_behaviors_rust` and, when a type composes a work-queue behavior
-or a commerce one, `engine_workqueue_rust` or `engine_commerce_rust`,
-and on each extension's crate by its path. A
-Rust host links the crate and opens the engine with `behaviors()` and
-`tools()`, the binary's invocation policy and vendor keys (acme's crate
-for `shop-ratings` is `acme-shop-ratings-engine`):
-
-```rust
-let mut options = EngineOptions::postgres(url, PostgresOptions::default());
-options.policy = Some(policy);
-options.meta_schema = Some(MetaSchema::Text(meta_schema));
-options.behaviors = acme_shop_ratings_engine::behaviors();
-options.tools = acme_shop_ratings_engine::tools();
-let engine = Engine::open(options)?;
-```
-
-A Go host links the engine as a static archive through its C ABI, and
-the crate's workspace holds that archive as its member `ffi/`
-(`<crate>-ffi`), the C ABI over `behaviors()`:
-
-```rust
-use acme_shop_ratings_engine as project;
-
-superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);
-```
-
-It depends on the C ABI's library at `[paths] engine_abi_rust`. Build
-it, and link it in place of the core's archive by putting its directory
-first in `CGO_LDFLAGS`; the binding's config passes the engine
-document's `tools`, without which an engine refuses an operation that
-names the extension's invocation policy value:
-
-```sh
-scripts/engine-archive.sh --crate dist/engine/rust/shop-ratings/ffi --out dist/engine/lib
-CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
-```
-
-A TypeScript host loads the engine as a Node-API addon, and the crate's
-workspace holds one as its member `napi/` (`<crate>-napi`), the addon
-over `behaviors()`:
-
-```rust
-use acme_shop_ratings_engine as project;
-
-superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors);
-```
-
-It depends on the addon's library at `[paths] engine_napi_rust`. Build
-it, and name the file it prints when the engine opens, with the engine
-option `addon` or, for every engine the process opens,
-`SUPERSCHEMATIC_ENGINE_ADDON`; the engine's `behaviors` name the
-extension's, which it registers after the core's, and `tools` passes the
-engine document's:
-
-```sh
-export SUPERSCHEMATIC_ENGINE_ADDON="$(scripts/engine-napi.sh --crate dist/engine/rust/shop-ratings/napi --out dist/engine/addon)"
-```
-
-```ts
-const engine = await openEngineAsync({ postgres: { url }, policy: 'permission', behaviors: ['acme.Rating'], tools, metaSchema });
-```
-
-`openEngine({ path, ... })` opens the same addon on a SQLite file.
-
-A generated Go server and runner on the database link it so: the
-checkout's Dockerfile builds the `ffi` member in its engine stage, the
-generated CI's `check` builds it before it compiles the server, and
-`stack dev` builds it before it builds the server and puts its directory
-first in the build's `CGO_LDFLAGS`. A generated TypeScript server and
-runner load the `napi` member's addon: the checkout's Dockerfile builds it
-in its engine stage and names it with `SUPERSCHEMATIC_ENGINE_ADDON`, and
-`stack dev` builds it and names it so in the server's environment. The
-commands above are for a host written by hand; a generated one needs none
-of them. Each needs the `[paths]` engine keys to name a checkout of the
-engine's crates, since a release ships none yet.
-
-A schema whose types compose the core's behaviors alone gets no crate,
-since the engine's release carries them, and one that composes an
-extension's behavior whose registration names no crate gets none either:
-the build logs that no engine can run the schema's behaviors, an engine
-refuses the schema, and the build refuses a server on it. acme's
-`crates/behaviors` is the worked example (`examples/acme-schematic`).
+No build writes a project's engine crate. A behavior whose rules need
+code names its rules crate (`crate` in its class), and the build of a DB
+schema that composes it writes the project's rules crate; a declarative
+behavior needs none, as `acme.Rating` in `examples/acme-schematic` shows
+([Write an extension](/superschematic/extending/write-an-extension/#a-behavior)).
 
 ## Display
 
@@ -639,17 +349,15 @@ has every rule.
 ## Create parameters
 
 Some behaviors take parameters when an instance is created, so the
-instance holds what they set from its first event: `Links` takes its
-links, `Dependencies` its blockers. Without them a task would be created
-first and linked after, and in between a queue could claim it with no
-project or blockers. A create gives them under `behaviors`, by behavior
-name:
+instance holds what they set from its first event: `Dependencies` takes
+its blockers. Without them a task would be created first and blocked
+after, and in between a worker could claim it with no blockers. A create
+gives them under `behaviors`, by behavior name:
 
 ```ts
 engine.instances.create(alice, 'tasks', { title: 'Build' }, {
   id: 'build',
   behaviors: {
-    Links: { project: 'launch', spec: { id: 'doc-1', revision: 2 } },
     Dependencies: { blockers: [{ id: 'plan' }] },
   },
 });
@@ -660,39 +368,32 @@ Over HTTP they sit beside `data` in the body of
 create tool (`tasks_create`) takes them as its `behaviors` argument:
 
 ```json
-{ "id": "build", "data": { "title": "Build" }, "behaviors": { "Links": { "project": "launch" } } }
+{ "id": "build", "data": { "title": "Build" }, "behaviors": { "Dependencies": { "blockers": [{ "id": "plan" }] } } }
 ```
 
 - Each behavior declares what it takes (`createParamsSchema`), and the
   describe document and the create tool show it as the type's config
-  narrows it: `Links`' parameters name the type's links, with the
-  required ones required.
+  narrows it.
 - A parameter is held to the same checks as the operation it stands in
-  for (`link`, `addBlocker`). A refusal is `invalid_argument` (400), with
-  each issue at a JSON pointer such as `/behaviors/Links/project`, or
+  for (`addBlocker`). A refusal is `invalid_argument` (400), with each
+  issue at a JSON pointer such as `/behaviors/Dependencies/blockers`, or
   `vetoed` (409), and nothing of the create is left.
 - Every behavior's guard can refuse a create too, before any behavior
   sets anything up. A create's veto carries a code like any other
   ([below](#refusals-and-preconditions)): a blocker given twice is
   Dependencies' `already_blocking`, as `addBlocker` would say.
 - A create takes no preconditions: there is no instance yet to fence.
-- The create, its links and its edges are one event, in one transaction.
+- The create and its edges are one event, in one transaction.
 
 ## Schema-level operations
 
 Most operations run on one instance. An operation a behavior declares
 with `scope: "schema"` runs on the schema as a whole and names no
-instance. Eight do so far:
+instance. Of the behaviors a type may compose, one does so far (the
+folded `Links`, `Search` and `Queue` declared more):
 
 | Operation | Behavior | What it does |
 | --- | --- | --- |
-| `listLinked` | `Links` | the instances whose link points at a target |
-| `search` | `Search` | a full-text or vector search over the schema's instances |
-| `similar` | `Search` | the instances nearest to one, or to a draft's text |
-| `staleEmbeddings` | `Search` | the instances an embedder has a vector to compute for, read-only |
-| `settleEmbeddings` | `Search` | stores the vectors an embedder computed |
-| `claimNext` | `Queue` | claims the first instance the caller can claim |
-| `countClaimable` | `Queue` | counts the instances `claimNext` would try, read-only |
 | `expireHolder` | `Lease` | expires every lease one principal holds |
 
 Each is served at its own route, with its parameters as the body:
@@ -706,7 +407,7 @@ The response carries the result and no `ETag`, and the route takes no
 with `invokeSchema` rather than `invoke`:
 
 ```ts
-engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', limit: 20 });
+engine.instances.invokeSchema(me, 'jobs', 'expireHolder', { holder: 'worker-1' });
 ```
 
 The access policy is asked for `read` or `write` with the operation's
@@ -746,10 +447,7 @@ client.behaviors.invoke('Comments', 'inbox', { limit: 20 });
 
 It is no operation of a type: a schema's operation routes, `invoke` and
 `invokeSchema` answer 404 for it, the describe document lists it under
-its behavior as `namespaceOperations`, not among the type's operations,
-and `engine-client` types it apart from every schema's client,
-`commentsNamespaceClient(client, namespace?)`
-([typed wrappers](/superschematic/guides/engine/#typed-wrappers-for-your-schemas)).
+its behavior as `namespaceOperations`, not among the type's operations.
 Its MCP tool is named after the behavior: `comments.inbox`, handle
 `comments_inbox`. Two behaviors of a type may each declare one of the
 same name, since neither is the type's. A namespace operation is never
@@ -998,52 +696,22 @@ engine.instances.get(alice, 'Task', 't1')?.behaviors;
 
 ## Links
 
-Typed links from an instance to instances of other schemas, or its own:
-a task's project, its parent, the spec it implements, its reviewers.
+`Links` is no behavior: a link to another row is a relation (D103). The
+build refuses a type that composes `Links`, naming `Relation<>`. Give the
+type a field that points at the other type, and name that field where a
+config named a link:
 
-| | |
-| --- | --- |
-| Config | `links`: by camelCase name, `{ schema, required?, pinned?, many?, max? }`. `pinned: true` (or `"revision"`) pins a revision, and the target schema must compose `Revisions`; `pinned: "release"` pins a release, and it must compose `Branches`. `many: true` holds a list of up to `max` targets, from 1 to 100 |
-| Field | `targets`: `{ <name>: { schema, id, revision?, release?, latest?, stale? } }`, a list of those for a many-valued link; absent when the instance holds none |
-| Operations | `link({ name, id, revision?, release? })`, `unlink({ name, id? })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
-| Create parameters | by link name, the target's `id`, or `{ id, revision? }` or `{ id, release? }` for a pinned link; a list of them for a many-valued link |
-| Guard | deleting the target of a required link is `vetoed` (`required_target`), for a many-valued link only its last target |
-| Vetoes | `no_revision` and `no_release`, a pinned link to a target with no revision or no release yet, by `link` or at create; `too_many`, a new target of a many-valued link that holds `max`; `not_linked`, unlinking a target the link does not hold; `required_link`, unlinking a required link or the last target of a required many-valued one; `required_target` |
-
-```ts
-engine.instances.invoke(alice, 'Task', 't1', 'link', { name: 'owner', id: 'p1' });
-// { name: 'owner', schema: 'Person', id: 'p1' }
-engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: 's1' });
-// { items: [{ id: 't1', revision: 1, latest: 2, stale: true }, { id: 't2', revision: 2, latest: 2, stale: false }], next: null }
+```json
+{ "name": "batch", "typeRef": { "name": "Batch" }, "relation": { "type": "Batch" } }
 ```
 
-- `link` again moves a link to another target.
-- A **many-valued** link (`many: true` with a `max`) holds a list of
-  targets, a ticket's reviewers or a stylist's services, in the order they
-  were linked: `link` adds one, or pins again one it holds,
-  `unlink({ name, id })` removes one, and a create gives a list, each
-  target once. A deleted target leaves every list that holds it. While
-  the schema has instances, a link keeps whether it holds a list, and its
-  `max` may rise, not fall. What reads one target of a link, Reactions'
-  `then.link` and the links of `allTerminal`, `anyTerminal` and `holds`
-  say, refuses a many-valued one; `listLinked`, Rollups and `revised`
-  read across the list.
-- A **required** link is given at every create, so every instance holds
-  it: a create without it is refused, it can be moved but not unlinked,
-  and its target cannot be deleted while it points there. A required
-  many-valued link keeps at least one target: its last can be neither
-  unlinked nor deleted. While the schema has instances, a new version
-  cannot make a link required, as it cannot make a field required; with
-  none, in any namespace that reads it, a new version may change its
-  links in any way.
-- An **optional** link is cleared when its target is deleted, with an
-  `unlink` event on each instance that pointed there.
-- A **pinned** link records the target's revision, or with `pinned:
-  "release"` its release (the target's `Branches` release pointer, its
-  `Branches.release` field), and `targets` gives the target's latest beside it and
-  `stale: true` once the target has a later one: "pinned 3, latest 5"
-  in one read. `listLinked({ ..., stale: true })` finds every instance
-  pointing at a superseded revision or release.
+On development mode the field holds its target's key under `batchId`,
+and a relation refuses an id no row has
+([A table's answers](/superschematic/guides/development-mode/#a-tables-answers)).
+On a table it is `batch: Relation<Batch>`, a foreign key. Rollups'
+`link`, Reactions' `link`, Blueprint's `parentLink`, Numbering's
+`scope.link`, a Budget meter's `scope` and Payments' `refundOf.link` name
+it. A link pinned to a revision has no relation counterpart yet.
 
 ## Rollups
 
@@ -1101,117 +769,15 @@ they ended.
 
 ## Search
 
-Full-text search over the type's own text fields, on SQLite's FTS5, and
-with `vectors`, vector search over embeddings an outside embedder
-computes from the same text.
-
-| | |
-| --- | --- |
-| Config | `fields`: 1 to 16 top-level fields, each a string or a string-valued scalar; `weights`: by field, above 0 and at most 1000 (1 when absent); `vectors`, optional: `dimensions` (1 to 4096), `model` (a label) and `permission` (what an embedder needs) |
-| Operations | all schema-level: `search({ query?, vector?, model?, syntax?, limit?, cursor? })` and `similar({ id } or { text, vector?, model? }, limit?, cursor?)`, which return a page of hits, and an embedder's `staleEmbeddings({ limit?, cursor? })` and `settleEmbeddings({ items })` |
-
-```json
-"behaviors": [{ "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 },
-    "vectors": { "dimensions": 384, "model": "minilm-l6", "permission": "notes.embed" } } }]
-```
-
-```ts
-engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', limit: 20 });
-// { items: [{ id: 'n2', rank: 1, field: 'title',
-//             snippet: [{ text: 'Release', match: true }, { text: ' ', match: false }, { text: 'plan', match: true }] }],
-//   next: null }
-```
-
-- **Queries.** By default a query is plain words: an instance matches
-  when its indexed fields hold every word, in any field and order.
-  `syntax: "fts5"` takes an FTS5 expression instead (phrases, `AND`, `OR`,
-  `NOT`, `NEAR`, prefixes such as `wal*`); column filters are refused.
-  Prefix queries over a large index are slow, and a search runs
-  synchronously, so think twice before serving `fts5` syntax to callers
-  you do not trust.
-- **Matching.** The tokenizer folds case and removes diacritics; there is
-  no stemming.
-- **Results.** Best first, by bm25 with the config's weights. `rank` is
-  the position, from 1, across pages. `snippet` is up to 12 words around
-  the matches of the best field, split into parts that say whether they
-  match, so a client can highlight them.
-- **Consistency.** The index is written in the same transaction as the
-  change, so a search never sees an instance that is not there.
-- **Publishing.** A version that adds Search or changes `fields` rebuilds
-  the index during the publish, holding the write lock (about half a
-  second for 10,000 instances of 160 words on a laptop).
-- **Access.** A caller needs `read` on the schema, and only sees results
-  from their own namespace.
-
-### Vectors
-
-The engine calls no embedding provider and loads no SQLite extension. A
-worker process, the embedder, holds the config's permission and keeps
-the vectors current: it pulls the instances whose text has no vector,
-computes them with the config's model, and settles them back.
-
-```ts
-const page = engine.instances.invokeSchema(embedder, 'notes', 'staleEmbeddings', { limit: 50 });
-// { model: 'minilm-l6', dimensions: 384,
-//   items: [{ id: 'n1', text: 'Release plan\n\nDates and owners.', sourceHash: '9c1f...' }], next: null }
-const vectors = await provider.embed(page.items.map((item) => item.text));
-engine.instances.invokeSchema(embedder, 'notes', 'settleEmbeddings', {
-  items: page.items.map((item, i) => ({ id: item.id, sourceHash: item.sourceHash, vector: vectors[i] })),
-});
-// { settled: 1, skipped: [] }
-```
-
-- **Stale.** An instance is stale from its create, and again when its
-  indexed text changes or a version changes the model or the dimensions.
-  Its text is its indexed fields joined by a blank line.
-- **The hash.** A settle presents the hash it pulled, and is skipped for
-  an instance whose text or model changed since (`moved`) or that is gone
-  (`not_found`). A vector of the wrong dimensions, all zeros, or with a
-  value a 32-bit float cannot hold refuses the whole batch.
-- **No event.** A settle appends no event and moves no instance's `seq`:
-  no read of an instance shows a vector. Who settled each one and when is
-  kept beside it.
-
-A search takes the query's `vector` beside its `query`, computed with the
-same model:
-
-```ts
-engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', vector: queryVector, model: 'minilm-l6' });
-// { items: [{ id: 'n2', rank: 1, score: 0.0328, field: 'title', snippet: [...],
-//             text: { rank: 1 }, vector: { rank: 1, similarity: 0.83 } }, ...], next: null }
-```
-
-- **A vector alone** ranks by cosine similarity.
-- **Both** fuse the full-text and vector rankings by reciprocal rank
-  fusion (k = 60, over the first 200 of each). Each hit carries its
-  `score`, its place in each ranking (`text`, `vector`) and its
-  similarity, so you can show why it ranks where it does.
-- **The cost.** Vectors are ranked by a scan of every vector of the
-  schema in the namespace, in the engine's process.
-
-`similar({ id })` lists the instances nearest to one, leaving it out: by
-its own text and, once its vector is settled, by its vector too. An agent
-calls it before creating an instance like one it found, to reuse or link
-a near-duplicate instead. `similar({ text, vector? })` ranks the same way
-for an instance not yet created: the draft's indexed fields joined by a
-blank line, and optionally their vector from the config's model, so an
-agent checks for a near-duplicate before it creates one.
-
-### Searching every schema
-
-`engine.search(principal, params, { namespace })`, `POST
-/namespaces/{namespace}/search` and the MCP tool `search` run `search` on
-every schema of the namespace that composes Search and that the caller
-may read, and merge the hits, each naming its `schema`. Each schema's
-best hit ties the others', since bm25 and cosine do not compare across
-schemas. A vector needs its `model`, and ranks only the schemas whose
-vectors come from it. A schema the caller may not read is skipped
-silently, not refused.
-
-A DB table has no Search behavior: its text fields take `@searchField`,
-and a `@searchable` table's rows share one index that a single query
-ranks across tables, with each row's access checked inside it
-([Search across tables](/superschematic/guides/database-tables/#search-across-tables)).
+`Search` is no behavior: full-text search is a schema feature (D103). The
+build refuses a type that composes `Search`, naming `@searchField`. On a
+table, mark each field to search `@searchField` (`"searchField": true` in
+the data forms), keep a vector in a `Validate<Embedding.Vector, {
+dimensions }>` field (D84), and search across tables with `@searchable`
+([Database tables](/superschematic/guides/database-tables/)). On
+development mode a list's text filter, `filter[title][contains]=...`,
+matches a field's text anywhere, case aside, with no weights and no
+ranking.
 
 ## Reactions
 
@@ -1315,18 +881,11 @@ instance itself, as the first is, acts only while the field still holds
 `to` when the runner gets to it, as an `enters` rule acts only while the
 status is still in its state.
 
-Work done against a spec goes back to review when the spec changes:
-
-```json
-{ "name": "Links", "config": { "links": { "spec": { "schema": "specs", "pinned": true } } } },
-{ "name": "Reactions", "config": { "rules": [
-    { "when": { "revised": { "link": "spec" } }, "then": { "transition": "review" } } ] } }
-```
-
-A new revision of a spec moves each work item pinned to an earlier one;
-an item linked again to the new revision before the runner gets to it
-stays where it is. With `Queue`'s `excludeStale` the same items are not
-claimed meanwhile ([Work queues](/superschematic/guides/work-queues/)).
+A `revised` rule, which moved work back to review when a spec it was
+pinned to took a new revision, heard a link `Links` pinned. `Links`
+folds into a relation ([Links](#links)), which pins no revision yet, so
+no schema composes one; on a table the build refuses `revised`, naming
+what it waits for.
 
 - A rule acts only where it can. A target already in the state, with no
   transition to it, or whose guards veto the move (an open blocker, say)
@@ -1450,141 +1009,12 @@ shows how a behavior of your own judges the fields a write stores.
 
 ## Branches
 
-`Branches` makes each instance the root of a version graph (D17, D19,
-D32 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). Rows of the kinds its config names live on
-refs: a primary line, which each instance gets when it is created, and
-drafts of it, which only a merge brings back. A tagged commit of the
-primary line is released with `releaseCommit`, the version graph's
-release, and a rollback is a release of an earlier one. The instance's
-own fields stay outside the graph. The graph lives
-in the behavior's own tables, kept by the version graph's Rust engine in
-the transaction of the operation that writes it.
-[Version graphs](/superschematic/reference/version-graphs/) covers the
-model under it: refs, commits, merges by conflict unit, releases,
-snapshots and the sweep.
-
-Each kind's content is another type of the schema, so a recipe's steps,
-its ingredients under a step and its one cover are three types:
-
-```ts
-import { Generic, Identity } from "superscalar";
-import { behavior } from "@superschematic/schema";
-
-export abstract class Step {
-  instruction: string;
-  position: Generic.Int64;
-  timings?: Generic.JSON;
-}
-
-export abstract class Ingredient {
-  stepKey: Identity.UUID;
-  quantity: string;
-}
-
-export abstract class Cover {
-  photoUrl: string;
-}
-
-@behavior("Branches", {
-  kinds: {
-    step: { type: "Step", order: "position", units: { timings: "keyed" }, retentionDays: 365 },
-    ingredient: { type: "Ingredient", parent: { key: "stepKey", of: "step" } },
-    cover: { type: "Cover", singleton: true }
-  },
-  sweep: { intervalMs: 3600000, abandonAfter: 2592000000 }
-})
-export abstract class Recipe {
-  title: string;
-}
-```
-
-| Config | |
-| --- | --- |
-| `kinds` | by name, camelCase: `type`, the type of the schema whose fields are the kind's content; `parent: { key, of }`, the field of a UUID scalar that holds the parent row's entity key and the parent's kind, so deleting a parent removes its descendants; `order`, an integer field that orders siblings; `singleton`, at most one live row; `units`, a field's conflict unit (`atomic`, the default, `keyed` for each key of a JSON object, `jsonSchema`, or `excluded`, not content); `retentionDays`, how many days of history the sweep keeps |
-| `primary` | the primary line's name, `main` when absent |
-| `snapshotEvery` | how many commits past the nearest snapshot a commit is snapshotted at, 64 when absent |
-| `sweep` | `intervalMs`, and optionally `discardGrace`, `pruneBatch` and `abandonAfter`: turns the sweep on for the schema |
-
-Work happens on a draft and merges into the primary line:
-
-```ts
-const call = (operation: string, params = {}) => engine.instances.invoke(me, "Recipe", id, operation, params);
-
-const [main] = call("refs").items;                          // the primary line, from the create
-const draft = call("branch", { name: "spicier" });          // from the primary line; or { fromRef, name }
-const { ref } = call("save", {
-  ref: draft.id, version: draft.version,
-  edits: { step: { upsert: [{ instruction: "Add chili", position: 3 }] } },
-});
-const { ref: committed } = call("commit", { ref: ref.id, version: ref.version, message: "chili" });
-const merged = call("merge", { source: committed.id, target: main.id, targetVersion: main.version, tag: true });
-call("releaseCommit", { commit: merged.commit.id, version: 0 });  // 0: the first release
-call("released");                                                 // { release, tree, contentHash, findings }
-engine.instances.get(me, "Recipe", id)?.behaviors.Branches.release; // 1: the release pointer's version
-```
-
-- **Operations.** `branch`, `save`, `commit`, `seal`, `merge`, `rebase`,
-  `revert`, `releaseCommit` and `discard` write; `refs`, `releases` (the
-  release log), `compose`, `materialize`, `released`, `diff` and
-  `history` read. Each is an operation of the instance, so the access
-  policy is asked `write` or `read` with its name, and who may `merge`
-  or `releaseCommit` is the deployment's to decide. Each write appends
-  the instance's operation event.
-- **Refs, commits and versions.** An operation names refs and commits by
-  id, and every write through a ref names the ref's version, which the
-  write moves. One that is not the instance's is `invalid_argument`; the
-  version graph's refusals are vetoes with its codes: `version_conflict`,
-  `name_taken`, `ref_sealed`, `primary_merge_only`, `nothing_to_commit`,
-  `entity_not_found`, `invalid_tree`, `merge_into_itself`, `no_parent`,
-  `not_tagged` and `walk_ceiling`. `discard` refuses the primary line
-  (`primary_line`), which every draft branches from and merges into.
-- **Rows.** A kind's rows carry fixed columns beside its type's fields:
-  `id`, `entity_key`, `ref_id`, `root_id`, `deleted_on_ref`, `_version`,
-  `created_at`, `created_by`, `updated_at` and `updated_by`, the author a
-  conflict names. A type with a field of one of those names is refused.
-  A saved row is an entity's whole content, with `entity_key` to replace
-  one, and it is held to its kind's type as a field of that type is, and
-  each value to its column's value class; a refused row is
-  `invalid_argument` at its field. A read returns each author as the
-  caller's subject.
-- **Conflicts.** A merge or a rebase whose sides changed a unit
-  differently returns the conflicts, each side's value and author, and
-  writes nothing; `resolutions` settle them by unit path, taking a side
-  or giving a value. A value is held to its field's class, and the row it
-  leaves to its kind's type, as a saved row is; a refused one is
-  `invalid_argument` at `/resolutions/<i>/value` and writes nothing.
-- **Older instances.** `Branches` can be added to a schema with
-  instances. One created before gets its primary line at its first write
-  after, as its caller: a `branch` without `fromRef`, which then branches
-  from that line, an update that changes it, or another behavior's
-  writing operation.
-- **The sweep.** With `sweep`, a schedule runs on the schema as the
-  runner's principal: it discards each draft with no write for
-  `abandonAfter` through the instance's `discard`, with an event each,
-  then deletes the rows of refs discarded longer ago than `discardGrace`
-  (seven days by default), prunes history past each kind's
-  `retentionDays` and writes missing snapshots. Without `sweep` it is off.
-- **New versions.** A new version may add a kind, change a kind's fields
-  as the compatibility rule allows a field to change, and change a
-  retention, `primary`, `snapshotEvery` and `sweep`; removing a kind or
-  changing a kind's type, parent, order, singleton or a field's unit is
-  refused while the schema has instances, and so is a version without
-  `Branches`. With none, deleting the last instance having deleted its
-  graph, the kinds may change in any way. Every stored row reads
-  a field a version adds as null, and a null field hashes as an absent
-  one, so `materialize` of a commit made before returns the `contentHash`
-  the commit stored and `history` returns; a value written to the field
-  moves the hash, and `nothing_to_commit`, which compares trees, holds.
-- **The release field.** `release` is the number of the instance's
-  latest release, the release pointer's version, absent before the
-  first: what the next `releaseCommit` names, and what a `Links` link
-  pinned to a release records and compares.
-- **Deleting.** Deleting an instance deletes its graph.
-- **Lease.** The operation that points the release pointer is
-  `releaseCommit`, not `release`, because `Lease` has `release`, so a
-  type composes both. Lease's guard then holds `Branches`' writes to the
-  lease's holder, as it holds any writing operation
-  ([Work queues](/superschematic/guides/work-queues/#lease)).
+`Branches` is no behavior: a version graph is a schema feature (D103).
+The build refuses a type that composes `Branches`, naming `@versioned`. A
+compiled schema declares the graph with `@versionGraph`, each member a
+`@versioned` table with `@graphMember` and its `@conflictUnit`s (D17,
+D19), and its generated facade drafts, merges, commits and releases
+([Version graphs](/superschematic/reference/version-graphs/)).
 
 ## StateRules
 
@@ -1724,14 +1154,13 @@ engine.instances.get(alice, 'expenses', 'trip')?.behaviors.Approvals;
 
 A number a person reads on each instance: an invoice's `INV-2026-0042`,
 a ticket's `T-17`. The count runs per schema, per target of a scope
-link and per year, as the config says, and the create sets the number
-in its own transaction.
+relation and per year, as the config says, and the create sets the
+number in its own transaction.
 
 ```ts
 import { behavior } from "@superschematic/schema";
 
-@behavior("Links", { links: { project: { schema: "projects", required: true } } })
-@behavior("Numbering", { format: "INV-{yyyy}-{seq:4}", scope: { link: "project" }, reset: "yearly" })
+@behavior("Numbering", { format: "INV-{yyyy}-{seq:4}", reset: "yearly" })
 export abstract class Invoice {
   title: string;
 }
@@ -1739,16 +1168,16 @@ export abstract class Invoice {
 
 | | |
 | --- | --- |
-| Config | `format` (required): text with `{seq}`, or `{seq:N}` zero-padded to N digits (1 to 10), exactly once, and `{yyyy}` or `{yy}`, the UTC year the instance was created in; `scope: { link }`: a required, single-valued link of the type's `Links`, each of whose targets counts on its own; `reset: "yearly"`: each count starts again at 1 every UTC year, which needs the year in `format` |
+| Config | `format` (required): text with `{seq}`, or `{seq:N}` zero-padded to N digits (1 to 10), exactly once, and `{yyyy}` or `{yy}`, the UTC year the instance was created in; `scope: { link }`: a required relation of the type, by its field, each of whose targets counts on its own; `reset: "yearly"`: each count starts again at 1 every UTC year, which needs the year in `format` |
 | Fields | `seq`, the number in its count, and `label`, the number as `format` prints it; both absent until the instance is numbered |
 | Operation | `assignNumber()`, which numbers an instance made before its schema composed `Numbering` |
-| Refusals at define | a brace outside a token, a token it does not know, a `{seq}` not there once, `reset` without the year, and a `scope` link that is not a required, single-valued link of the type's `Links` (`invalid_schema`) |
+| Refusals at define | a brace outside a token, a token it does not know, a `{seq}` not there once, `reset` without the year, and a `scope` that names no required relation of the type (`invalid_schema`) |
 
 ```ts
-engine.instances.create(me, "invoices", { title: "Kickoff" }, { behaviors: { Links: { project: "launch" } } }).behaviors.Numbering;
+engine.instances.create(me, "invoices", { title: "Kickoff" }).behaviors.Numbering;
 // { seq: 1, label: 'INV-2026-0001' }
 engine.instances.list(me, "invoices", { where: { "Numbering.label": "INV-2026-0001" } });
-// the launch project's first invoice of 2026, and each other project's
+// the first invoice of 2026
 ```
 
 - **No gap a refused create leaves.** The number is set after every
@@ -1882,8 +1311,7 @@ engine.instances.get(me, "requests", "jam")?.behaviors;
 
 Own fields that a model outside the engine fills from other own fields:
 a ticket's category and priority, an article's summary, a document's
-extracted dates. The engine calls no model, as it calls no embedder for
-[vectors](#vectors). A deriver, a worker holding the config's
+extracted dates. The engine calls no model. A deriver, a worker holding the config's
 permission, pulls what is stale, asks its model, and settles the answers
 with the hash it pulled.
 
@@ -2105,8 +1533,9 @@ table, `provenance_in_review`, which a list filters on
 
 ## Where to go next
 
-- [Work queues](/superschematic/guides/work-queues/): leases, claims,
-  worker heartbeats, stamped children, budgets and retries.
+- [Work queues](/superschematic/guides/work-queues/): leases, a claim
+  that is a read and a lease, worker heartbeats, stamped children, budgets
+  and retries.
 - [Selling and booking](/superschematic/guides/commerce/): stock, time,
   a claim's holds on both, and payments and refunds.
 - [Database tables](/superschematic/guides/database-tables/#beyond-plain-tables):
@@ -2116,4 +1545,4 @@ table, `provenance_in_review`, which a list filters on
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#behaviors):
   the behavior interface, for writing your own.
 - [Write an extension](/superschematic/extending/write-an-extension/#a-behavior):
-  declare a behavior in the compiler and implement it for the engine.
+  declare a behavior in the compiler, its rules declarative or a crate's.

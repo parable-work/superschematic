@@ -194,31 +194,6 @@ func checkStateRulesConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef
 	}
 }
 
-// checkEngineStateRulesConfig refuses, on an engine type, each member of
-// StateRules' config that a table's StateRules alone takes (D104): the by
-// of each state's rules, in the canonical config's order, then status. The
-// declaration is shared, so the configSchema accepts them; the engine's
-// StateRules refuses them too, and the build says so first, naming the
-// table form. A config the configSchema refuses is reported by
-// checkTypeBehaviors and left alone here.
-func checkEngineStateRulesConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	var config struct {
-		States map[string]map[string]json.RawMessage `json:"states"`
-		Status json.RawMessage                       `json:"status"`
-	}
-	if len(ref.Config) == 0 || json.Unmarshal(ref.Config, &config) != nil {
-		return
-	}
-	for _, state := range slices.Sorted(maps.Keys(config.States)) {
-		if _, ok := config.States[state]["by"]; ok {
-			r.errorf(td.Owner, "type %s: @behavior StateRules names by in the rules of %q, which a table's StateRules takes (implements StateRules<%s, C>, D104); an engine type's StateRules takes required, frozen and permission alone, so leave it out", td.Name, state, td.Name)
-		}
-	}
-	if len(config.Status) > 0 {
-		r.errorf(td.Owner, "type %s: @behavior StateRules names status, the Workflow field a table's StateRules reads (implements StateRules<%s, C>, D104); an engine type's StateRules reads its one Workflow, so leave status out", td.Name, td.Name)
-	}
-}
-
 // pronoun is "it" for one field and "them" for several.
 func pronoun(n int) string {
 	if n == 1 {

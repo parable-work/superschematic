@@ -86,7 +86,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **Batch** - A batch stamped into steps, which counts its jobs.
 
-- **Job** - A job a worker claims from its topic's queue and holds under a lease, within a CPU budget, retried per failure class.
+- **Job** - A job a worker holds under a lease, within a CPU budget, retried per failure class.
 
 - **Note** - A note whose behaviors add no field: its behaviors' type has no member.
 
@@ -94,7 +94,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **Request** - A request a model triages and a person reviews: Derived and Provenance narrow by their configs' fields.
 
-- **Ticket** - A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
+- **Ticket** - A ticket that moves through its states, waits for the tickets that block it, and keeps deadlines.
 
 - **Worker** - A worker that beats while it runs; one that misses its beats gives up its jobs' leases.
 

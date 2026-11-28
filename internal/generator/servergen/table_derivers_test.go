@@ -180,12 +180,6 @@ func TestTableDeriversOfTheStack(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("derivers =\n%q\nwant\n%q", got, want)
 	}
-	// No engine runs over a database of tables, so the stack has no runner.
-	for _, d := range env.Deployables {
-		if d.Kind == ir.DeployableRunner {
-			t.Errorf("the stack runs %s, an engine's runner, over a database with no engine type", d.Name)
-		}
-	}
 }
 
 // TestTableDeriverRefusals: the build refuses a deriver of a table that
@@ -207,7 +201,7 @@ func TestTableDeriverRefusals(t *testing.T) {
 
 	f := loadTableDeriverFixture(t)
 	f.schemas[tableDeriverAPI].Derivers[0].Schemas = []string{"Note"}
-	if err := build(f, tableDeriverDB, tableDeriverAPI); err == nil || !strings.Contains(err.Error(), "deriver TriageTickets of derived-ts-api fills the derived fields of Note, which is no engine type or table of fixture-derived-provenance-db that composes Derived (its types that do: Article, Ticket)") {
+	if err := build(f, tableDeriverDB, tableDeriverAPI); err == nil || !strings.Contains(err.Error(), "deriver TriageTickets of derived-ts-api fills the derived fields of Note, which is no table of fixture-derived-provenance-db that implements Derived (its tables that do: Article, Ticket)") {
 		t.Errorf("build = %v, want a schema without Derived refused", err)
 	}
 
@@ -267,4 +261,13 @@ func TestTableDeriverEntrypointCompiles(t *testing.T) {
 			t.Fatalf("tsc in %s: %v\n%s", checked, err, output)
 		}
 	}
+}
+
+// deriverPaths are the paths a build of a deriver fixture reads: the
+// TypeScript and the Rust runtimes'.
+func deriverPaths(repoRoot string) naming.LocalPaths {
+	paths := rustFakePaths(repoRoot)
+	ts := tsFakePaths(repoRoot)
+	paths.ScalarTypeScript, paths.HTTPRuntimeTypeScript = ts.ScalarTypeScript, ts.HTTPRuntimeTypeScript
+	return paths
 }

@@ -79,9 +79,9 @@ A build is one of three modes. The same schemas also run with no
 generated code: in [development mode](/superschematic/guides/development-mode/),
 whose rows are JSON so that a publish takes effect at once, and in
 [runtime mode](/superschematic/guides/runtime-mode/), whose publish
-plans and applies the migration while the environment runs. The
-[engine](/superschematic/guides/engine/) serves a schema of composed
-behaviors with no generated code too.
+plans and applies the migration while the environment runs.
+[A server with no build](/superschematic/guides/engine/) serves a schema of
+composed behaviors on development mode.
 
 ## Where to start
 
@@ -99,8 +99,8 @@ behaviors with no generated code too.
    [auth and permissions](/superschematic/guides/auth-and-permissions/),
    [client SDKs](/superschematic/guides/client-sdks/) in Go, TypeScript,
    Python and Rust, [stacks and deploys](/superschematic/guides/stacks/),
-   [the engine](/superschematic/guides/engine/), which runs a schema with
-   no generated code, with its
+   [a server with no build](/superschematic/guides/engine/), which runs a
+   schema with no generated code on development mode, with
    [behaviors](/superschematic/guides/engine-behaviors/) and
    [work queues](/superschematic/guides/work-queues/), and
    [pages with Topcoat](/superschematic/guides/topcoat/), which call a Rust
@@ -112,7 +112,7 @@ behaviors with no generated code too.
    [capability map](/superschematic/start/capabilities/) links every guide
    from what you need.
 
-The tutorial's code is `examples/acme-shop`, and the engine guide's is
+The tutorial's code is `examples/acme-shop`, and the no-build guide's is
 `examples/engine-notes`. CI builds and tests both in the release
 candidate run on `main` twice a day. [Examples](/superschematic/start/examples/)
 lists every example project and the script that runs it.

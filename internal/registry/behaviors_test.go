@@ -565,16 +565,16 @@ func TestRegisterBehaviorAsksSupplyFromAnEnginesPackage(t *testing.T) {
 }
 
 // An extension's spec may name the Rust crate that implements its
-// behavior (D58), which the registered behavior carries for the
-// projectengine generator; a core behavior names none, and a crate name,
-// path or register expression the project's engine crate could not use is
-// refused.
+// behavior on the behaviors' core, which the registered behavior carries
+// for the rulescore generator; a core behavior names none, and a crate
+// name, path or register expression the project's rules crate could not
+// use is refused.
 func TestRegisterBehaviorRust(t *testing.T) {
 	rating := BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating"}
 	reg := New(naming.Default())
 	for _, spec := range []BehaviorSpec{
-		{Extension: "acme", Rust: rating, Declaration: ratingDeclaration()},
-		{Extension: "acme", Rust: BehaviorRust{Crate: "acme_flags", Path: "../shared/flags", Register: "acme_flags::flag::Flag::new()"}, Declaration: declaration("acme.Flag", nil)},
+		{Extension: "acme", Rules: rating, Declaration: ratingDeclaration()},
+		{Extension: "acme", Rules: BehaviorRust{Crate: "acme_flags", Path: "../shared/flags", Register: "acme_flags::flag::Flag::new()"}, Declaration: declaration("acme.Flag", nil)},
 		{Extension: "acme", Declaration: declaration("acme.Pin", nil)},
 	} {
 		if err := reg.RegisterBehavior(spec); err != nil {
@@ -586,8 +586,8 @@ func TestRegisterBehaviorRust(t *testing.T) {
 		"acme.Flag":   {Crate: "acme_flags", Path: "../shared/flags", Register: "acme_flags::flag::Flag::new()"},
 		"acme.Pin":    {},
 	} {
-		if b, _ := reg.Behavior(name); b.Rust != want || b.Rust.Declared() != (want != BehaviorRust{}) {
-			t.Errorf("%s Rust = %+v, want %+v", name, b.Rust, want)
+		if b, _ := reg.Behavior(name); b.Rules != want || b.Rules.Declared() != (want != BehaviorRust{}) {
+			t.Errorf("%s Rules = %+v, want %+v", name, b.Rules, want)
 		}
 	}
 	if got := rating.Ident(); got != "acme_behaviors" {
@@ -600,7 +600,7 @@ func TestRegisterBehaviorRust(t *testing.T) {
 		want      string
 	}{
 		{"", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating"},
-			`registry: core behavior Rating names Rust crate "acme-behaviors": the core's behaviors are the engine's own crates`},
+			`registry: core behavior Rating names Rust crate "acme-behaviors": the core's behaviors are the core's own crate`},
 		{"acme", BehaviorRust{Crate: "1acme", Path: "crates/behaviors", Register: "acme::Rating"},
 			`registry: behavior acme.Rating Rust crate "1acme" is not a Cargo package name: a letter, then letters, digits, '-' and '_', at most 64 characters`},
 		{"acme", BehaviorRust{Crate: "acme behaviors", Path: "crates/behaviors", Register: "acme::Rating"},
@@ -632,14 +632,14 @@ func TestRegisterBehaviorRust(t *testing.T) {
 		if test.extension == "" {
 			decl = declaration("Rating", nil)
 		}
-		err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: test.extension, Rust: test.rust, Declaration: decl})
+		err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: test.extension, Rules: test.rust, Declaration: decl})
 		if err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Errorf("%+v: err = %v, want %q", test.rust, err, test.want)
 		}
 	}
 }
 
-// Two behaviors may share a crate, at one path: the project's engine crate
+// Two behaviors may share a crate, at one path: the project's rules crate
 // depends on it once.
 func TestFinalizeHoldsARustCrateToOnePath(t *testing.T) {
 	for _, test := range []struct {
@@ -653,14 +653,14 @@ func TestFinalizeHoldsARustCrateToOnePath(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			reg := New(naming.Default())
 			for _, spec := range []BehaviorSpec{
-				{Extension: "acme", Rust: BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Flag"}, Declaration: declaration("acme.Flag", nil)},
-				{Extension: "acme", Rust: BehaviorRust{Crate: "acme-behaviors", Path: test.path, Register: "acme_behaviors::Rating"}, Declaration: ratingDeclaration()},
+				{Extension: "acme", Rules: BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Flag"}, Declaration: declaration("acme.Flag", nil)},
+				{Extension: "acme", Rules: BehaviorRust{Crate: "acme-behaviors", Path: test.path, Register: "acme_behaviors::Rating"}, Declaration: ratingDeclaration()},
 			} {
 				if err := reg.RegisterBehavior(spec); err != nil {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore", "tasks"} {
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site", "memorystore", "tasks"} {
 				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 					t.Fatal(err)
 				}
@@ -793,7 +793,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore", "tasks"} {
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site", "memorystore", "tasks"} {
 				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 					t.Fatal(err)
 				}

@@ -60,11 +60,6 @@ func TestMergeableTrait(t *testing.T) {
 			want: "Label: the Mergeable trait is on a base class, which gets no table; implement it on the table that extends Label (Tag)",
 		},
 		{
-			name:   "an engine type",
-			mutate: func(s *ir.Schema) { label(s).Behaviors = []ir.BehaviorRef{{Name: "Comments"}} },
-			want:   "Label: the Mergeable trait is on an engine type, whose instances the engine keeps",
-		},
-		{
 			name:   "a queue",
 			mutate: func(s *ir.Schema) { label(s).Queue = &ir.QueueDef{} },
 			want:   "Label: the Mergeable trait is on a queue, whose rows are messages no relation references",

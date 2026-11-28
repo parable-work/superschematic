@@ -85,7 +85,7 @@ fn a_read_shows_rollups_values_over_the_rows_that_point_at_it() {
     host.ok(&operation(
         "Task",
         "t2",
-        "Workflow",
+        "status",
         "transition",
         json!({"to": "doing"}),
     ));
@@ -171,7 +171,7 @@ fn a_read_shows_whether_dependencies_blockers_are_open() {
         host.ok(&operation(
             "Task",
             "t2",
-            "Workflow",
+            "status",
             "transition",
             json!({ "to": to }),
         ));
@@ -182,7 +182,7 @@ fn a_read_shows_whether_dependencies_blockers_are_open() {
     host.ok(&operation(
         "Milestone",
         "m1",
-        "Workflow",
+        "status",
         "transition",
         json!({"to": "shipped"}),
     ));

@@ -21,4 +21,3 @@ tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 superschematic-http-runtime = { path = "../../../../runtime/http/rust", features = ["identity", "postgres", "identity-postgres"] }
 schemas-desk-app-api-types = { path = "../../types/rust/desk-app-api" }
 superscalar = { path = "../../../../third_party/superscalar/crates/core" }
-superschematic-engine = { path = "../../../../runtime/engine/rust/engine", default-features = false, features = ["background"] }

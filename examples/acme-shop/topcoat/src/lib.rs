@@ -25,25 +25,14 @@
 //! (`pages_live`), render a filter's or a page's results in place; without
 //! it they are GET forms and links that load the page (D44, amended).
 //!
-//! shop-db is an engine database (D58, D70), so the crate mounts its
-//! engine at `/engine` beside the JSON API, which the app opens on a SQLite
-//! file of its own (`open_engine`) and deploys shop-db's engine types in,
-//! and the console pages it at `/console/engine`: the types the caller may
-//! read, each type's instances, and an instance's fields, a panel per
-//! behavior and its operations as forms, every call made as the signed-in
-//! caller, whom shop-db's engine policy admits by their permissions. Staff
-//! receive, adjust and count an Inventory's stock there, see a
-//! CollectionPoint's hours and bookings, and a Checkout's holds and its
-//! payment, every amount as money; a Refund moves to approved only once two
-//! of them who hold `refunds.approve` have signed it off, and approving it
-//! asks the checkout's Payments for the money back. Ada, the demo's staff,
-//! holds the roles the policy names (`BACK_OFFICE_ROLES`), and administers
-//! the shop's users and roles at `/console/users` and `/console/roles`.
-//! The app itself sells nothing through the engine: the shop's checkouts,
-//! which hold stock and take payment, are the stack's, on shop-orders' Go
-//! server, and this engine has no payment adapter, so its checkouts are
-//! those a test writes, and a refund approved here waits for an adapter to
-//! report it paid.
+//! shop-db's commerce types are tables whose behaviors' operations other
+//! APIs serve (D103): the shop's checkouts, which hold stock and take
+//! payment, are the stack's, on shop-orders' Go server, staff sign refunds
+//! off through shop-api's routes and receive stock in shop-stock's
+//! Backoffice, and the console renders no behavior's panel of a table yet.
+//! Ada, the demo's staff, holds the back office's roles
+//! (`BACK_OFFICE_ROLES`), and administers the shop's users and roles at
+//! `/console/users` and `/console/roles`.
 //!
 //! The crate's identity pages serve `/console/sign-in` too, but the
 //! console links to the app's own `/sign-in`, which its settings name
@@ -157,9 +146,10 @@ pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Resu
 
 /// The back office's roles, which staff hold beside rust-server's `staff`
 /// (`orders.any`, which reads every checkout): each of the first three
-/// grants a permission shop-db's engine policy asks of staff, to sign a
-/// refund off, keep the stock and keep the collection points; `admin`
-/// grants the identity pages' administration of users and roles.
+/// grants a permission a behavior of shop-db's tables asks of staff, to
+/// sign a refund off (Approvals), keep the stock (Stock) and keep the
+/// collection points (Calendar); `admin` grants the identity pages'
+/// administration of users and roles.
 pub const BACK_OFFICE_ROLES: [(&str, &[&str]); 4] = [
     ("refunds", &["refunds.approve"]),
     ("stock", &["stock.write"]),
@@ -183,15 +173,8 @@ pub async fn add_back_office(users: &Service, login: &str) -> Result<(), Box<dyn
 /// the session cookie is not `Secure`.
 pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 
-/// shop-db's engine, which `app` mounts at `/engine`.
-pub type Engine = superschematic_engine::Engine;
-
-/// Opens shop-db's engine on the SQLite file at `path`, created if absent,
-/// and deploys shop-db's engine types in it, as `app` takes it.
-pub use acme_shop_orders_topcoat::engine::open as open_engine;
-
 /// The app: its pages, and shop-orders' JSON API and in-process operations
-/// over `shop`, shop-db's `engine` at `/engine`, in memory (`shop_in_memory`) or in SQLite
+/// over `shop`, in memory (`shop_in_memory`) or in SQLite
 /// (`acme_shop_orders_server::sqlite::SqliteShop`), whose callers are
 /// `users`' users. A page's caller is the user whose session the request
 /// carries, read by the identity runtime as the JSON API reads it. Topcoat's
@@ -212,7 +195,6 @@ pub use acme_shop_orders_topcoat::engine::open as open_engine;
 pub fn app<S: ShopImplementation>(
     shop: Arc<S>,
     users: Arc<Service>,
-    engine: Arc<Engine>,
     assets: Option<AssetConfig>,
 ) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
@@ -221,7 +203,7 @@ pub fn app<S: ShopImplementation>(
         .discover()
         .with(users)
         .with(console_settings())
-        .shop_orders(implementations, authenticator, engine);
+        .shop_orders(implementations, authenticator);
     match assets {
         Some(assets) => builder.assets(assets).layer(RuntimeLayer::new()).build(),
         None => builder.build(),

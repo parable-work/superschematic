@@ -266,15 +266,13 @@ func skipped(result *registry.Result, reason string) bool {
 // are the core user model's (D50), fixture-args-api, whose arguments make
 // argument forms, fixture-pages-api, whose resources make pages, and
 // fixture-console-api, whose lists page, whose ids refer to products and
-// whose lists search, fixture-engine-api, whose crate mounts its engine
-// database's engine, with its pages on, fixture-identity-pages-api,
-// whose users are the core user model's, with its pages on, and
-// fixture-paged-api, whose parts' list filters by a field of every kind
-// (D106), with its pages on, with testdata/golden/<service>; -update
-// rewrites them. A path to the
-// repository, as the engine's crates' paths are, is written <repo>.
+// whose lists search, fixture-identity-pages-api, whose users are the core
+// user model's, with its pages on, and fixture-paged-api, whose parts'
+// list filters by a field of every kind (D106), with its pages on, with
+// testdata/golden/<service>; -update rewrites them. A path to the
+// repository, as the scalar crate's path is, is written <repo>.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService, consoleService, engineService, identityPagesService, pagedService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService, consoleService, identityPagesService, pagedService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, outputsOf(service)); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -310,16 +308,10 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// TestTheConsoleFixturesBuild builds the crates of the console's own
-// pages' fixtures, fixture-engine-api over fixture-engine-db's engine and
-// fixture-identity-pages-api over the core user model, with their pages
-// on, and runs cargo clippy with warnings denied, then cargo test.
+// TestTheConsoleFixturesBuild builds the crate of the console's own pages'
+// fixture, fixture-identity-pages-api over the core user model, with its
+// pages on, and runs cargo clippy with warnings denied, then cargo test.
 func TestTheConsoleFixturesBuild(t *testing.T) {
-	t.Run("engine", func(t *testing.T) {
-		cargoTestCrateWith(t, engineService, "#[test]\nfn builds() {}\n", crateOptions{
-			before: map[string]map[string]any{engineDatabase: engineDatabaseOutputs()},
-		})
-	})
 	t.Run("identity", func(t *testing.T) {
 		cargoTestCrateWith(t, identityPagesService, "#[test]\nfn builds() {}\n", crateOptions{
 			features: []string{"identity-sqlite"},
@@ -327,13 +319,13 @@ func TestTheConsoleFixturesBuild(t *testing.T) {
 	})
 }
 
-// TestTheConsolePagesConfig: outputs.topcoat.pages.engine and .identity,
-// and [extension.topcoat]'s pages_engine and pages_identity, take what
-// they declare and refuse anything else; a crate whose pages are on writes
-// src/engine_pages.rs and src/identity_pages.rs when their key turns them
-// on, and neither, nor asks for them in its build log, when the key turns
-// them off. TestTheConsolePagesTheEngine and
-// TestTheIdentityPagesAreWrittenAsDeclared hold their build logs.
+// TestTheConsolePagesConfig: outputs.topcoat.pages.identity and
+// [extension.topcoat]'s pages_identity take what they declare and refuse
+// anything else, the engine's pages' engine and pages_engine among it; a
+// crate whose pages are on writes src/identity_pages.rs when the key turns
+// them on, and does not, nor asks for them in its build log, when the key
+// turns them off. TestTheIdentityPagesAreWrittenAsDeclared holds its build
+// log.
 func TestTheConsolePagesConfig(t *testing.T) {
 	// logOf builds service with pages as its outputs.topcoat.pages, or
 	// with no outputs.topcoat for nil, under names, and gives its build log;
@@ -359,12 +351,6 @@ func TestTheConsolePagesConfig(t *testing.T) {
 		return err == nil
 	}
 	names := registry.DefaultNaming()
-	if logOf(engineService, map[string]any{"enabled": true}, names); !wrote("engine_pages.rs") {
-		t.Errorf("pages on did not write the engine pages")
-	}
-	if log := logOf(engineService, map[string]any{"enabled": true, "engine": false}, names); strings.Contains(log, "no engine pages") || wrote("engine_pages.rs") {
-		t.Errorf("pages.engine false still asks for the engine pages, written %v:\n%s", wrote("engine_pages.rs"), log)
-	}
 	if logOf(identityPagesService, map[string]any{"enabled": true, "identity": map[string]any{"signUp": true}}, names); !wrote("identity_pages.rs") {
 		t.Errorf("pages.identity { signUp } did not write the identity pages")
 	}
@@ -374,7 +360,7 @@ func TestTheConsolePagesConfig(t *testing.T) {
 		}
 	}
 	for _, pages := range []map[string]any{
-		{"enabled": true, "engine": "no"},
+		{"enabled": true, "engine": false},
 		{"enabled": true, "identity": "yes"},
 		{"enabled": true, "identity": map[string]any{"signup": true}},
 	} {
@@ -385,17 +371,16 @@ func TestTheConsolePagesConfig(t *testing.T) {
 		}
 	}
 
-	table, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"fixture-engine-api\"]\npages_prefix = \"/console\"\npages_engine = false\npages_identity = { sign_up = true }\n"), "superschematic.toml")
+	table, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"fixture-identity-pages-api\"]\npages_prefix = \"/console\"\npages_identity = false\n"), "superschematic.toml")
 	if err != nil {
 		t.Fatalf("ParseNaming: %v", err)
 	}
-	if log := logOf(engineService, nil, table); !wrote("pages.rs") || wrote("engine_pages.rs") || strings.Contains(log, "no engine pages") {
-		t.Errorf("pages_engine = false in the table: pages written %v, engine pages written %v, and asked for:\n%s", wrote("pages.rs"), wrote("engine_pages.rs"), log)
+	if log := logOf(identityPagesService, nil, table); !wrote("pages.rs") || wrote("identity_pages.rs") || strings.Contains(log, "no sign-in") {
+		t.Errorf("pages_identity = false in the table: pages written %v, identity pages written %v, and asked for:\n%s", wrote("pages.rs"), wrote("identity_pages.rs"), log)
 	}
 	for table, want := range map[string]string{
-		"services = [\"a\"]\npages_engine = false":                                            "pages_engine sets the pages pages_prefix turns on, and the table has no pages_prefix",
 		"services = [\"a\"]\npages_identity = true\npages_live = true":                        "pages_identity sets the pages pages_prefix turns on",
-		"services = [\"a\"]\npages_prefix = \"/console\"\npages_engine = \"no\"":              "pages_engine must be true or false",
+		"services = [\"a\"]\npages_prefix = \"/console\"\npages_engine = false":               `unknown key "pages_engine"`,
 		"services = [\"a\"]\npages_prefix = \"/console\"\npages_identity = 1":                 "pages_identity must be true or false, or a table",
 		"services = [\"a\"]\npages_prefix = \"/console\"\npages_identity = { signUp = true }": `pages_identity: unknown key "signUp"`,
 		"services = [\"a\"]\npages_prefix = \"/console\"\npages_identity = { sign_up = 1 }":   "pages_identity.sign_up must be true or false",
@@ -416,8 +401,8 @@ func TestTheConsolePagesConfig(t *testing.T) {
 const identityPagesService = "fixture-identity-pages-api"
 
 // repoPathsOf is files, a crate written in dir, with each path from dir to
-// the repository, as a Cargo.toml names the engine's crates or the scalar
-// crate, written <repo>: the golden then holds no path of the machine.
+// the repository, as a Cargo.toml names the scalar crate, written <repo>:
+// the golden then holds no path of the machine.
 func repoPathsOf(t *testing.T, files map[string][]byte, dir string) map[string][]byte {
 	t.Helper()
 	rel, err := filepath.Rel(dir, testpaths.RepoRoot(t))
@@ -1106,13 +1091,13 @@ type crateOptions struct {
 // outputsOf are a fixture's outputs in the tests that build every fixture
 // alike: rustOutputs, with the pages on, their lists live, for
 // fixture-pages-api and fixture-console-api, and the pages on for
-// fixture-engine-api and fixture-identity-pages-api, the fixtures whose
+// fixture-identity-pages-api and fixture-paged-api, the fixtures whose
 // crates have them.
 func outputsOf(service string) map[string]any {
 	switch service {
 	case pagesService, consoleService:
 		return livePagesOutputs()
-	case engineService, identityPagesService, pagedService:
+	case identityPagesService, pagedService:
 		return pagesOutputs()
 	}
 	return rustOutputs()
