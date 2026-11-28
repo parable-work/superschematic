@@ -143,6 +143,12 @@ buildRouter(implementations, {
 });
 ```
 
+The generated server puts `grantAuthenticator({ orm, inner, runTokens:
+'inner' })` in front of the implementation's authenticator for a database
+with grants: a party's token runs as the party, and a run's token goes on
+to the implementation's, which resolves it where it is
+`deps.agents.authenticator(...)` and refuses it otherwise.
+
 ## Autonomy
 
 Each tool call passes the run's policy. The most specific row wins: the
@@ -182,15 +188,15 @@ message, and approving it releases the message; denying it refuses it.
 
 A TypeScript API whose database declares the orchestration holds the
 dispatcher in its `Deps`. The generated entrypoint builds `deps.agents`
-with `createAgents` over `deps.orm` and the requests queue, and the rest of
-its options from the implementation's `createAgentOptions`:
+with `createAgents` over `deps.orm` and the requests queue, with the
+providers its config names (`deps.providers`, D159), the notifier
+(`deps.notifier`, D153) and the inbound path (`deps.inbound`, D157) it
+builds too, and the rest of its options from the implementation's
+`createAgentOptions`, which override them:
 
 ```ts
 export const createAgentOptions: AgentOptionsConstructor = deps => ({
   endpoint: deps.config.AGENT_ENDPOINT ?? 'http://localhost:8080/api/agents',
-  providers, // providersFrom over the config's slots (D159)
-  notifier, // createNotifier, whose approval replies run agents' reply actions
-  inbound, // createInbound, whose approve hook is agents.sendApproval
   tools,
   search: true,
 });
@@ -198,8 +204,9 @@ export const createAgentOptions: AgentOptionsConstructor = deps => ({
 
 | What the generated server does | Where |
 | --- | --- |
-| builds `deps.agents` with `withAgents` | every entrypoint that builds `Deps` |
-| mounts `deps.agents.routes()` at the endpoint's path | the server |
+| builds `deps.agents` with `withRuntime`, the API package's `runtime.ts`, after the notifier and the inbound path | every entrypoint that builds `Deps`: `main.ts`, `fetch.ts`, and each worker's `main.ts` and `drain.ts` |
+| routes a route's `{ agent }` recipient to the dispatcher, decides "approve 12" and "deny 12" with its reply actions, and gives the inbound path its `sendApproval` hook | the notifier and the inbound path it builds |
+| mounts `deps.agents.routes({ authenticate })` at the endpoint's path, with the approvals' approve and deny as the caller the API's authenticator establishes | the server |
 | passes `agents.mcpGate` as the MCP endpoint's call gate | a server that serves the API's MCP endpoint |
 | hands each message to `agents.handle` | a `@worker` of the requests queue, and of the `@runRequests` queue (D157) |
 | prunes the transcripts past their retention with the queue | the requests queue's worker |

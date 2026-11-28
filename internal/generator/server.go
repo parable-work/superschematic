@@ -927,8 +927,9 @@ func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, 
 }
 
 // typeScriptDispatcherQueues are the queues of api's database whose
-// @worker the agent dispatcher runs in TypeScript (D183): its
-// @agents("requests") queue and its @runRequests queue (D157); none for a
+// @worker a runtime piece runs in TypeScript: the agent dispatcher's
+// @agents("requests") queue and its @runRequests queue (D183, D157), the
+// notifier's dispatch queue and search's indexing queues; none for a
 // database that does not use the agent orchestration, or that cannot be
 // read here, whose workers the API's build reads again.
 func (r run) typeScriptDispatcherQueues(services []stack.Service, api string) map[string]bool {
@@ -959,6 +960,10 @@ func (r run) typeScriptDispatcherQueues(services []stack.Service, api string) ma
 				if runs := schema.RunRequestsQueue(); runs != nil {
 					out[runs.Name] = true
 				}
+			}
+			// And the notifier's and search's (typescript_runtime.go).
+			for _, queue := range r.typeScriptRuntimeQueues(db, schema) {
+				out[queue] = true
 			}
 		}
 	}
