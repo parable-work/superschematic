@@ -171,7 +171,7 @@ func TestSearchInEachDialect(t *testing.T) {
 		t.Fatal(err)
 	}
 	holdsWords(t, "a search on SQLite", lite.statements, []string{"search_index_fts MATCH ?1", "bm25(search_index_fts, 1.0, 0.4, 0.2, 0.1, 0.0, 0.0, 0.0)", "json_each(si.audience) WHERE json_each.value IN (?3)", "si.source_table IN (?2)"}, []string{"$", "::", "phraseto_tsquery"})
-	if got := lite.args[0][0]; got != `{title body comments files} : ("walnut" """desk""")` {
+	if got := lite.args[0][0]; got != `{title body comments files} : ("walnut" AND "desk")` {
 		t.Errorf("the words on SQLite: %v", got)
 	}
 	if got := lite.args[0][2]; got != "00000000-0000-4000-8000-0000000000a1" {
@@ -201,17 +201,20 @@ func TestSearchInEachDialect(t *testing.T) {
 	holdsWords(t, "an indexing on SQLite", lite.statements, []string{"CAST(id AS TEXT) AS key", "WHERE id = ?1", "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", "excluded.text_hash", "s.id = ?9"}, []string{"$", "::", "unnest", "FOR SHARE"})
 }
 
-// TestFTSPhrases: each word with a letter or a digit is a quoted FTS5
-// phrase, a quote doubled, and a word of neither is left out.
-func TestFTSPhrases(t *testing.T) {
-	for words, want := range map[string]string{
-		`walnut desk`:   `"walnut" "desk"`,
-		`say "hi"`:      `"say" """hi"""`,
-		`-- ** café 42`: `"café" "42"`,
-		`--`:            ``,
+// TestFTSQuery: each term with a letter or a digit is a quoted FTS5
+// phrase, a quote doubled, groups OR and excluded terms NOT, and a query
+// of no term to hold is none (#740).
+func TestFTSQuery(t *testing.T) {
+	for q, want := range map[string]string{
+		`walnut desk`:    `"walnut" AND "desk"`,
+		`say "hi"`:       `"say" AND "hi"`,
+		`-- ** café 42`:  `"café" AND "42"`,
+		`oak OR pine -x`: `(("oak" OR "pine")) NOT "x"`,
+		`--`:             ``,
+		`-oak`:           ``,
 	} {
-		if got := ftsPhrases(SearchWords(words)); got != want {
-			t.Errorf("ftsPhrases(%q) = %q, want %q", words, got, want)
+		if got := FTSQuery(ReadSearchQuery(q)); got != want {
+			t.Errorf("FTSQuery(%q) = %q, want %q", q, got, want)
 		}
 	}
 }

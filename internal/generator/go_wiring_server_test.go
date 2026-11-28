@@ -39,6 +39,13 @@ var wiringWorkers = map[string]string{
 // repoRoot, and returns the output root.
 func buildWiringStack(t *testing.T, repoRoot string) string {
 	t.Helper()
+	return buildWiringStackOn(t, repoRoot, "postgres")
+}
+
+// buildWiringStackOn is buildWiringStack with fixture-agent-runs-db's
+// dialects, the first the one the server and its workers open (D116).
+func buildWiringStackOn(t *testing.T, repoRoot string, dialects ...any) string {
+	t.Helper()
 	outputRoot := filepath.Join(repoRoot, "schemas", "dist")
 	schemas := map[string]*ir.Schema{}
 	configs := map[string]*schemaconfig.SchemaConfig{}
@@ -52,7 +59,7 @@ func buildWiringStack(t *testing.T, repoRoot string) string {
 	db := *configs[wiringDB]
 	db.Outputs = map[string]any{
 		"types": map[string]any{"go": map[string]any{"enabled": true}},
-		"sql":   map[string]any{"dialects": []any{"postgres"}},
+		"sql":   map[string]any{"dialects": dialects},
 	}
 	configs[wiringDB] = &db
 	for _, service := range []string{wiringDB, wiringAPI, wiringStack} {

@@ -349,6 +349,12 @@ type TypeDef struct {
 	// repository is generated.
 	SearchIndex bool `json:"searchIndex,omitempty" yaml:"searchIndex,omitempty" jsonschema:"-"`
 
+	// SearchFolds marks a search index whose words fold diacritics
+	// (outputs.sql.search.foldDiacritics, #740): on Postgres its GIN
+	// expression and a search's query are in [SearchFoldedConfig], and on
+	// SQLite its FTS5 table removes diacritics.
+	SearchFolds bool `json:"searchFolds,omitempty" yaml:"searchFolds,omitempty" jsonschema:"-"`
+
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
 	// Nil for every other type. See [QueryDef].

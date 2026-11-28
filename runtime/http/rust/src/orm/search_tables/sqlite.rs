@@ -5,11 +5,11 @@
 //! ([`SearchableDefinition::fts`], `search_index_fts`), which the index
 //! table's triggers keep in the statement that writes an index row.
 //!
-//! - The words: each word with a letter or a digit is a quoted FTS5 phrase
-//!   of the words the `unicode61` tokenizer finds in it (folded to lower
-//!   case, no diacritic removed and none stemmed, as Postgres's `simple`
-//!   configuration reads them), every one required, and only in the four
-//!   texts.
+//! - The words: the plan's FTS5 expression ([`super::query`], #740), each
+//!   term a quoted FTS5 phrase of the words the `unicode61` tokenizer finds
+//!   in it (folded to lower case and none stemmed, as Postgres's `simple`
+//!   configuration reads them; diacritics removed where the build folds
+//!   them), groups `OR` and excluded terms `NOT`, only in the four texts.
 //! - The order: bm25 with the weights Postgres gives the title, the body,
 //!   the conversation and the files (1, 0.4, 0.2, 0.1), best first, then
 //!   the table and the key. A hit's `matched` is the first of the four
@@ -42,9 +42,9 @@ use serde_json::{json, Map, Value};
 
 use super::shared::{quoted_of, request_of, search_sources_of, text_of};
 use super::{
-    clean, hex_sha256, search_tool_request, search_words, snippet_parts, whole, Indexed, SearchHit,
-    SearchIndexing, SearchOptions, SearchRequest, SearchResult, SearchableDefinition, CLOSE,
-    MAX_LIMIT, MAX_OFFSET, OPEN,
+    clean, fts_query, hex_sha256, search_plan, search_tool_request, snippet_parts, whole, Indexed,
+    SearchHit, SearchIndexing, SearchOptions, SearchRequest, SearchResult, SearchableDefinition,
+    CLOSE, MAX_LIMIT, MAX_OFFSET, OPEN,
 };
 use crate::auth::{Authenticator, Principal};
 use crate::orm::sqlite::{execute_rows, query_rows, Repositories, Tables};
@@ -68,18 +68,6 @@ const FTS: &str = "\"search_index_fts\"";
 /// The refusal of embeddings on SQLite.
 fn embeddings_refused(what: &str) -> String {
     format!("{what}: embeddings re-rank and are stored on Postgres alone; a search on SQLite and D1 ranks by its words (D186)")
-}
-
-/// A query's words as an FTS5 expression, each a quoted phrase, every one
-/// required; none for words with no letter or digit, which match nothing
-/// on Postgres either.
-pub fn fts_phrases(words: &[String]) -> Option<String> {
-    let phrases: Vec<String> = words
-        .iter()
-        .filter(|word| word.chars().any(|c| c.is_alphabetic() || c.is_numeric()))
-        .map(|word| format!("\"{}\"", word.replace('"', "\"\"")))
-        .collect();
-    (!phrases.is_empty()).then(|| phrases.join(" "))
 }
 
 fn bound(value: Value) -> Bound {
@@ -129,8 +117,10 @@ pub fn search_tables(
 ) -> Result<SearchResult, Error> {
     let limit = whole(request.limit, 20, 1, MAX_LIMIT, "limit")?;
     let offset = whole(request.offset, 0, 0, MAX_OFFSET, "offset")?;
-    let words = search_words(&request.q);
-    if words.is_empty() {
+    let plan = search_plan(&request.q);
+    // A query with no term to hold matches nothing; a vector, which
+    // would rank it, is refused below.
+    if plan.all.is_empty() && request.vector.is_none() {
         return Ok(SearchResult::default());
     }
     let definition = repositories.definition();
@@ -173,7 +163,7 @@ pub fn search_tables(
     if options.embeddings.is_some() {
         return Err(Error::Definition(embeddings_refused("search_tables")));
     }
-    let Some(phrases) = fts_phrases(&words) else {
+    let Some(phrases) = fts_query(&plan) else {
         return Ok(SearchResult::default());
     };
     let fts = first.fts.as_deref().unwrap_or(FTS);
@@ -653,16 +643,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_word_with_a_letter_or_a_digit_is_a_quoted_phrase() {
-        let words = |q: &str| search_words(q);
+    fn each_term_with_a_letter_or_a_digit_is_a_quoted_phrase() {
+        let fts = |q: &str| fts_query(&search_plan(q));
         assert_eq!(
-            fts_phrases(&words("walnut 2026 o\"k")),
-            Some("\"walnut\" \"2026\" \"o\"\"k\"".to_owned())
+            fts("walnut 2026 o\"k"),
+            Some("\"walnut\" AND \"2026\" AND \"o\" AND \"k\"".to_owned())
         );
-        assert_eq!(
-            fts_phrases(&words("-- ... walnut")),
-            Some("\"walnut\"".to_owned())
-        );
-        assert_eq!(fts_phrases(&words("-- ...")), None);
+        assert_eq!(fts("-- ... walnut"), Some("\"walnut\"".to_owned()));
+        assert_eq!(fts("-- ..."), None);
     }
 }

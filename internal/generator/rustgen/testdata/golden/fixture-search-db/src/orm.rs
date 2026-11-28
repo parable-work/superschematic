@@ -2372,7 +2372,8 @@ pub const POSTGRES: &str = r#"{
       ],
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "contract",
         "key": "id",
         "keyType": "uuid",
@@ -2715,7 +2716,8 @@ pub const POSTGRES: &str = r#"{
       },
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "document",
         "key": "id",
         "keyType": "uuid",
@@ -2934,7 +2936,8 @@ pub const POSTGRES: &str = r#"{
       },
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "folder",
         "key": "id",
         "keyType": "uuid",
@@ -3362,7 +3365,8 @@ pub const POSTGRES: &str = r#"{
       },
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "note",
         "key": "id",
         "keyType": "uuid",
@@ -4505,7 +4509,8 @@ pub const POSTGRES: &str = r#"{
       ],
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "request",
         "key": "id",
         "keyType": "uuid",
@@ -4992,7 +4997,8 @@ pub const POSTGRES: &str = r#"{
       ],
       "searchable": {
         "index": "search_index",
-        "document": "(setweight(to_tsvector('simple'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "document": "(setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(si.files, '')), 'D'))",
+        "config": "search_unaccent",
         "table": "unit",
         "key": "id",
         "keyType": "uuid",

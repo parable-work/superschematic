@@ -46,6 +46,18 @@ var wiringCases = []string{
 	"the agent routes are the dispatcher's, under its endpoint's path",
 }
 
+// wiringDialect is a database the wiring's end-to-end test runs on:
+// fixture-agent-runs-db's dialects in the build, the first the one the
+// server and its workers open (D116); the app's side, which the test
+// writes into the server's module as probe/main.go; and open, which makes
+// the database through the probe and returns the URL the server, the
+// workers and the probe read.
+type wiringDialect struct {
+	dialects []any
+	probe    string
+	open     func(t *testing.T, outputRoot string, probe func(database string, args ...string) string) string
+}
+
 // TestGoServerWiresTheRuntimeEndToEnd builds fixture-agent-runs-go-api and
 // its stack as TestGoServerWiresTheRuntime does, with an implementation
 // whose NewWiring names the agent endpoint from the API's config, and runs
@@ -63,8 +75,26 @@ func TestGoServerWiresTheRuntimeEndToEnd(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set " + behaviorServerDatabaseEnv + " to run the Go server's wiring against Postgres")
 	}
+	runWiringEndToEnd(t, wiringDialect{
+		dialects: []any{"postgres"},
+		probe:    wiringProbe,
+		open: func(t *testing.T, outputRoot string, probe func(database string, args ...string) string) string {
+			schema := fmt.Sprintf("wiring_go_%d", time.Now().UnixNano())
+			createSQL := filepath.Join(t.TempDir(), "create.sql")
+			pgtest.WriteCreateSQL(t, filepath.Join(SQLDir(outputRoot, wiringDB), "create.sql"), createSQL)
+			probe(dsn, "setup", schema, createSQL)
+			t.Cleanup(func() { probe(dsn, "drop", schema) })
+			return withSearchPath(t, dsn, schema)
+		},
+	})
+}
+
+// runWiringEndToEnd runs every case of wiringCases against the generated
+// server and its four workers over d's database.
+func runWiringEndToEnd(t *testing.T, d wiringDialect) {
+	t.Helper()
 	repoRoot := testpaths.TempDir(t)
-	outputRoot := buildWiringStack(t, repoRoot)
+	outputRoot := buildWiringStackOn(t, repoRoot, d.dialects...)
 	implFile := filepath.Join(naming.Default().GoImplementationDir(repoRoot, wiringAPI), "implementation.go")
 	impl, err := os.ReadFile(implFile)
 	if err != nil {
@@ -83,7 +113,7 @@ func TestGoServerWiresTheRuntimeEndToEnd(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(serverDir, "probe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(serverDir, "probe", "main.go"), []byte(wiringProbe), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(serverDir, "probe", "main.go"), []byte(d.probe), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	env := []string{"CGO_LDFLAGS=" + archiveLDFlags(t)}
@@ -108,12 +138,7 @@ func TestGoServerWiresTheRuntimeEndToEnd(t *testing.T) {
 		}
 		return string(out)
 	}
-	schema := fmt.Sprintf("wiring_go_%d", time.Now().UnixNano())
-	createSQL := filepath.Join(t.TempDir(), "create.sql")
-	pgtest.WriteCreateSQL(t, filepath.Join(SQLDir(outputRoot, wiringDB), "create.sql"), createSQL)
-	probe(dsn, "setup", schema, createSQL)
-	t.Cleanup(func() { probe(dsn, "drop", schema) })
-	database := withSearchPath(t, dsn, schema)
+	database := d.open(t, outputRoot, probe)
 	var seeded map[string]string
 	if err := json.Unmarshal([]byte(probe(database, "seed")), &seeded); err != nil {
 		t.Fatal(err)
@@ -216,7 +241,7 @@ func TestGoServerWiresTheRuntimeEndToEnd(t *testing.T) {
 
 	t.Run(wiringCases[0], func(t *testing.T) {
 		eventually(t, "no text reached Ann", func() bool { return len(relay.sentTo(wiringPhoneAnn)) > 0 })
-		notices := rows(`SELECT reference::text AS reference, state FROM notice`)
+		notices := rows(`SELECT CAST(reference AS TEXT) AS reference, state FROM notice`)
 		if len(notices) != 1 || !strings.Contains(relay.sentTo(wiringPhoneAnn)[0], notices[0]["reference"]) {
 			t.Fatalf("the notices %v, and Ann's texts %q", notices, relay.sentTo(wiringPhoneAnn))
 		}
@@ -226,7 +251,7 @@ func TestGoServerWiresTheRuntimeEndToEnd(t *testing.T) {
 	})
 
 	t.Run(wiringCases[1], func(t *testing.T) {
-		reference := rows(`SELECT reference::text AS reference FROM notice`)[0]["reference"]
+		reference := rows(`SELECT CAST(reference AS TEXT) AS reference FROM notice`)[0]["reference"]
 		status, body := callback(t, "ack "+reference, wiringPhoneAnn)
 		if status != http.StatusOK || !strings.Contains(body, `"outcome":"reply"`) {
 			t.Fatalf("Ann's reply = %d %s", status, body)

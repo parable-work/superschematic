@@ -216,6 +216,10 @@ const queue = inbound.runWorker(pool, async request => {
 written as the party, so it lands only where the grant's role reaches.
 `file` points the row at the message, so the row lists it among its
 backlinks, and files the message's photos onto it with no second upload.
+A row of a table with no `@attachments` gets the reference alone, and so
+does every row when the messages table has no `@attachments`. Filing is
+idempotent: a run request whose handler failed after `file` runs again,
+and filing the message again adds no second reference or file.
 
 ## Send to a party
 

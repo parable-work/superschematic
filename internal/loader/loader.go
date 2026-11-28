@@ -252,6 +252,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.SearchFoldsDiacritics = searchFoldsDiacritics(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
 		vin.MCPServer = mcpServer(cfg)
@@ -320,6 +321,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Naming = o.naming
 		vin.Registry = reg
 		vin.Dialects = sqlDialects(cfg)
+		vin.SearchFoldsDiacritics = searchFoldsDiacritics(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
 		vin.MCPServer = mcpServer(cfg)
@@ -851,7 +853,7 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// Search across tables (D155): the database's search index and the
 	// fields of the queues @searchable names join the schema before the
 	// pass, so it reads them as its own.
-	if added := search.Expand(schema); len(added) > 0 {
+	if added := search.Expand(schema, vin.SearchFoldsDiacritics); len(added) > 0 {
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}
