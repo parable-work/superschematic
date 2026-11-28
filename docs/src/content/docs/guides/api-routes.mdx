@@ -3560,6 +3560,89 @@ Each operation is an MCP tool, `recipe_branch`, `recipe_save` and the rest,
 with the title and the description the build gives it; a set whose
 `@requireService` admits only services hides them.
 
+## A table's references and files
+
+A table's references, the rows that point at it and its files
+([References and files on any row](/superschematic/guides/database-tables/#references-and-files-on-any-row))
+are routes with no code of yours (#723): a class with no members, marked
+`@rowFeatureOperations` with the table, which it imports from its database.
+
+```ts
+// issues-api
+import { auth, rowFeatureOperations } from "@superschematic/api";
+import { Issue, Note } from "@acme/issues-db";
+
+@rowFeatureOperations(Issue)
+@auth
+export abstract class IssueOperations {}
+
+@rowFeatureOperations(Note, {
+  operations: ["references", "addReference", "backlinks", "attachments", "beginUpload", "completeUpload", "download"],
+  permissions: { beginUpload: ["notes.upload"] },
+  bucket: "issue-files"
+})
+@auth
+export abstract class NoteOperations {}
+```
+
+The build adds to the set each operation the table offers: a `@references`
+table its references, a table a reference may point at its backlinks, and
+an `@attachments` table its files. `operations` narrows the set,
+`permissions` replaces the class's `@requirePermission` for one operation,
+and `bucket` names the API's bucket that holds the files, its one bucket
+unless set.
+
+| Operation | Route | Body | Answers | Tool |
+| --- | --- | --- | --- | --- |
+| `references` | `GET issue/{id}/references` | | `RowReference[]`, each to a row the caller can read | `issue_references` |
+| `addReference` | `POST issue/{id}/references` | `RowReferenceInput`: `to` (`{ table, key }`), `role` | `RowReference` | `issue_add_reference` |
+| `removeReference` | `POST issue/{id}/references/remove` | `RowReferenceInput`; no `role` removes every role | `RowReferencesRemoved` | |
+| `backlinks` | `GET issue/{id}/backlinks` | | `RowBacklinks`: `items`, and `hidden` for the owner of a private row | `issue_backlinks` |
+| `attachments` | `GET issue/{id}/files` | | `RowAttachment[]`, the ready files | `issue_attachments` |
+| `beginUpload` | `POST issue/{id}/files` | `RowAttachmentBeginInput`: `name`, `mediaType`, `size`, `sha256`, `caption` | `RowAttachmentBegun`: the pending file and the `upload` the browser PUTs the bytes with | |
+| `completeUpload` | `POST issue/{id}/files/{file}/complete` | | `RowAttachment`, ready | |
+| `download` | `GET issue/{id}/files/{file}` | | `RowAttachmentDownload`: a signed `url`, its `expiresAt`, the file | |
+| `fileAttachment` | `POST issue/{id}/files/{file}/file` | `RowAttachmentFileInput`: `to`, `move`, `role` | `RowAttachment`, the file on the other row | |
+| `removeAttachment` | `DELETE issue/{id}/files/{file}` | | `true` | |
+
+Every route is below `/api`, and every type is added once to the API,
+shared by every set. The SDK methods sit in the set's namespace,
+`sdk.issue.backlinks(id)` and `sdk.issue.completeUpload(id, file)`: name the
+set `<Table>Operations` or `<Table>Actions` to put them under the table's
+name. The reads and the add of a reference are MCP tools; the rest stay
+routes, since a file's bytes go to and from the bucket through a signed URL,
+which no tool call carries.
+
+Each route takes the set's clause, as a `@behaviorOperations` set's does,
+and runs as its caller, so every read keeps to what the caller may read
+([Per-record access](#per-record-access)): a row the caller cannot read is
+the 404 of one that is not there, a reference to one is left out, and only
+the owner of a row whose audience is not everyone gets `hidden`. A route
+that names a file holds it to the row its path names: another row's file is
+a 404 too. A refusal of the declaration's rules is a 422 whose `code` is
+the rule's (`table_not_allowed`, `too_many`, `media_type`, `too_large`,
+`row_full`, `mismatch`, `expired` and the rest), with its `details`.
+
+The TypeScript router runs each through `RouterOptions.orm`, the database's
+repositories, and signs the files' URLs of `RouterOptions.attachmentsBucket`;
+the generated entrypoint passes `deps.orm` and the bucket's `Deps` member.
+The Go server serves them from the module's `rowfeatures.go`, over
+`Config.DB` and `Config.Attachments`, which `AttachmentsOf(deps)` builds:
+
+```go
+issuesapi.RegisterRoutes(router, issuesapi.Config{
+	DB:          db,
+	Attachments: issuesapi.AttachmentsOf(deps),
+	Logger:      logger,
+})
+```
+
+A Rust server keeps each operation a method of the implementation's trait,
+written over the database's `references()` and `attachments()`, until its
+generator writes the handlers. The released queue's worker, which deletes an
+object once no file names it, stays the app's: it calls
+`orm.asSystem().attachments.release(message, { bucket })`.
+
 ## OpenAPI
 
 The build writes `api/<service>/openapi.json`, and every server serves it

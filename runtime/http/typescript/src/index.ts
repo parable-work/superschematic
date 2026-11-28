@@ -184,6 +184,8 @@ export {
   graphSeal,
 } from './graph-routes.js';
 export type { GraphFacade, GraphKind, GraphOperation, GraphOperationName, GraphRelation, GraphRequest, GraphSet } from './graph-routes.js';
+export { rowFeatureOperation } from './rowfeature-routes.js';
+export type { RowFeatureOperation, RowFeatureOperationName, RowFeatureRequest } from './rowfeature-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,

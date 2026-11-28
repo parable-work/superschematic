@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "api": "fixture-references-api",
+  "permissions": [
+    {
+      "name": "notes.upload",
+      "identity": false,
+      "operations": [
+        "NoteBeginUploadHandler"
+      ]
+    }
+  ]
+}

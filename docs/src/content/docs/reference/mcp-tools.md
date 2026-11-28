@@ -196,6 +196,17 @@ admits only calling services hides them with that reason, as above. A
 handle that another tool of the API takes, or one longer than 48
 characters, fails the load.
 
+An operation the build adds for a `@rowFeatureOperations` set
+([A table's references and files](/superschematic/guides/api-routes/#a-tables-references-and-files))
+is a visible tool when it reads, or adds a reference (#723): `Issue`'s
+`references`, `backlinks`, `attachments` and `addReference` are the tools
+`issue_references`, `issue_backlinks`, `issue_attachments` and
+`issue_add_reference`, each run as its caller, so an agent's reads keep to
+what it may read. The rest, a reference's removal and a file's upload,
+completion, download, filing and removal, stay routes: their `@mcp` is
+hidden with the reason, since a file's bytes go to and from the bucket
+through a signed URL, which no tool call carries.
+
 A `@tableOperation` that declares no `@mcp` is a visible tool whose handle
 is its method's name in snake case, `list_issues`, and one that declares
 no `@docs` is given them, a read and a list replaying as `read_only`

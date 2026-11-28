@@ -1,90 +1,45 @@
 /*
-The routes of an issue tracker's files and links (D154), written by hand
-over issues-db's repositories and a bucket: the generated router serves no
-references or attachments yet. Each route runs within its caller, as a
-generated router's operations do, so every read keeps to what the caller may
-see (D156).
+What the issue tracker adds to the routes issues-api's generated router
+serves (#723, D154). The router serves an issue's conversation
+(@behaviorOperations) and the references, backlinks and files of issues
+and notes (@rowFeatureOperations) through issues-db's repositories, each
+as its caller, so every read keeps to what the caller may see (D156): ask
+for an upload (POST /api/issue/{id}/files), PUT the bytes straight to the
+bucket through the URL it answers, complete it (POST
+/api/issue/{id}/files/{file}/complete), post a message whose attachment
+block names the file (POST /api/issue/{id}/comments/post), file it onto a
+note (POST /api/issue/{id}/files/{file}/file), and read the note's
+backlinks (GET /api/note/{id}/backlinks). The generated SDK has a method
+for each, and the MCP endpoint a tool for the reads and the add of a
+reference.
 
-A browser posts a file on an issue's thread in three steps: it asks for an
-upload (POST .../files), PUTs the bytes straight to the bucket through the
-URL it gets back, and completes the upload (POST .../files/:id/complete),
-which checks the bytes against the size and SHA-256 it declared. It then
-posts a message whose block names the file. Filing the file onto a note is
-one call, with no second upload, and the note then lists the issue among its
-backlinks.
-
-The imports name the package `superschematic build-all` writes for
-issues-db.
+The app gives the router its caller, the repositories and the bucket, and
+runs the FileReleased queue's worker, which deletes an object once no file
+names it. The imports name the packages `superschematic build-all` writes
+for issues-api and issues-db.
 */
 import pg from 'pg';
 import { Hono } from 'hono';
-import type { Bucket } from '@superschematic/http-runtime';
-import { withCaller } from '@superschematic/http-runtime/hono';
-import { NotFoundError, RowFeatureError, attachmentBlock } from '@superschematic/http-runtime/postgres';
+import type { Bucket, Principal, RequestContext } from '@superschematic/http-runtime';
+import { buildRouter, type Implementations } from '@schemas/issues-api-api';
 import { createOrm } from '@schemas/issues-db-types/orm';
 
 /** Who calls: the app's own session reader, which answers a user's id or none. */
 export type Caller = (request: Request) => Promise<string | undefined>;
 
-/** The routes, over pool and the bucket that holds the files. */
+/** The API's routes, over pool and the bucket that holds the files. */
 export function issuesServer(pool: pg.Pool, bucket: Bucket, caller: Caller): Hono {
-  const orm = createOrm(pool);
+  const authenticate = Object.assign(
+    async (ctx: RequestContext): Promise<Principal | null> => {
+      const subject = await caller(ctx.raw);
+      return subject ? { subject, permissions: [] } : null;
+    },
+    { readsAuthorization: true }
+  );
+  // Every operation of issues-api is generated: no implementation method.
+  const implementations: Implementations = {};
   const app = new Hono();
-
-  // Each request runs as its caller, so the repositories keep its reads to
-  // the rows it may see, and its writes record it.
-  app.use('*', async (c, next) => {
-    const subject = await caller(c.req.raw);
-    await withCaller(subject ? { subject } : null, next);
-  });
-
-  // Ask for an upload: the file's name, type, size and SHA-256.
-  app.post('/:table/:key/files', async c => {
-    const { name, mediaType, size, sha256 } = await c.req.json();
-    const { attachment, upload } = await orm.attachments.begin({ to: { table: c.req.param('table'), key: c.req.param('key') }, name, mediaType, size, sha256 }, { bucket });
-    return c.json({ file: attachment, upload }, 201);
-  });
-
-  // Complete it once the bytes are in the bucket.
-  app.post('/:table/:key/files/:id/complete', async c => {
-    const file = await orm.attachments.complete({ table: c.req.param('table'), id: c.req.param('id') }, { bucket });
-    return c.json(file);
-  });
-
-  // Post a file on an issue's thread: a message whose block names it.
-  app.post('/issues/:key/messages', async c => {
-    const { body, file } = await c.req.json();
-    const blocks = file ? [attachmentBlock(await orm.attachments.get({ table: 'Issue', id: file }))] : [];
-    const subject = (await caller(c.req.raw)) ?? '';
-    const message = await orm.withBehaviorCaller({ subject, permissions: [] }).issue.comments.post(c.req.param('key'), { body, blocks } as never);
-    return c.json(message, 201);
-  });
-
-  // File it onto another row: no second upload.
-  app.post('/:table/:key/files/:id/file', async c => {
-    const { to, move } = await c.req.json();
-    const filed = await orm.attachments.file({ table: c.req.param('table'), id: c.req.param('id'), to, move });
-    return c.json(filed, 201);
-  });
-
-  // A row's files, and a download link that asks the file's preview on its
-  // first view.
-  app.get('/:table/:key/files', async c => c.json(await orm.attachments.list({ table: c.req.param('table'), key: c.req.param('key') })));
-  app.get('/:table/:key/files/:id', async c => c.json(await orm.attachments.download({ table: c.req.param('table'), id: c.req.param('id') }, { bucket })));
-
-  // The rows that point at a row: what the caller may see, and for the
-  // owner of a private note, how many others there are.
-  app.get('/:table/:key/backlinks', async c => c.json(await orm.references.referencedBy({ table: c.req.param('table'), key: c.req.param('key') })));
-  app.post('/:table/:key/references', async c => {
-    const { to, role } = await c.req.json();
-    return c.json(await orm.references.add({ from: { table: c.req.param('table'), key: c.req.param('key') }, to, role }), 201);
-  });
-
-  app.onError((error, c) => {
-    if (error instanceof NotFoundError) return c.json({ code: 'not_found' }, 404);
-    if (error instanceof RowFeatureError) return c.json({ code: error.code, detail: error.message, ...error.details }, 422);
-    throw error;
-  });
+  app.route('/', buildRouter(implementations, { authenticate, orm: createOrm(pool), attachmentsBucket: bucket }));
   return app;
 }
 
