@@ -86,6 +86,13 @@ const (
 	siteWorkerFirst = "/__superschematic/*"
 )
 
+// siteOAuthWorkerFirst are the root OAuth and OpenID Connect discovery paths
+// (#695) that a site with an origin routes to its script before static assets.
+var siteOAuthWorkerFirst = []any{
+	"/.well-known/oauth-*",
+	"/.well-known/openid-configuration*",
+}
+
 // bindingAssets is the binding type of a Worker's static assets.
 const bindingAssets = "assets"
 
@@ -156,6 +163,7 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 		for _, api := range d.Site.Origin {
 			workerFirst = append(workerFirst, api.Path, api.Path+"/*")
 		}
+		workerFirst = append(workerFirst, siteOAuthWorkerFirst...)
 	}
 	version := map[string]any{
 		"mainModule": SiteModule,

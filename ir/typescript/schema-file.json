@@ -177,9 +177,34 @@
       },
       "type": "object"
     },
+    "BehaviorOperationMCP": {
+      "additionalProperties": false,
+      "properties": {
+        "hidden": {
+          "default": false,
+          "type": "boolean"
+        },
+        "invocationPolicy": {
+          "default": "",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "type": "string"
+        },
+        "writeInvocationPolicy": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "BehaviorOperationsConfig": {
       "additionalProperties": false,
       "properties": {
+        "mcp": {
+          "$ref": "#/$defs/BehaviorOperationsMCP"
+        },
         "type": {
           "type": "string"
         }
@@ -187,6 +212,42 @@
       "required": [
         "type"
       ],
+      "type": "object"
+    },
+    "BehaviorOperationsMCP": {
+      "additionalProperties": false,
+      "properties": {
+        "behaviors": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BehaviorOperationMCP"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "hidden": {
+          "default": false,
+          "type": "boolean"
+        },
+        "invocationPolicy": {
+          "default": "",
+          "type": "string"
+        },
+        "operations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BehaviorOperationMCP"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "reason": {
+          "default": "",
+          "type": "string"
+        },
+        "writeInvocationPolicy": {
+          "default": "",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "BehaviorRef": {

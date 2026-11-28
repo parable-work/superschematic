@@ -215,15 +215,15 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:98b8d45510b964469bc6600acbcf77f677f0f6c56a801302b6244f77f2a28bc6',
+    inputSchemaDigest: 'sha256:39053b080358240ebc9077d4cbf6732437c229ec200527b4945de3130649f629',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        cursor: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        state: {"description":"A string value","minLength":1,"type":["string","null"]},
+        cursor: {"description":"The next of the previous page.","type":["string","null"]},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"At most this many sign-offs; 50 when absent.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        state: {"description":"Only sign-offs for this state.","minLength":1,"type":["string","null"]},
       },
       required: ['id']
     },
@@ -257,15 +257,15 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:056da1f3d069c7f2238a6468441bad86d0fcc00993b7088ed3c5aa5dd5432729',
+    inputSchemaDigest: 'sha256:a602806881a156d61b785c475791e546265373c51094e161c885e99f2ba7b9d1',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
-        state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
-        version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        note: {"description":"Why, for the others.","maxLength":10000,"type":["string","null"]},
+        state: {"description":"The gated state to sign off for.","enum":["done","proving"],"type":"string"},
+        version: {"description":"The row's version the signer read, the version a write through the core is held to. Needed on a pinned gate; on any gate, one that is not the row's version is vetoed stale before anything else is checked. A table's alone: an engine type refuses it.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'state']
     },
@@ -299,13 +299,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:01cc93a2bb0bd31cdfafcf17fe9c3cdf6b78ef98f68e43efd193e53c7c201fcc',
+    inputSchemaDigest: 'sha256:ad607bb445543d5571de8aeb01243126c9b8c7ea55a2eddb9e48d00b95c2c052',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        state: {"description":"The gated state whose sign-off to withdraw.","enum":["done","proving"],"type":"string"},
       },
       required: ['id', 'state']
     },
@@ -339,14 +339,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:3c71d81fb875e5522353fe6683ce0716d19705fcabeacc0cd28e65f196702a0e',
+    inputSchemaDigest: 'sha256:710b72f27863ae08bd385db1c2dcc1ce60c646fb806b32cac6339d94d09c80bb',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        from: {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        to: {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled"],"type":"string"},
+        from: {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        to: {"description":"The state to move to.","enum":["planned","working","proving","done","cancelled"],"type":"string"},
       },
       required: ['id', 'to']
     },
@@ -403,10 +403,10 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        cursor: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        state: {"description":"A string value","minLength":1,"type":["string","null"]},
+        cursor: {"description":"The next of the previous page.","type":["string","null"]},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"At most this many sign-offs; 50 when absent.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        state: {"description":"Only sign-offs for this state.","minLength":1,"type":["string","null"]},
       },
       required: ['id']
     }
@@ -418,10 +418,10 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
-        state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
-        version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        note: {"description":"Why, for the others.","maxLength":10000,"type":["string","null"]},
+        state: {"description":"The gated state to sign off for.","enum":["done","proving"],"type":"string"},
+        version: {"description":"The row's version the signer read, the version a write through the core is held to. Needed on a pinned gate; on any gate, one that is not the row's version is vetoed stale before anything else is checked. A table's alone: an engine type refuses it.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'state']
     }
@@ -433,8 +433,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        state: {"description":"The gated state whose sign-off to withdraw.","enum":["done","proving"],"type":"string"},
       },
       required: ['id', 'state']
     }
@@ -446,9 +446,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        from: {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        to: {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled"],"type":"string"},
+        from: {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        to: {"description":"The state to move to.","enum":["planned","working","proving","done","cancelled"],"type":"string"},
       },
       required: ['id', 'to']
     }
@@ -481,10 +481,10 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        cursor: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        state: {"description":"A string value","minLength":1,"type":["string","null"]},
+        cursor: {"description":"The next of the previous page.","type":["string","null"]},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"At most this many sign-offs; 50 when absent.","maximum":500,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        state: {"description":"Only sign-offs for this state.","minLength":1,"type":["string","null"]},
       },
       required: ['id']
     }
@@ -496,10 +496,10 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        note: {"description":"A string value","maxLength":10000,"type":["string","null"]},
-        state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
-        version: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        note: {"description":"Why, for the others.","maxLength":10000,"type":["string","null"]},
+        state: {"description":"The gated state to sign off for.","enum":["done","proving"],"type":"string"},
+        version: {"description":"The row's version the signer read, the version a write through the core is held to. Needed on a pinned gate; on any gate, one that is not the row's version is vetoed stale before anything else is checked. A table's alone: an engine type refuses it.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'state']
     }
@@ -511,8 +511,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        state: {"description":"A TaskApprovalsGate value","enum":["done","proving"],"type":"string"},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        state: {"description":"The gated state whose sign-off to withdraw.","enum":["done","proving"],"type":"string"},
       },
       required: ['id', 'state']
     }
@@ -524,9 +524,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        from: {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        to: {"description":"A TaskStatusState value","enum":["planned","working","proving","done","cancelled"],"type":"string"},
+        from: {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["planned","working","proving","done","cancelled",null],"type":["string","null"]},
+        id: {"description":"The key of the Task row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        to: {"description":"The state to move to.","enum":["planned","working","proving","done","cancelled"],"type":"string"},
       },
       required: ['id', 'to']
     }

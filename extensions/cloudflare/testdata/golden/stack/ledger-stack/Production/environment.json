@@ -450,19 +450,16 @@
           "modules": [
             {
               "contentFile": "artifacts/finances-api-embed-line-items/{bundle-digest}/main.js",
-              "contentSha256": "{bundle-sha256:main.js}",
               "contentType": "application/javascript+module",
               "name": "main.js"
             },
             {
               "contentFile": "artifacts/finances-api-embed-line-items/{bundle-digest}/main.js.map",
-              "contentSha256": "{bundle-sha256:main.js.map}",
               "contentType": "application/source-map",
               "name": "main.js.map"
             },
             {
               "contentFile": "artifacts/finances-api-embed-line-items/{bundle-digest}/superscalar_wasm_bg.wasm",
-              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
               "contentType": "application/wasm",
               "name": "superscalar_wasm_bg.wasm"
             }
@@ -740,19 +737,16 @@
           "modules": [
             {
               "contentFile": "artifacts/finances-api-sync-all-plaid-items/{bundle-digest}/main.js",
-              "contentSha256": "{bundle-sha256:main.js}",
               "contentType": "application/javascript+module",
               "name": "main.js"
             },
             {
               "contentFile": "artifacts/finances-api-sync-all-plaid-items/{bundle-digest}/main.js.map",
-              "contentSha256": "{bundle-sha256:main.js.map}",
               "contentType": "application/source-map",
               "name": "main.js.map"
             },
             {
               "contentFile": "artifacts/finances-api-sync-all-plaid-items/{bundle-digest}/superscalar_wasm_bg.wasm",
-              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
               "contentType": "application/wasm",
               "name": "superscalar_wasm_bg.wasm"
             }
@@ -940,19 +934,16 @@
           "modules": [
             {
               "contentFile": "artifacts/finances-api-sync-plaid-item/{bundle-digest}/main.js",
-              "contentSha256": "{bundle-sha256:main.js}",
               "contentType": "application/javascript+module",
               "name": "main.js"
             },
             {
               "contentFile": "artifacts/finances-api-sync-plaid-item/{bundle-digest}/main.js.map",
-              "contentSha256": "{bundle-sha256:main.js.map}",
               "contentType": "application/source-map",
               "name": "main.js.map"
             },
             {
               "contentFile": "artifacts/finances-api-sync-plaid-item/{bundle-digest}/superscalar_wasm_bg.wasm",
-              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
               "contentType": "application/wasm",
               "name": "superscalar_wasm_bg.wasm"
             }
@@ -1200,19 +1191,16 @@
           "modules": [
             {
               "contentFile": "artifacts/finances-api/{bundle-digest}/main.js",
-              "contentSha256": "{bundle-sha256:main.js}",
               "contentType": "application/javascript+module",
               "name": "main.js"
             },
             {
               "contentFile": "artifacts/finances-api/{bundle-digest}/main.js.map",
-              "contentSha256": "{bundle-sha256:main.js.map}",
               "contentType": "application/source-map",
               "name": "main.js.map"
             },
             {
               "contentFile": "artifacts/finances-api/{bundle-digest}/superscalar_wasm_bg.wasm",
-              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
               "contentType": "application/wasm",
               "name": "superscalar_wasm_bg.wasm"
             }

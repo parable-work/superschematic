@@ -63,3 +63,29 @@ func TestParseOutputsReadsTheMCPConfirmationKey(t *testing.T) {
 		t.Errorf("a key without mcp: error = %v, want %q", err, want)
 	}
 }
+
+func TestParseOutputsReadsMCPInstructions(t *testing.T) {
+	enabled := map[string]any{"enabled": true}
+	parse := func(api map[string]any) (*Outputs, error) {
+		return ParseOutputs(map[string]any{"api": api, "types": map[string]any{"typescript": enabled}}, coreOutputRegistry(t))
+	}
+	const primer = "Amounts are integer cents; outflows are negative."
+	outputs, err := parse(map[string]any{"enabled": true, "language": "TYPESCRIPT", "mcp": true, "mcpInstructions": primer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := outputs.MCPInstructions(); got != primer {
+		t.Errorf("MCPInstructions() = %q, want %q", got, primer)
+	}
+	if got := (&Outputs{}).MCPInstructions(); got != "" {
+		t.Errorf("no API instructions = %q", got)
+	}
+	for _, blank := range []string{"", "   \n\t "} {
+		if _, err := parse(map[string]any{"enabled": true, "language": "TYPESCRIPT", "mcp": true, "mcpInstructions": blank}); err == nil || !strings.Contains(err.Error(), "outputs.api.mcpInstructions must be a non-empty string") {
+			t.Errorf("blank instructions %q: err = %v", blank, err)
+		}
+	}
+	if _, err := parse(map[string]any{"enabled": true, "language": "TYPESCRIPT", "mcpInstructions": primer}); err == nil || !strings.Contains(err.Error(), "outputs.api.mcpInstructions is set and outputs.api.mcp is off") {
+		t.Errorf("instructions without mcp: err = %v", err)
+	}
+}

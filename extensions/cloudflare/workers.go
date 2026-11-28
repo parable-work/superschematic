@@ -260,10 +260,9 @@ func bundleVersion(ctx registry.PlatformContext, v accountValues) (map[string]an
 	modules := make([]any, 0, len(BundleModules))
 	for _, m := range BundleModules {
 		modules = append(modules, map[string]any{
-			"name":          m.Name,
-			"contentType":   m.ContentType,
-			"contentFile":   ir.BundlePath(d.Name, m.Name),
-			"contentSha256": ir.BundleFileToken(m.Name),
+			"name":        m.Name,
+			"contentType": m.ContentType,
+			"contentFile": ir.BundlePath(d.Name, m.Name),
 		})
 	}
 	date := settingString(d.Settings, "compatibilityDate", CompatibilityDate)
@@ -343,7 +342,7 @@ func configBindings(ctx registry.PlatformContext, v accountValues) ([]any, error
 	for _, b := range d.Bindings {
 		switch b.Source {
 		case ir.BindingLiteral:
-			value, err := literalString(b.Value)
+			value, err := literalValue(b.Value)
 			if err != nil {
 				return nil, fmt.Errorf("binding %s: %w", b.Field, err)
 			}
@@ -449,14 +448,17 @@ func resourceBinding(field string, value any) (map[string]any, error) {
 	return nil, bad(fmt.Sprintf("binding is %T, neither a service binding nor an R2 binding's name", m["binding"]))
 }
 
-// literalString is a literal binding's value as a plain_text binding's
-// text: a string as it is, a number or a boolean in its JSON form.
-func literalString(v any) (string, error) {
-	if s, ok := v.(string); ok {
-		return s, nil
+// literalValue is a literal binding's value as a plain_text binding's
+// text: a string or reference expression as it is, a number or a boolean
+// in its JSON form.
+func literalValue(v any) (any, error) {
+	switch v := v.(type) {
+	case string, ir.Parameter, ir.Output, ir.Concat:
+		return v, nil
+	default:
+		data, err := json.Marshal(v)
+		return string(data), err
 	}
-	data, err := json.Marshal(v)
-	return string(data), err
 }
 
 func settingString(settings map[string]any, key, def string) string {

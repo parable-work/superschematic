@@ -1,14 +1,14 @@
 [
   {
     "name": "grid.saveGrid",
-    "inputSchemaDigest": "sha256:deb35542dbb844674affc6afe14047cb21fc10c8373e433e6025eca6ff936018",
+    "inputSchemaDigest": "sha256:f3fbfcc0b76f6de57bd68a9cb4bad19e9abf321e5732459809eb78e18cc51b69",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
       "properties": {
         "labels": {
           "type": "array",
-          "description": "Array of arrays of string values",
+          "description": "Cell labels, one inner list per row.",
           "items": {
             "type": "array",
             "description": "Array of string values",
@@ -20,7 +20,7 @@
         },
         "polygons": {
           "type": "array",
-          "description": "Array of arrays of Point values",
+          "description": "Polygons, each a list of its points.",
           "items": {
             "type": "array",
             "description": "Array of Point values",
@@ -47,7 +47,7 @@
         },
         "shades": {
           "type": "array",
-          "description": "Array of arrays of Shade values",
+          "description": "Cell shades, one inner list per row.",
           "items": {
             "type": "array",
             "description": "Array of Shade values",
@@ -62,7 +62,7 @@
           }
         },
         "weights": {
-          "description": "Array of arrays of number values",
+          "description": "Weight vectors in batches; absent when the grid is unweighted.",
           "items": {
             "type": "array",
             "description": "Array of number values",

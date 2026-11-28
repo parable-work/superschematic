@@ -18,3 +18,7 @@
 import type { McpRouteTool } from '{{ .RuntimePackage }}/mcp';
 
 export const mcpTools: readonly McpRouteTool[] = {{ .MCP.ToolsLiteral }};
+{{- if .MCP.Instructions }}
+
+export const mcpInstructions: string = {{ tsString .MCP.Instructions }};
+{{- end }}

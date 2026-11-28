@@ -246,19 +246,16 @@
           "modules": [
             {
               "contentFile": "artifacts/reviews/{bundle-digest}/main.js",
-              "contentSha256": "{bundle-sha256:main.js}",
               "contentType": "application/javascript+module",
               "name": "main.js"
             },
             {
               "contentFile": "artifacts/reviews/{bundle-digest}/main.js.map",
-              "contentSha256": "{bundle-sha256:main.js.map}",
               "contentType": "application/source-map",
               "name": "main.js.map"
             },
             {
               "contentFile": "artifacts/reviews/{bundle-digest}/superscalar_wasm_bg.wasm",
-              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
               "contentType": "application/wasm",
               "name": "superscalar_wasm_bg.wasm"
             }

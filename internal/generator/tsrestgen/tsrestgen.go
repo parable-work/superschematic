@@ -1165,6 +1165,9 @@ type Options struct {
 	// MCP is outputs.api.mcp: the router serves the API's visible @mcp
 	// tools at POST /api/mcp (D81).
 	MCP bool
+	// MCPInstructions is outputs.api.mcpInstructions: domain guidance sent
+	// to MCP clients on initialize unless overridden in RouterOptions.mcp.
+	MCPInstructions string
 }
 
 // Generate produces the TypeScript API package metadata from the endpoints
@@ -1380,6 +1383,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		if err != nil {
 			return nil, err
 		}
+		mcp.Instructions = opts.MCPInstructions
 		output.MCP = mcp
 	}
 	return output, nil

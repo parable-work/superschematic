@@ -753,7 +753,8 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 		Clock:        r.Options.Clock,
 		AuthDB:       authDB,
 		// The router serves the visible @mcp tools at POST /api/mcp (D81).
-		MCP: r.Outputs.APIEnabled() && r.Outputs.API.MCP,
+		MCP:             r.Outputs.APIEnabled() && r.Outputs.API.MCP,
+		MCPInstructions: r.Outputs.MCPInstructions(),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
@@ -1693,7 +1694,8 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 		AuthDB:       authDB,
 		// The router serves the visible @mcp tools at POST /api/mcp (D81,
 		// D116).
-		MCP: r.Outputs.APIEnabled() && r.Outputs.API.MCP,
+		MCP:             r.Outputs.APIEnabled() && r.Outputs.API.MCP,
+		MCPInstructions: r.Outputs.MCPInstructions(),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)

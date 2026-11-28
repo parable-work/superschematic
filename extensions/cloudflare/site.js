@@ -23,8 +23,15 @@
 // off, the query kept, the browser's Host on the URL a binding carries,
 // and X-Forwarded-Host, -Proto, -Prefix and -For set, as stack dev's proxy
 // forwards it (D82); a redirect within the API's routes gets the path back.
+// Root OAuth and OpenID Connect discovery paths (/.well-known/oauth-* and
+// /.well-known/openid-configuration*, #695) go to the origin API they name
+// (or the origin API that answers them for bare discovery paths) with the
+// well-known path preserved and X-Forwarded-Prefix set to that API's path.
 
 const CONFIG_PATH = '/__superschematic/config.json';
+const WELL_KNOWN_PREFIX = '/.well-known/';
+const WELL_KNOWN_OAUTH_PREFIX = '/.well-known/oauth-';
+const WELL_KNOWN_OIDC_PATH = '/.well-known/openid-configuration';
 
 /** The APIs of the site's origin, read from SITE_ORIGIN once per isolate. */
 let origin;
@@ -32,8 +39,12 @@ let origin;
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const api = originAPI(env, url.pathname);
-    if (api) return forward(request, env, url, api);
+    const apis = originAPIs(env);
+    const api = matchAPI(apis, url.pathname);
+    if (api) return forward(request, env, url, api, true);
+    if (apis.length > 0 && isWellKnownOAuth(url.pathname)) {
+      return forwardWellKnown(request, env, url, apis);
+    }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return text(405, 'method not allowed', { allow: 'GET, HEAD' });
     }
@@ -52,16 +63,55 @@ export default {
   },
 };
 
-/** The API of the site's origin whose path holds pathname, or undefined. */
-function originAPI(env, pathname) {
-  if (!env.SITE_ORIGIN) return undefined;
+/** The APIs of the site's origin, or an empty list when SITE_ORIGIN is unset. */
+function originAPIs(env) {
+  if (!env.SITE_ORIGIN) return [];
   origin ??= JSON.parse(env.SITE_ORIGIN);
-  return origin.find((api) => pathname === api.path || pathname.startsWith(`${api.path}/`));
+  return origin;
 }
 
-/** The request forwarded to the API's server, the API's path taken off. */
-async function forward(request, env, url, api) {
-  const rest = url.pathname.slice(api.path.length) || '/';
+/** The API of apis whose path holds pathname, or undefined. */
+function matchAPI(apis, pathname) {
+  return apis.find((api) => pathname === api.path || pathname.startsWith(`${api.path}/`));
+}
+
+/** Whether pathname is an OAuth or OpenID Connect discovery path at the origin root (#695). */
+function isWellKnownOAuth(pathname) {
+  return (
+    pathname.startsWith(WELL_KNOWN_OAUTH_PREFIX) ||
+    pathname === WELL_KNOWN_OIDC_PATH ||
+    pathname.startsWith(`${WELL_KNOWN_OIDC_PATH}/`)
+  );
+}
+
+/** The path inserted after /.well-known/<document>, or '' for a bare discovery path. */
+function wellKnownSuffix(pathname) {
+  const slash = pathname.indexOf('/', WELL_KNOWN_PREFIX.length);
+  return slash < 0 ? '' : pathname.slice(slash);
+}
+
+/** Forwards a root OAuth/OIDC discovery request to the origin API that serves it, keeping the path intact. */
+async function forwardWellKnown(request, env, url, apis) {
+  const suffix = wellKnownSuffix(url.pathname);
+  if (suffix !== '') {
+    const api = matchAPI(apis, suffix);
+    return api ? forward(request, env, url, api, false) : text(404, 'not found');
+  }
+  if (apis.length === 1 || (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'OPTIONS')) {
+    return forward(request, env, url, apis[0], false);
+  }
+  let last;
+  for (const api of apis) {
+    const response = await forward(request, env, url, api, false);
+    if (response.status !== 404) return response;
+    last = response;
+  }
+  return last ?? text(404, 'not found');
+}
+
+/** The request forwarded to the API's server, with the API's path taken off when strip is true. */
+async function forward(request, env, url, api, strip = true) {
+  const rest = strip ? url.pathname.slice(api.path.length) || '/' : url.pathname;
   const target = new URL(api.binding ? url.origin : api.url.replace(/\/$/u, '') + rest);
   if (api.binding) target.pathname = rest;
   target.search = url.search;
@@ -84,8 +134,10 @@ async function forward(request, env, url, api) {
 
 /**
  * A redirect's location with the API's path put back, when it points
- * within the API's routes: a path-absolute location, or one on the site's
- * host or the server's. Any other location is left as it is.
+ * within the API's routes without already carrying prefix: a path-absolute
+ * location, or one on the upstream server's host when that differs from the
+ * site's. A location already under prefix, or an absolute URL on the site's
+ * own host or any other host, is left as it is.
  */
 function prefixed(location, prefix, site, target) {
   let u;
@@ -94,8 +146,15 @@ function prefixed(location, prefix, site, target) {
   } catch {
     return location;
   }
+  const hasPrefix = (p) => p === prefix || p.startsWith(`${prefix}/`);
   const pathAbsolute = location.startsWith('/') && !location.startsWith('//');
-  if (!pathAbsolute && u.host !== site.host && u.host !== target.host) return location;
+  if (pathAbsolute) {
+    if (hasPrefix(u.pathname)) return location;
+    return prefix + u.pathname + u.search + u.hash;
+  }
+  const hasOrigin = /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(location) || location.startsWith('//');
+  if (!hasOrigin || u.host === site.host || u.host !== target.host) return location;
+  if (hasPrefix(u.pathname)) return u.pathname + u.search + u.hash;
   return prefix + u.pathname + u.search + u.hash;
 }
 

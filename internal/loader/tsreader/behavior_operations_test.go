@@ -143,7 +143,7 @@ export abstract class OrderActions {}
 @behaviorOperations()
 export abstract class OrderActions {}
 `,
-			want: []string{`@behaviorOperations takes one argument, the table whose behaviors' operations the set serves, imported from the API's database: @behaviorOperations(Order)`},
+			want: []string{`@behaviorOperations takes the table whose behaviors' operations the set serves, imported from the API's database, and optional options`},
 		},
 		{
 			name: "a set-level @auth on another set",

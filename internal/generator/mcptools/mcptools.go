@@ -50,6 +50,9 @@ type Endpoint struct {
 	// confirms the call (D93), whose confirmations it signs with the
 	// secret outputs.api.mcpConfirmationKey names.
 	Confirming []string
+	// Instructions is outputs.api.mcpInstructions: domain guidance returned
+	// to MCP clients on initialize unless overridden at runtime.
+	Instructions string
 }
 
 // Tool is one tool as a router's table declares it, the runtimes' route

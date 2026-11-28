@@ -267,8 +267,11 @@ func TestWorkerNodes(t *testing.T) {
 	for _, m := range version.Properties["modules"].([]any) {
 		m := m.(map[string]any)
 		modules = append(modules, m["name"].(string))
-		if m["contentFile"] != "artifacts/shop-storefront/{bundle-digest}/"+m["name"].(string) || m["contentSha256"] != "{bundle-sha256:"+m["name"].(string)+"}" {
+		if m["contentFile"] != "artifacts/shop-storefront/{bundle-digest}/"+m["name"].(string) {
 			t.Errorf("module %v does not read its file from the bundle", m)
+		}
+		if _, hasSha := m["contentSha256"]; hasSha {
+			t.Errorf("module %v must not set read-only contentSha256", m)
 		}
 	}
 	if !slices.Equal(modules, []string{"main.js", "main.js.map", "superscalar_wasm_bg.wasm"}) {

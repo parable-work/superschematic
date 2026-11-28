@@ -34,6 +34,9 @@ type GoMCP struct {
 	// key the endpoint signs confirmations with: the @envVars secret
 	// outputs.api.mcpConfirmationKey names; empty when no tool asks.
 	ConfirmationKey string
+	// Instructions is outputs.api.mcpInstructions: domain guidance returned
+	// to MCP clients on initialize unless Config.MCP.Instructions sets one.
+	Instructions string
 }
 
 // GoMCPTool is one tool of mcp.go: its handle and its route's endpoint.

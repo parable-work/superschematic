@@ -111,6 +111,12 @@ type Service struct {
 	// binds its identity config field (ir.IdentityConfigField).
 	Identity bool
 
+	// OAuth reports that an API service's @userSessions declares oauth
+	// (#695): stack lowering populates oauth.publicBaseUrl in its identity
+	// config field (ir.IdentityConfigField) from its site origin or public
+	// address unless the environment sets it explicitly.
+	OAuth bool
+
 	// ClientVersions reports that an API service's config says
 	// clientVersions (D143): each server that serves it has the optional
 	// config field ir.MinClientVersionsSetting, which an environment's env

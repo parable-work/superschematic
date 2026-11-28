@@ -288,7 +288,7 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 	for _, b := range d.Bindings {
 		switch b.Source {
 		case ir.BindingLiteral:
-			value, err := envString(b.Value)
+			value, err := envValue(b.Value)
 			if err != nil {
 				return registry.Lowered{}, workload{}, fmt.Errorf("binding %s: %w", b.Field, err)
 			}
@@ -403,12 +403,14 @@ func containsValue(list []any, v any) bool {
 
 // envString is a literal binding's value as an environment variable's: a
 // string as it is, a number or a boolean in its JSON form.
-func envString(v any) (string, error) {
-	if s, ok := v.(string); ok {
-		return s, nil
+func envValue(v any) (any, error) {
+	switch v := v.(type) {
+	case string, ir.Parameter, ir.Output, ir.Concat:
+		return v, nil
+	default:
+		data, err := json.Marshal(v)
+		return string(data), err
 	}
-	data, err := json.Marshal(v)
-	return string(data), err
 }
 
 func settingString(settings map[string]any, key, def string) string {

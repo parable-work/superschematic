@@ -53,7 +53,7 @@ func TestOriginOnWorkers(t *testing.T) {
 		t.Fatal(errs)
 	}
 	version := node(t, env, "storefront-web.version")
-	if got, want := jsonOf(t, version.Properties["assets"].(map[string]any)["config"]), `{"htmlHandling":"none","notFoundHandling":"none","runWorkerFirst":["/__superschematic/*","/api/shop-storefront","/api/shop-storefront/*"]}`; got != want {
+	if got, want := jsonOf(t, version.Properties["assets"].(map[string]any)["config"]), `{"htmlHandling":"none","notFoundHandling":"none","runWorkerFirst":["/__superschematic/*","/api/shop-storefront","/api/shop-storefront/*","/.well-known/oauth-*","/.well-known/openid-configuration*"]}`; got != want {
 		t.Errorf("the version's assets' config is\n%s, want\n%s", got, want)
 	}
 	if got, want := jsonOf(t, version.Properties["bindings"]), `[{"name":"ASSETS","type":"assets"},`+

@@ -75,6 +75,11 @@ type Param struct {
 	// is; the servers read it with the page and leave it out of the
 	// implementation's arguments (ArgQueryParams).
 	Sort *SortParam
+
+	// Description is the reader-facing description of the parameter or
+	// field: @purpose when set, else description or comment (and for a
+	// field of a @source type, falling back to the source table's field).
+	Description string
 }
 
 // SortParam is a sort argument's order (D60, amended): the fields it
@@ -1806,6 +1811,7 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		ValueRules:      arg.ValueRules,
 		Reference:       resolveReference(m.schema, m.dependencies, arg.References),
 		Search:          arg.Search,
+		Description:     strings.TrimSpace(codegen.DocText(arg.Description, arg.Comment)),
 	}
 	m.applyGoMapping(&param, arg.TypeRef.Name)
 	return param, nil
@@ -1886,7 +1892,7 @@ func (m *typeMapper) inputTypeFields(inputTypeName string) []Param {
 }
 
 // fieldsFromTypeDef maps a type's fields to Params, with their shape,
-// Validate<> bounds and reference.
+// Validate<> bounds, reference and reader-facing description.
 func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
@@ -1900,11 +1906,65 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 			IsMap:           field.TypeRef.IsMap,
 			ValueRules:      field.ValueRules,
 			Reference:       m.fieldReference(typeDef, field),
+			Description:     m.fieldDescription(typeDef, field),
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)
 	}
 	return fields
+}
+
+// fieldDocText selects a field's reader-facing text: @purpose first, then
+// description, then comment.
+func fieldDocText(field *ir.FieldDef) string {
+	if field == nil {
+		return ""
+	}
+	if purpose := strings.TrimSpace(field.Purpose); purpose != "" {
+		return purpose
+	}
+	return strings.TrimSpace(codegen.DocText(field.Description, field.Comment))
+}
+
+// fieldDescription returns field's own doc text, or for a field of a @source
+// type without its own doc text, the matching field's (or to-one relation's)
+// doc text on the source table.
+func (m *typeMapper) fieldDescription(holder *ir.TypeDef, field *ir.FieldDef) string {
+	if doc := fieldDocText(field); doc != "" {
+		return doc
+	}
+	if holder == nil || holder.Source == nil || field == nil {
+		return ""
+	}
+	src := m.sourceTypeDef(holder.Source.Target)
+	if src == nil {
+		return ""
+	}
+	for _, sf := range src.Fields {
+		if sf != nil && sf.Name == field.Name {
+			return fieldDocText(sf)
+		}
+	}
+	if rel, ok := ir.RelationKey(src, field); ok {
+		return fieldDocText(rel)
+	}
+	return ""
+}
+
+// sourceTypeDef looks up a @source target ("service.Type" or "Type") across
+// the schema and its dependencies.
+func (m *typeMapper) sourceTypeDef(target string) *ir.TypeDef {
+	service, name, ok := strings.Cut(target, ".")
+	if !ok {
+		return m.schema.Types[target]
+	}
+	if service == m.schema.Name {
+		return m.schema.Types[name]
+	}
+	if dep := m.dependencies[service]; dep != nil {
+		return dep.Types[name]
+	}
+	return nil
 }
 
 // extractFileUploadFields extracts file upload fields from an input type. A

@@ -37,6 +37,63 @@ type BehaviorOperationsConfig struct {
 	// its name as the API imports it: a table of the API's database
 	// (Schema.Database) one of whose fields is a behavior.
 	Type string `json:"type" yaml:"type"`
+
+	// MCP overrides MCP visibility and invocation policy for the
+	// operations the set adds. More specific entries replace less specific
+	// ones (Operations > Behaviors > set-level), so a set or behavior can
+	// be hidden while selectively exposing individual operations.
+	MCP *BehaviorOperationsMCP `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+}
+
+// BehaviorOperationsMCP configures MCP visibility and invocation policy for
+// a @behaviorOperations set.
+type BehaviorOperationsMCP struct {
+	// Hidden hides every operation in the set from MCP unless overridden
+	// by a visible entry in Behaviors or Operations. Requires Reason.
+	Hidden bool `json:"hidden,omitempty" yaml:"hidden,omitempty"`
+
+	// Reason states why the set's operations are hidden from MCP.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+
+	// InvocationPolicy sets the invocation policy for every visible
+	// operation in the set.
+	InvocationPolicy string `json:"invocationPolicy,omitempty" yaml:"invocationPolicy,omitempty"`
+
+	// WriteInvocationPolicy sets the invocation policy for visible write
+	// operations in the set (taking precedence over set-level
+	// InvocationPolicy for writes while reads keep InvocationPolicy or the
+	// behavior's default).
+	WriteInvocationPolicy string `json:"writeInvocationPolicy,omitempty" yaml:"writeInvocationPolicy,omitempty"`
+
+	// Behaviors overrides MCP settings for one behavior use of the table,
+	// keyed by the use's member name (behaviorlayout.UseMember, e.g.
+	// "comments", "recurrence", "status").
+	Behaviors map[string]*BehaviorOperationMCP `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
+
+	// Operations overrides MCP settings for individual operations, keyed
+	// by "<use>.<op>" (e.g. "comments.list") or the expanded operation
+	// name (e.g. "commentsList").
+	Operations map[string]*BehaviorOperationMCP `json:"operations,omitempty" yaml:"operations,omitempty"`
+}
+
+// BehaviorOperationMCP overrides MCP visibility or invocation policy for a
+// behavior use or individual behavior operation.
+type BehaviorOperationMCP struct {
+	// Hidden hides matching operation(s) from MCP when true. A non-nil
+	// entry with Hidden false explicitly exposes operation(s) even when
+	// the parent set or behavior is hidden.
+	Hidden bool `json:"hidden,omitempty" yaml:"hidden,omitempty"`
+
+	// Reason states why the operation(s) are hidden when Hidden is true.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+
+	// InvocationPolicy sets the invocation policy for visible operation(s).
+	InvocationPolicy string `json:"invocationPolicy,omitempty" yaml:"invocationPolicy,omitempty"`
+
+	// WriteInvocationPolicy sets the invocation policy for visible write
+	// operations of a behavior use (allowed in Behaviors, refused in
+	// Operations).
+	WriteInvocationPolicy string `json:"writeInvocationPolicy,omitempty" yaml:"writeInvocationPolicy,omitempty"`
 }
 
 // BehaviorOperation marks an operation the loader added for a

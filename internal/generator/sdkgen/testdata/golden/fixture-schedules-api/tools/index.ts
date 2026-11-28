@@ -228,13 +228,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3',
+    inputSchemaDigest: 'sha256:257c5ab1acbdb727f8f834112135587cd419dc52b7273525861aba35be4b6966',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to cancel.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     },
@@ -272,13 +272,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:13a101f4da5d4a069cda653bbba9c60545f69d0a35f8a6b6c568afaca0f5723c',
+    inputSchemaDigest: 'sha256:7c7c9dfe12660feb26751ab19e99d1211d41f6eab2e092fc087f1bcaa73d3509',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":["string","null"]},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"Only this schedule.","minLength":1,"type":["string","null"]},
       },
       required: ['id']
     },
@@ -312,13 +312,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3',
+    inputSchemaDigest: 'sha256:eeb0614345a1e0fbd440cd7f7135631618a9951632fddfe1974b22b031e81107',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to pause.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     },
@@ -352,16 +352,16 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:d5011b7e316721ca89a6f273f7685fc5d49e1426497babde76e1a75534cc655a',
+    inputSchemaDigest: 'sha256:38a8872fb4c31e00ed5620de3fb1f17d3144a3b810bc543b2389d22a11b6d936',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        attempt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
-        outcome: {"description":"A ProblemSchedulesOutcome value","enum":["told","resumed","held","missed"],"type":"string"},
-        run: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        attempt: {"description":"The attempt of the run, its number in the event run's payload; when given, a report of an attempt other than the latest is answered unchanged.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule whose run it reports.","minLength":1,"type":"string"},
+        outcome: {"description":"One of the config's outcomes.","enum":["told","resumed","held","missed"],"type":"string"},
+        run: {"description":"The run, its number in the event run's payload.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'name', 'outcome', 'run']
     },
@@ -395,13 +395,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f49d563a9fab5a0ce71099dace2e97c754d44fbfb9211635f4507650490487d3',
+    inputSchemaDigest: 'sha256:ba3e725dd07f43b60d267d581cdf7de340832db1b4b81844c03b22fa7e9411b2',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to resume.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     },
@@ -435,17 +435,17 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f6c4ec4020e6b835d383486c31d1568ac9ffced7c48c9c15c2063264ae378e69',
+    inputSchemaDigest: 'sha256:eecd7918edeae8a3ae5b699a0b466835b91e1b358cc8bf5d43c9582b88545b72',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        after: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        cron: {"description":"A string value","minLength":1,"type":["string","null"]},
-        every: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","maxLength":64,"pattern":"^[A-Za-z][A-Za-z0-9_-]*$","type":"string"},
-        timeZone: {"description":"A string value","minLength":1,"type":["string","null"]},
+        after: {"description":"One run this many milliseconds from now.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        cron: {"description":"A run at each time this cron line names: five fields, minute hour day-of-month month day-of-week, or a macro: @yearly, @annually, @monthly, @weekly, @daily, @midnight or @hourly.","minLength":1,"type":["string","null"]},
+        every: {"description":"A run at each whole interval of this many milliseconds from now.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule's name: a letter, then letters, digits, _ and -.","maxLength":64,"pattern":"^[A-Za-z][A-Za-z0-9_-]*$","type":"string"},
+        timeZone: {"description":"The IANA time zone the cron line is read in; the config's timeZone, else UTC, when absent. A cron schedule's alone.","minLength":1,"type":["string","null"]},
       },
       required: ['id', 'name']
     },
@@ -479,14 +479,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:7bafe086511af0c2e31104c74a3173bfba4fd12be8f7ce5492d6e991ac96e16d',
+    inputSchemaDigest: 'sha256:e4f4e90a714196b3d4feb413e6eaf7cac64a3aa4edb659ffdd18c99f1f973e94',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        from: {"description":"A ProblemStatusState value","enum":["open","working","done","dropped",null],"type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        to: {"description":"A ProblemStatusState value","enum":["open","working","done","dropped"],"type":"string"},
+        from: {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["open","working","done","dropped",null],"type":["string","null"]},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        to: {"description":"The state to move to.","enum":["open","working","done","dropped"],"type":"string"},
       },
       required: ['id', 'to']
     },
@@ -509,8 +509,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to cancel.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     }
@@ -522,8 +522,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":["string","null"]},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"Only this schedule.","minLength":1,"type":["string","null"]},
       },
       required: ['id']
     }
@@ -535,8 +535,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to pause.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     }
@@ -548,11 +548,11 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        attempt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
-        outcome: {"description":"A ProblemSchedulesOutcome value","enum":["told","resumed","held","missed"],"type":"string"},
-        run: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        attempt: {"description":"The attempt of the run, its number in the event run's payload; when given, a report of an attempt other than the latest is answered unchanged.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule whose run it reports.","minLength":1,"type":"string"},
+        outcome: {"description":"One of the config's outcomes.","enum":["told","resumed","held","missed"],"type":"string"},
+        run: {"description":"The run, its number in the event run's payload.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'name', 'outcome', 'run']
     }
@@ -564,8 +564,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to resume.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     }
@@ -577,12 +577,12 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        after: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        cron: {"description":"A string value","minLength":1,"type":["string","null"]},
-        every: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","maxLength":64,"pattern":"^[A-Za-z][A-Za-z0-9_-]*$","type":"string"},
-        timeZone: {"description":"A string value","minLength":1,"type":["string","null"]},
+        after: {"description":"One run this many milliseconds from now.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        cron: {"description":"A run at each time this cron line names: five fields, minute hour day-of-month month day-of-week, or a macro: @yearly, @annually, @monthly, @weekly, @daily, @midnight or @hourly.","minLength":1,"type":["string","null"]},
+        every: {"description":"A run at each whole interval of this many milliseconds from now.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule's name: a letter, then letters, digits, _ and -.","maxLength":64,"pattern":"^[A-Za-z][A-Za-z0-9_-]*$","type":"string"},
+        timeZone: {"description":"The IANA time zone the cron line is read in; the config's timeZone, else UTC, when absent. A cron schedule's alone.","minLength":1,"type":["string","null"]},
       },
       required: ['id', 'name']
     }
@@ -594,9 +594,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        from: {"description":"A ProblemStatusState value","enum":["open","working","done","dropped",null],"type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        to: {"description":"A ProblemStatusState value","enum":["open","working","done","dropped"],"type":"string"},
+        from: {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["open","working","done","dropped",null],"type":["string","null"]},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        to: {"description":"The state to move to.","enum":["open","working","done","dropped"],"type":"string"},
       },
       required: ['id', 'to']
     }
@@ -615,8 +615,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to cancel.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     }
@@ -628,8 +628,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":["string","null"]},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"Only this schedule.","minLength":1,"type":["string","null"]},
       },
       required: ['id']
     }
@@ -641,8 +641,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to pause.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     }
@@ -654,11 +654,11 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        attempt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
-        outcome: {"description":"A ProblemSchedulesOutcome value","enum":["told","resumed","held","missed"],"type":"string"},
-        run: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        attempt: {"description":"The attempt of the run, its number in the event run's payload; when given, a report of an attempt other than the latest is answered unchanged.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule whose run it reports.","minLength":1,"type":"string"},
+        outcome: {"description":"One of the config's outcomes.","enum":["told","resumed","held","missed"],"type":"string"},
+        run: {"description":"The run, its number in the event run's payload.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'name', 'outcome', 'run']
     }
@@ -670,8 +670,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","minLength":1,"type":"string"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule to resume.","minLength":1,"type":"string"},
       },
       required: ['id', 'name']
     }
@@ -683,12 +683,12 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        after: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        cron: {"description":"A string value","minLength":1,"type":["string","null"]},
-        every: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        name: {"description":"A string value","maxLength":64,"pattern":"^[A-Za-z][A-Za-z0-9_-]*$","type":"string"},
-        timeZone: {"description":"A string value","minLength":1,"type":["string","null"]},
+        after: {"description":"One run this many milliseconds from now.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        cron: {"description":"A run at each time this cron line names: five fields, minute hour day-of-month month day-of-week, or a macro: @yearly, @annually, @monthly, @weekly, @daily, @midnight or @hourly.","minLength":1,"type":["string","null"]},
+        every: {"description":"A run at each whole interval of this many milliseconds from now.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        name: {"description":"The schedule's name: a letter, then letters, digits, _ and -.","maxLength":64,"pattern":"^[A-Za-z][A-Za-z0-9_-]*$","type":"string"},
+        timeZone: {"description":"The IANA time zone the cron line is read in; the config's timeZone, else UTC, when absent. A cron schedule's alone.","minLength":1,"type":["string","null"]},
       },
       required: ['id', 'name']
     }
@@ -700,9 +700,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        from: {"description":"A ProblemStatusState value","enum":["open","working","done","dropped",null],"type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        to: {"description":"A ProblemStatusState value","enum":["open","working","done","dropped"],"type":"string"},
+        from: {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["open","working","done","dropped",null],"type":["string","null"]},
+        id: {"description":"The key of the Problem row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        to: {"description":"The state to move to.","enum":["open","working","done","dropped"],"type":"string"},
       },
       required: ['id', 'to']
     }

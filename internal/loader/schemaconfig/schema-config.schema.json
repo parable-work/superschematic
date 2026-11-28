@@ -30,6 +30,10 @@
           "description": "The Secret<string> config field the MCP endpoint signs the confirmations of its ask tools with (D93), by the envVars class that declares it and the field's name, as a stack names the secret: \"McpKeys.MCP_CONFIRMATION_KEY\". The API's envVars class holds the field, its own or one it extends; its value is a random string of at least 32 bytes, one per environment. Required with mcp when a visible tool's invocation policy is ask.",
           "type": "string"
         },
+        "mcpInstructions": {
+          "description": "Domain instructions returned to MCP clients on initialize (and server/discover) when mcp is enabled. Use this to give agents a concise primer on units, sign conventions, scopes, entity relationships, privacy/audience rules, and workflows.",
+          "type": "string"
+        },
         "scaffoldsOutputDir": {
           "type": "string"
         }

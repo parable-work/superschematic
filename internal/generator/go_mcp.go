@@ -51,7 +51,7 @@ func (r run) goMCP(output *apigen.APIOutput) (*apigen.GoMCP, error) {
 	if err != nil {
 		return nil, err
 	}
-	mcp := &apigen.GoMCP{RequiresAuth: built.RequiresAuth, Confirming: built.Confirming, Left: built.Left}
+	mcp := &apigen.GoMCP{RequiresAuth: built.RequiresAuth, Confirming: built.Confirming, Left: built.Left, Instructions: r.Outputs.MCPInstructions()}
 	tools := make([]goRouteTool, 0, len(built.Tools))
 	for _, tool := range built.Tools {
 		endpoint := endpoints[tool.Operation]

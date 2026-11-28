@@ -359,10 +359,11 @@ type JSONSchemaReturn struct {
 // ToolPathParam represents a path parameter for tool invocation helpers.
 // Reference is the reference it holds (D61), nil when none.
 type ToolPathParam struct {
-	Name      string
-	TSName    string
-	Type      string
-	Reference *apigen.Reference
+	Name        string
+	TSName      string
+	Type        string
+	Reference   *apigen.Reference
+	Description string
 }
 
 // ToolScalarArg is one body argument of an operation without an input
@@ -380,6 +381,7 @@ type ToolScalarArg struct {
 	IsMap           bool
 	Reference       *apigen.Reference
 	Search          bool
+	Description     string
 }
 
 // ToolQueryArg is one query parameter as a tool argument: its type,
@@ -395,9 +397,10 @@ type ToolQueryArg struct {
 	IsArray  bool
 	IsMap    bool
 	ir.ValueRules
-	Reference *apigen.Reference
-	Search    bool
-	Sort      *apigen.SortParam
+	Reference   *apigen.Reference
+	Search      bool
+	Sort        *apigen.SortParam
+	Description string
 }
 
 // ParamKeyFn chooses the JSON object key for a parameter.
@@ -459,7 +462,11 @@ func BuildParametersSchema(
 
 	for _, param := range pathParams {
 		prop := typeToJSONSchemaProperty(param.Type, scalars, inputTypeEnums)
-		prop.Description = fmt.Sprintf("%s parameter", param.Name)
+		if param.Description != "" {
+			prop.Description = param.Description
+		} else {
+			prop.Description = fmt.Sprintf("%s parameter", param.Name)
+		}
 		prop.Reference = ToolReference(param.Reference)
 		key := paramKeyFn(param.Name, param.TSName)
 		schema.Properties[key] = prop
@@ -470,8 +477,11 @@ func BuildParametersSchema(
 		prop := FieldToJSONSchemaProperty(apigen.Param{
 			// Optional query values are omitted by the SDK; JSON null is a body contract.
 			Name: arg.Name, Type: arg.Type, Required: true, IsArray: arg.IsArray, IsMap: arg.IsMap,
-			ValueRules: arg.ValueRules,
-			Reference:  arg.Reference, Search: arg.Search, Sort: arg.Sort,
+			ValueRules:  arg.ValueRules,
+			Reference:   arg.Reference,
+			Search:      arg.Search,
+			Sort:        arg.Sort,
+			Description: arg.Description,
 		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
@@ -497,7 +507,7 @@ func BuildParametersSchema(
 		prop := FieldToJSONSchemaProperty(apigen.Param{
 			Name: arg.Name, Type: arg.Type, Required: arg.Required,
 			IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays, IsMap: arg.IsMap,
-			Reference: arg.Reference, Search: arg.Search,
+			Reference: arg.Reference, Search: arg.Search, Description: arg.Description,
 		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
@@ -674,6 +684,9 @@ func FieldToJSONSchemaProperty(
 	value.Nullable = !field.Required
 	value.Reference = ToolReference(field.Reference)
 	value.Search = field.Search
+	if field.Description != "" {
+		value.Description = field.Description
+	}
 	if field.Sort != nil {
 		value = SortProperty(value, field.Sort)
 	}

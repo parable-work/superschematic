@@ -131,15 +131,15 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:deb35542dbb844674affc6afe14047cb21fc10c8373e433e6025eca6ff936018",
+      "inputSchemaDigest": "sha256:f3fbfcc0b76f6de57bd68a9cb4bad19e9abf321e5732459809eb78e18cc51b69",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "labels": {"description":"Array of arrays of string values","items":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"type":"array"},
-          "polygons": {"description":"Array of arrays of Point values","items":{"description":"Array of Point values","items":{"additionalProperties":false,"description":"Point object","properties":{"x":{"description":"A numeric value","type":"number"},"y":{"description":"A numeric value","type":"number"}},"required":["x","y"],"type":"object"},"type":"array"},"type":"array"},
-          "shades": {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","enum":["light","dark"],"type":"string"},"type":"array"},"type":"array"},
-          "weights": {"description":"Array of arrays of number values","items":{"description":"Array of number values","items":{"description":"A numeric value","type":"number"},"type":"array"},"type":["array","null"]}
+          "labels": {"description":"Cell labels, one inner list per row.","items":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"type":"array"},
+          "polygons": {"description":"Polygons, each a list of its points.","items":{"description":"Array of Point values","items":{"additionalProperties":false,"description":"Point object","properties":{"x":{"description":"A numeric value","type":"number"},"y":{"description":"A numeric value","type":"number"}},"required":["x","y"],"type":"object"},"type":"array"},"type":"array"},
+          "shades": {"description":"Cell shades, one inner list per row.","items":{"description":"Array of Shade values","items":{"description":"A Shade value","enum":["light","dark"],"type":"string"},"type":"array"},"type":"array"},
+          "weights": {"description":"Weight vectors in batches; absent when the grid is unweighted.","items":{"description":"Array of number values","items":{"description":"A numeric value","type":"number"},"type":"array"},"type":["array","null"]}
         },
         "required": ["labels", "polygons", "shades"]
       },

@@ -33,15 +33,12 @@ resources:
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-storefront/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/main.js
-          contentSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           contentType: application/javascript+module
           name: main.js
         - contentFile: artifacts/shop-storefront/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/main.js.map
-          contentSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           contentType: application/source-map
           name: main.js.map
         - contentFile: artifacts/shop-storefront/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/superscalar_wasm_bg.wasm
-          contentSha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
           contentType: application/wasm
           name: superscalar_wasm_bg.wasm
       workerId: ${shop-storefront-worker.id}

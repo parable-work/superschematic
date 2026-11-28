@@ -179,7 +179,7 @@ func checkFiles(req registry.ProvisionRequest, ids []string) error {
 				return
 			}
 			sum := sha256.Sum256(data)
-			if want, _ := m["contentSha256"].(string); want != hex.EncodeToString(sum[:]) {
+			if want, ok := m["contentSha256"].(string); ok && want != hex.EncodeToString(sum[:]) {
 				err = fmt.Errorf("node %s reads %s, whose SHA-256 is %x, not %s", res.ID, path, sum, want)
 			}
 		})

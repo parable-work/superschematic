@@ -1,7 +1,7 @@
 [
   {
     "name": "catalog.placeBasket",
-    "inputSchemaDigest": "sha256:014cf856c8ba0766dcb11f71691a76a5a9723c294511bdb332b5b08168f0ac8d",
+    "inputSchemaDigest": "sha256:b6796cf1f679b3dd4e995a27ceba7c5a5ab4df8e4527a847083de32f54dce905",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
@@ -15,7 +15,7 @@
             "label": "name",
             "search": "q"
           },
-          "description": "A URL friendly version of a string",
+          "description": "A gift named by its sku, with every member said.",
           "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
           "minLength": 1,
           "maxLength": 255,

@@ -348,3 +348,112 @@ func TestSiteProxyPassesWebSocketUpgrades(t *testing.T) {
 		}
 	}
 }
+
+// TestOriginProxyRoutesOAuthDiscoveryAndAvoidsDoublePrefix verifies #695 item 5:
+// root /.well-known/oauth-* and /.well-known/openid-configuration* routes reach
+// the matching origin API with the path preserved and X-Forwarded-Prefix set,
+// and OAuth redirects to an already-prefixed path or site-origin URL are not
+// double-prefixed or corrupted.
+func TestOriginProxyRoutesOAuthDiscoveryAndAvoidsDoublePrefix(t *testing.T) {
+	oauthAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prefix := r.Header.Get("X-Forwarded-Prefix")
+		switch r.URL.Path {
+		case "/.well-known/oauth-protected-resource",
+			"/.well-known/oauth-protected-resource/api/finances-api/api/mcp",
+			"/.well-known/oauth-authorization-server",
+			"/.well-known/oauth-authorization-server/api/finances-api",
+			"/.well-known/openid-configuration",
+			"/.well-known/openid-configuration/api/finances-api":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"path":   r.URL.Path,
+				"prefix": prefix,
+				"host":   r.Host,
+			})
+		case "/oauth/authorize":
+			switch r.URL.Query().Get("mode") {
+			case "spa":
+				w.Header().Set("Location", "http://"+r.Host+"/oauth/consent?request=req-1")
+			case "relative-prefixed":
+				w.Header().Set("Location", prefix+"/oauth/consent?request=req-1")
+			case "upstream":
+				w.Header().Set("Location", "http://"+r.Context().Value(http.LocalAddrContextKey).(net.Addr).String()+"/internal/next")
+			default:
+				w.Header().Set("Location", "http://"+r.Host+prefix+"/oauth/consent?request=req-1")
+			}
+			w.WriteHeader(http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(oauthAPI.Close)
+
+	otherAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(otherAPI.Close)
+
+	spa := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "<html>spa</html>")
+	})
+
+	proxy := httptest.NewServer(local.OriginProxy("finances-web", spa, map[string]*url.URL{
+		"billing-api":  mustURL(t, otherAPI.URL),
+		"finances-api": mustURL(t, oauthAPI.URL),
+	}, nil))
+	t.Cleanup(proxy.Close)
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	siteHost := mustURL(t, proxy.URL).Host
+
+	for _, p := range []string{
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-protected-resource/api/finances-api/api/mcp",
+		"/.well-known/oauth-authorization-server",
+		"/.well-known/oauth-authorization-server/api/finances-api",
+		"/.well-known/openid-configuration",
+		"/.well-known/openid-configuration/api/finances-api",
+	} {
+		resp, err := client.Get(proxy.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&got)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || got["path"] != p || got["prefix"] != "/api/finances-api" || got["host"] != siteHost {
+			t.Fatalf("GET %s: status=%d body=%v", p, resp.StatusCode, got)
+		}
+	}
+
+	// Unknown API under well-known returns 404 (not SPA fallback).
+	resp, err := client.Get(proxy.URL + "/.well-known/oauth-protected-resource/api/missing/api/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown well-known API: status=%d, want 404", resp.StatusCode)
+	}
+
+	// Redirect tests: no double prefix, custom SPA consentPath preserved, upstream URL still prefixed.
+	redirectCases := []struct {
+		query string
+		want  string
+	}{
+		{"", "http://" + siteHost + "/api/finances-api/oauth/consent?request=req-1"},
+		{"?mode=spa", "http://" + siteHost + "/oauth/consent?request=req-1"},
+		{"?mode=relative-prefixed", "/api/finances-api/oauth/consent?request=req-1"},
+		{"?mode=upstream", "/api/finances-api/internal/next"},
+	}
+	for _, tc := range redirectCases {
+		resp, err := client.Get(proxy.URL + "/api/finances-api/oauth/authorize" + tc.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Location"); resp.StatusCode != http.StatusFound || got != tc.want {
+			t.Fatalf("GET /api/finances-api/oauth/authorize%s: status=%d location=%q, want %q", tc.query, resp.StatusCode, got, tc.want)
+		}
+	}
+}

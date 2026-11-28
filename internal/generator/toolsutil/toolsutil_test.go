@@ -514,3 +514,73 @@ func TestToolKeysNameTheReferenceSearchAndSortKeys(t *testing.T) {
 		t.Fatalf("empty keys still wrote a reference, a search or a sort: %s", unkeyed)
 	}
 }
+
+func TestBuildParametersSchemaPropagatesFieldAndArgumentDescriptions(t *testing.T) {
+	fields := map[string][]apigen.Param{
+		"CreateEntryInput": {
+			{Name: "amountCents", Type: "Generic.Int64", Required: true, Description: "Signed amount in minor units (negative = outflow)."},
+			{Name: "memo", Type: "string", Description: "Short household note."},
+			{Name: "tags", Type: "string", IsArray: true, Description: "Free-form budget labels."},
+			{Name: "split", Type: "SplitInput", Description: "Optional split details."},
+			{Name: "plain", Type: "Generic.Int64", Required: true},
+		},
+		"SplitInput": {
+			{Name: "shareCents", Type: "Generic.Int64", Required: true, Description: "Member share in cents."},
+		},
+	}
+	scalars := map[string]apigen.ScalarJSONSchemaInfo{
+		"Identity.UUID": {CanonicalName: "Identity.UUID", Type: "string", Description: "A UUID"},
+		"Generic.Int64": {CanonicalName: "Generic.Int64", Type: "integer", Description: "Signed 64-bit integer"},
+		"string":        {Type: "string", Description: "A string value"},
+	}
+	sort := &apigen.SortParam{Fields: []string{"date"}, Values: []string{"date", "-date"}, Default: "-date"}
+	schema := BuildParametersSchema(
+		[]ToolPathParam{
+			{Name: "accountId", Type: "Identity.UUID", Description: "Account receiving the entry."},
+			{Name: "fallbackId", Type: "Identity.UUID"},
+		},
+		[]ToolQueryArg{
+			{Name: "since", Type: "string", Description: "Inclusive YYYY-MM-DD start date."},
+			{Name: "sort", Type: "string", Description: "Custom comment overridden by sort.", Sort: sort},
+		},
+		true, "CreateEntryInput", fields, nil, nil,
+		[]ToolScalarArg{
+			{Name: "dryRun", Type: "boolean", Description: "Validate without writing."},
+		},
+		false, scalars, byName, apigen.DefaultToolKeys(), nil, nil,
+	)
+
+	if got := schema.Properties["accountId"].Description; got != "Account receiving the entry." {
+		t.Errorf("accountId description = %q, want explicit path param description", got)
+	}
+	if got := schema.Properties["fallbackId"].Description; got != "fallbackId parameter" {
+		t.Errorf("fallbackId description = %q, want fallback", got)
+	}
+	if got := schema.Properties["since"].Description; got != "Inclusive YYYY-MM-DD start date." {
+		t.Errorf("since description = %q, want query description", got)
+	}
+	if got := schema.Properties["sort"].Description; !strings.Contains(got, apigen.PageSortDescription) {
+		t.Errorf("sort description = %q, want SortDescription", got)
+	}
+	if got := schema.Properties["amountCents"].Description; got != "Signed amount in minor units (negative = outflow)." {
+		t.Errorf("amountCents description = %q", got)
+	}
+	if got := schema.Properties["memo"].Description; got != "Short household note." {
+		t.Errorf("memo description = %q", got)
+	}
+	if got := schema.Properties["tags"].Description; got != "Free-form budget labels." {
+		t.Errorf("tags description = %q", got)
+	}
+	if got := schema.Properties["split"].Description; got != "Optional split details." {
+		t.Errorf("split description = %q", got)
+	}
+	if got := schema.Properties["split"].Properties["shareCents"].Description; got != "Member share in cents." {
+		t.Errorf("nested shareCents description = %q", got)
+	}
+	if got := schema.Properties["plain"].Description; got != "Signed 64-bit integer" {
+		t.Errorf("plain description = %q, want scalar fallback", got)
+	}
+	if got := schema.Properties["dryRun"].Description; got != "Validate without writing." {
+		t.Errorf("dryRun description = %q", got)
+	}
+}

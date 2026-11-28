@@ -772,6 +772,9 @@ type Options struct {
 	// MCP is outputs.api.mcp: the router serves the API's visible @mcp
 	// tools at POST /api/mcp (D81, D116).
 	MCP bool
+	// MCPInstructions is outputs.api.mcpInstructions: domain guidance sent
+	// to MCP clients on initialize unless overridden in RouterOptions.mcp.
+	MCPInstructions string
 }
 
 // Generate produces Rust REST API metadata for a schema. Each mounted
@@ -1075,6 +1078,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if output.MCP, err = mcpInfo(output, api, opts.Clock); err != nil {
 			return nil, err
 		}
+		output.MCP.Instructions = opts.MCPInstructions
 	}
 
 	return output, nil

@@ -69,6 +69,12 @@ func (m *MCPInfo) ToolsRust() (string, error) {
 	return rustutil.RawString(literal), nil
 }
 
+// InstructionsRust is outputs.api.mcpInstructions as a Rust raw string
+// literal.
+func (m *MCPInfo) InstructionsRust() string {
+	return rustutil.RawString(m.Instructions)
+}
+
 // Checks reports whether the router holds its routes' checks (D98): a tool
 // asks, so its call is checked through its route before the person is
 // asked.

@@ -26,6 +26,12 @@ use {{ .RuntimeCrateIdent }}::{Authenticator, RouteControls};
 /// The API's tools, as JSON: the table the runtime's `Mount` reads, each
 /// tool naming its operation as `operations::ALL` does.
 pub const TOOLS: &str = {{ .MCP.ToolsRust }};
+{{- if .MCP.Instructions }}
+
+/// Domain instructions returned to MCP clients on `initialize` unless
+/// `options.mcp.instructions` overrides them (`outputs.api.mcpInstructions`).
+pub const INSTRUCTIONS: &str = {{ .MCP.InstructionsRust }};
+{{- end }}
 
 /// The router of the API's MCP endpoint, over `routes`, the router's own
 /// routes, which a call of a tool is a request to.
@@ -71,7 +77,15 @@ pub(super) fn endpoint(
 {{- end }}
         transport: options.transport,
     };
+{{- if .MCP.Instructions }}
+    let mut mcp_options = options.mcp.clone();
+    if mcp_options.instructions.is_none() {
+        mcp_options.instructions = Some(INSTRUCTIONS.to_string());
+    }
+    match mount.router(&mcp_options) {
+{{- else }}
     match mount.router(&options.mcp) {
+{{- end }}
         Ok(router) => router,
         Err(message) => panic!("{message}"),
     }

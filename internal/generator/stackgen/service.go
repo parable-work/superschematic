@@ -59,6 +59,12 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		}
 		svc.Config = config
 		svc.ClientVersions = schema.ClientVersions
+		for _, set := range schema.OperationSets {
+			if set != nil && set.UserSessions != nil && set.UserSessions.OAuth != nil {
+				svc.OAuth = true
+				break
+			}
+		}
 		if svc.ProviderSlots, err = schema.ProviderSlotsOf(); err != nil {
 			return stack.Service{}, err
 		}

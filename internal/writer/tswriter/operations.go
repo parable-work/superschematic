@@ -179,7 +179,15 @@ func (e *emitter) emitBehaviorOperationsSet(set *ir.OperationSet, owner string) 
 
 	e.body.WriteString("\n")
 	e.comment("", set.Comment)
-	fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("behaviorOperations"), e.ident(table, "table"))
+	var options []string
+	if set.BehaviorOperations.MCP != nil {
+		options = append(options, "mcp: "+behaviorOperationsMCPLiteral(set.BehaviorOperations.MCP))
+	}
+	if literal := optionalObjectLiteral(options); literal != "" {
+		fmt.Fprintf(&e.body, "@%s(%s, %s)\n", e.use("behaviorOperations"), e.ident(table, "table"), literal)
+	} else {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("behaviorOperations"), e.ident(table, "table"))
+	}
 	if set.Auth {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("auth"))
 	}
@@ -192,6 +200,65 @@ func (e *emitter) emitBehaviorOperationsSet(set *ir.OperationSet, owner string) 
 	e.emitServiceCallersDecorator("", set.ServiceCallers)
 	e.emitMiddlewareDecorators("", set.Middleware)
 	fmt.Fprintf(&e.body, "export abstract class %s {}\n", e.ident(set.Name, "operation set"))
+}
+
+func behaviorOperationsMCPLiteral(mcp *ir.BehaviorOperationsMCP) string {
+	var parts []string
+	if mcp.Hidden {
+		parts = append(parts, "hidden: true", "reason: "+quote(mcp.Reason))
+	} else {
+		if mcp.InvocationPolicy != "" {
+			parts = append(parts, "invocationPolicy: "+quote(mcp.InvocationPolicy))
+		}
+		if mcp.WriteInvocationPolicy != "" {
+			parts = append(parts, "writeInvocationPolicy: "+quote(mcp.WriteInvocationPolicy))
+		}
+	}
+	if len(mcp.Behaviors) > 0 {
+		var entries []string
+		for _, key := range slices.Sorted(maps.Keys(mcp.Behaviors)) {
+			entries = append(entries, tsObjectKey(key)+": "+behaviorOperationMCPLiteral(mcp.Behaviors[key]))
+		}
+		parts = append(parts, "behaviors: { "+strings.Join(entries, ", ")+" }")
+	}
+	if len(mcp.Operations) > 0 {
+		var entries []string
+		for _, key := range slices.Sorted(maps.Keys(mcp.Operations)) {
+			entries = append(entries, tsObjectKey(key)+": "+behaviorOperationMCPLiteral(mcp.Operations[key]))
+		}
+		parts = append(parts, "operations: { "+strings.Join(entries, ", ")+" }")
+	}
+	if len(parts) == 0 {
+		return "{}"
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+func behaviorOperationMCPLiteral(rule *ir.BehaviorOperationMCP) string {
+	if rule == nil {
+		return "{ hidden: false }"
+	}
+	if rule.Hidden {
+		return "{ hidden: true, reason: " + quote(rule.Reason) + " }"
+	}
+	var parts []string
+	if rule.InvocationPolicy != "" {
+		parts = append(parts, "invocationPolicy: "+quote(rule.InvocationPolicy))
+	}
+	if rule.WriteInvocationPolicy != "" {
+		parts = append(parts, "writeInvocationPolicy: "+quote(rule.WriteInvocationPolicy))
+	}
+	if len(parts) == 0 {
+		return "{ hidden: false }"
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+func tsObjectKey(key string) string {
+	if identifierPattern.MatchString(key) {
+		return key
+	}
+	return quote(key)
 }
 
 // emitGraphOperationsSet renders a version graph's operations (D138):

@@ -124,15 +124,12 @@ resources:
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-pricing/0000000000000000000000000000000000000000000000000000000000000000/main.js
-          contentSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           contentType: application/javascript+module
           name: main.js
         - contentFile: artifacts/shop-pricing/0000000000000000000000000000000000000000000000000000000000000000/main.js.map
-          contentSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           contentType: application/source-map
           name: main.js.map
         - contentFile: artifacts/shop-pricing/0000000000000000000000000000000000000000000000000000000000000000/superscalar_wasm_bg.wasm
-          contentSha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
           contentType: application/wasm
           name: superscalar_wasm_bg.wasm
       workerId: ${shop-pricing-worker.id}
@@ -256,15 +253,12 @@ resources:
       mainModule: main.js
       modules:
         - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/main.js
-          contentSha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
           contentType: application/javascript+module
           name: main.js
         - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/main.js.map
-          contentSha256: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           contentType: application/source-map
           name: main.js.map
         - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/superscalar_wasm_bg.wasm
-          contentSha256: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
           contentType: application/wasm
           name: superscalar_wasm_bg.wasm
       workerId: ${shop-storefront-worker.id}

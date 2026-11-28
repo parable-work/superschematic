@@ -196,12 +196,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:014cf856c8ba0766dcb11f71691a76a5a9723c294511bdb332b5b08168f0ac8d',
+    inputSchemaDigest: 'sha256:b6796cf1f679b3dd4e995a27ceba7c5a5ab4df8e4527a847083de32f54dce905',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
+        giftSku: {"description":"A gift named by its sku, with every member said.","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
         lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
       },
       required: ['lines']
@@ -363,7 +363,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
+        giftSku: {"description":"A gift named by its sku, with every member said.","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
         lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
       },
       required: ['lines']
@@ -433,7 +433,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
+        giftSku: {"description":"A gift named by its sku, with every member said.","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
         lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
       },
       required: ['lines']

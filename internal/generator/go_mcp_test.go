@@ -174,3 +174,32 @@ func TestAGoAPIsToolTableIsTheTypeScriptRouters(t *testing.T) {
 		t.Errorf("mcp.go checks update_order's route and asks no permission:\n%s", source)
 	}
 }
+
+func TestGoMCPEmitsInstructionsFromOutputsAPI(t *testing.T) {
+	outputRoot := testpaths.TempDir(t)
+	schema, cfg := goMCPFixture(t, nil)
+	const primer = "Household primer: amounts are cents; negative = outflow."
+	cfg.Outputs["api"].(map[string]any)["mcpInstructions"] = primer
+	if _, err := Run(schema, cfg, Options{
+		OutputRoot: outputRoot,
+		Paths:      testpaths.Local(t),
+		Naming:     naming.Default(),
+		Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("run fixture-mcp with mcpInstructions: %v", err)
+	}
+	source, err := os.ReadFile(filepath.Join(APIDir(outputRoot, "fixture-mcp"), apigen.MCPFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`const mcpInstructions = "Household primer: amounts are cents; negative = outflow."`,
+		`if opts.Instructions == "" {`,
+		`opts.Instructions = mcpInstructions`,
+		`}.Handler(opts)`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Errorf("mcp.go missing %q:\n%s", want, source)
+		}
+	}
+}

@@ -7,9 +7,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "role": {"description":"A string value","type":["string","null"]},
-          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+          "id": {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "role": {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"}
         },
         "required": ["id", "to"]
       }
@@ -21,7 +21,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       }
@@ -33,7 +33,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       }
@@ -45,7 +45,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       }
@@ -57,9 +57,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "role": {"description":"A string value","type":["string","null"]},
-          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "role": {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"}
         },
         "required": ["id", "to"]
       }
@@ -71,7 +71,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       }
@@ -83,7 +83,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       }
@@ -95,7 +95,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       }

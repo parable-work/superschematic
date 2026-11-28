@@ -1,7 +1,7 @@
 [
   {
     "name": "problem.seatsLeaveSeat",
-    "inputSchemaDigest": "sha256:1b99868010f57a5f7189d6294e4683f0bd1a3f0b12c04c01505b42de485c3065",
+    "inputSchemaDigest": "sha256:ff23678800e34c13afa73f4c030efbbd704450cb4b54326a92762306a8fdf3f1",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
@@ -9,12 +9,12 @@
         "id": {
           "x-superschematic-scalar": "Identity.UUID",
           "type": "string",
-          "description": "id parameter",
+          "description": "The key of the Problem row the operation runs on.",
           "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
         },
         "seat": {
           "type": "string",
-          "description": "A ProblemSeatsSeat value",
+          "description": "The seat to leave.",
           "enum": [
             "accountable",
             "handles",
@@ -22,7 +22,7 @@
           ]
         },
         "subject": {
-          "description": "A string value",
+          "description": "The subject to unseat; the caller's own when absent. Unseating another needs the seat's assign permission.",
           "minLength": 1,
           "type": [
             "string",
@@ -42,7 +42,7 @@
   },
   {
     "name": "problem.seatsListSeats",
-    "inputSchemaDigest": "sha256:9996b4b83088e8d55e3a50c72db1a57dcfc6eb71ce11466475c541b9df801f64",
+    "inputSchemaDigest": "sha256:68e097a9345e43cfa5c00a305d84f4c5f95348ba6c7ee945ad94e5b8ab2329ff",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
@@ -50,11 +50,11 @@
         "id": {
           "x-superschematic-scalar": "Identity.UUID",
           "type": "string",
-          "description": "id parameter",
+          "description": "The key of the Problem row the operation runs on.",
           "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
         },
         "seat": {
-          "description": "A ProblemSeatsSeat value",
+          "description": "Only this seat's subjects.",
           "type": [
             "string",
             "null"
@@ -78,7 +78,7 @@
   },
   {
     "name": "problem.seatsTakeSeat",
-    "inputSchemaDigest": "sha256:1b99868010f57a5f7189d6294e4683f0bd1a3f0b12c04c01505b42de485c3065",
+    "inputSchemaDigest": "sha256:987896e80d6c84859d7d62b6a4a2b6cb1d548b17a633952f5113c94d8d6cde50",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
@@ -86,12 +86,12 @@
         "id": {
           "x-superschematic-scalar": "Identity.UUID",
           "type": "string",
-          "description": "id parameter",
+          "description": "The key of the Problem row the operation runs on.",
           "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
         },
         "seat": {
           "type": "string",
-          "description": "A ProblemSeatsSeat value",
+          "description": "The seat to take.",
           "enum": [
             "accountable",
             "handles",
@@ -99,7 +99,7 @@
           ]
         },
         "subject": {
-          "description": "A string value",
+          "description": "The subject to seat; the caller's own when absent. Seating another needs the seat's assign permission.",
           "minLength": 1,
           "type": [
             "string",
@@ -119,13 +119,13 @@
   },
   {
     "name": "problem.statusTransition",
-    "inputSchemaDigest": "sha256:bd6ef6fdd9bc98c579a49e664ab2a7bb05cb480cc476714debdc145647d5a635",
+    "inputSchemaDigest": "sha256:21dcb7a87ae7d906e099cbeca8e5620fdb6fef8bc13416034997dfbb11319c75",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
       "properties": {
         "from": {
-          "description": "A ProblemStatusState value",
+          "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
           "type": [
             "string",
             "null"
@@ -141,12 +141,12 @@
         "id": {
           "x-superschematic-scalar": "Identity.UUID",
           "type": "string",
-          "description": "id parameter",
+          "description": "The key of the Problem row the operation runs on.",
           "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
         },
         "to": {
           "type": "string",
-          "description": "A ProblemStatusState value",
+          "description": "The state to move to.",
           "enum": [
             "open",
             "working",
@@ -167,7 +167,7 @@
   },
   {
     "name": "sandbox.observedObserve",
-    "inputSchemaDigest": "sha256:5c58c3d7ec40c8eb95232ff3b293975447f5815fe55d7031c102d0d3f0e51388",
+    "inputSchemaDigest": "sha256:89389416a2ba0f3e5d1b828fc55a426b9aab82beaf0ef50c468b4788d79c5888",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
@@ -175,19 +175,19 @@
         "at": {
           "x-superschematic-scalar": "Generic.Int64",
           "type": "integer",
-          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "description": "When the provider was observed in it, in epoch milliseconds, no later than the call.",
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "id": {
           "x-superschematic-scalar": "Identity.UUID",
           "type": "string",
-          "description": "id parameter",
+          "description": "The key of the Sandbox row the operation runs on.",
           "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
         },
         "state": {
           "type": "string",
-          "description": "A SandboxObservedState value",
+          "description": "The state the provider reports, a state of the Workflow status names.",
           "enum": [
             "pending",
             "starting",
@@ -212,13 +212,13 @@
   },
   {
     "name": "sandbox.statusTransition",
-    "inputSchemaDigest": "sha256:b2feb8f306541faa193a84617e394eb8a61f59ef6ac1c5deda2fad5d21327190",
+    "inputSchemaDigest": "sha256:0152fe55930b35a4f5702564b9487f58a5e02d1128ef4306f4b655e55504080a",
     "parameters": {
       "additionalProperties": false,
       "type": "object",
       "properties": {
         "from": {
-          "description": "A SandboxStatusState value",
+          "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
           "type": [
             "string",
             "null"
@@ -237,12 +237,12 @@
         "id": {
           "x-superschematic-scalar": "Identity.UUID",
           "type": "string",
-          "description": "id parameter",
+          "description": "The key of the Sandbox row the operation runs on.",
           "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
         },
         "to": {
           "type": "string",
-          "description": "A SandboxStatusState value",
+          "description": "The state to move to.",
           "enum": [
             "pending",
             "starting",

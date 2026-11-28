@@ -231,8 +231,11 @@ func TestDeployPublishesAndFetchesTheBundle(t *testing.T) {
 	for _, m := range version.Properties["modules"].([]any) {
 		m := m.(map[string]any)
 		name := m["name"].(string)
-		if m["contentFile"] != "artifacts/shop-storefront/"+hexDigest+"/"+name || m["contentSha256"] != hexSum(bundleFiles("v1")[name]) {
+		if m["contentFile"] != "artifacts/shop-storefront/"+hexDigest+"/"+name {
 			t.Errorf("the rendered version reads %s as %v", name, m)
+		}
+		if _, hasSha := m["contentSha256"]; hasSha {
+			t.Errorf("the rendered version module %s must not set read-only contentSha256", name)
 		}
 		placed, err := os.ReadFile(filepath.Join(program, ir.ArtifactsDir, "shop-storefront", hexDigest, name))
 		if err != nil || string(placed) != bundleFiles("v1")[name] {

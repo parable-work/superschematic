@@ -35,14 +35,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:dc6f34affb6770812cf7a459583249ef876b7c35a525eb70c53c45390fea0582",
+      "inputSchemaDigest": "sha256:abb0beef8654704f466ad59fb55ef0c8a7b64dc1ca512c361b923002624c75c0",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens",null],"type":["string","null"]}
+          "amount": {"description":"How much of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter; every meter with a configured reservation when absent.","enum":["questions","tokens",null],"type":["string","null"]}
         },
         "required": ["id"]
       },
@@ -79,16 +79,16 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:b9205ef28eca1e94e25c2a08460ad18c39a13b6ea8c5008498108ace74053de0",
+      "inputSchemaDigest": "sha256:320a81587b5b5c23dd40441b58b1905e628dd2cfe74cd619214b16bbeb7983af",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
-          "resetsAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "used": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"The limit the provider holds the row to, while the observation holds; the meter's own when absent.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"The meter.","enum":["questions","tokens"],"type":"string"},
+          "resetsAt": {"description":"When the provider's count starts again, in epoch milliseconds: the observation lapses then.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "used": {"description":"What the provider counts as used.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
         },
         "required": ["id", "meter", "used"]
       },
@@ -125,14 +125,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:c0436f534af7ccb5e7edc914a3f879fda077490d4c425f9cb18ae7951b1b5819",
+      "inputSchemaDigest": "sha256:924734c456e8aaa76198c375a2403d86893d58103b4062ecf3f7532ddccf8edf",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"}
+          "amount": {"description":"How much was used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter.","enum":["questions","tokens"],"type":"string"}
         },
         "required": ["amount", "id", "meter"]
       },
@@ -169,16 +169,16 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:6b7fbe809b5ef73e84ff97ba0736e1afcd7e20156e4303bddb9d977b9e8dcbd0",
+      "inputSchemaDigest": "sha256:0e0400c6fa3538e38ca97df5200094962793394690dffcefed7e86357a8c8d94",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"A string value","minLength":1,"type":"string"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
-          "released": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "schema": {"description":"A string value","minLength":1,"type":"string"}
+          "amount": {"description":"How much it used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"Its id.","minLength":1,"type":"string"},
+          "meter": {"description":"The meter.","enum":["questions","tokens"],"type":"string"},
+          "released": {"description":"How much of its reservation the usage drew down.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "schema": {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"}
         },
         "required": ["amount", "id", "id", "meter", "released", "schema"]
       },
@@ -215,14 +215,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:dc6f34affb6770812cf7a459583249ef876b7c35a525eb70c53c45390fea0582",
+      "inputSchemaDigest": "sha256:80e0df7c65073c6aeb6d54b90447f57316e9bde41823db46b84cca375fd7e7a3",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens",null],"type":["string","null"]}
+          "amount": {"description":"How much to reserve of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter; every meter with a configured reservation when absent.","enum":["questions","tokens",null],"type":["string","null"]}
         },
         "required": ["id"]
       },
@@ -259,15 +259,15 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:775df17108ba429940277f7510f4f5ed37d7b432d08e8db99401a9f344b1bbbd",
+      "inputSchemaDigest": "sha256:cfdb4d3096516c20ec8c31aadac7386d673ed2639194e746272f68af5238ece2",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"A string value","minLength":1,"type":"string"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
-          "schema": {"description":"A string value","minLength":1,"type":"string"}
+          "amount": {"description":"How much to hold.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"Its id.","minLength":1,"type":"string"},
+          "meter": {"description":"The meter.","enum":["questions","tokens"],"type":"string"},
+          "schema": {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"}
         },
         "required": ["amount", "id", "id", "meter", "schema"]
       },
@@ -304,14 +304,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:12520954c749484ddf27f2ceb91276866c641cc8856d38d63a2c59ffe4407f8a",
+      "inputSchemaDigest": "sha256:f9394f5359fa593ff5dd1e9d452f0e427c77d0e000d8a10734905afb6b8aa8ec",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"The new limit.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"The meter.","enum":["questions","tokens"],"type":"string"}
         },
         "required": ["id", "limit", "meter"]
       },
@@ -348,13 +348,13 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:583c961fdc0f338ae3055b539caf9514d55e686c18b8c1def9bd433ab2ea08a7",
+      "inputSchemaDigest": "sha256:961f4738200e96cc6660e3b2aa807a789ca42699d0698dbb7b0e99796cc2e234",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens",null],"type":["string","null"]}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter; every meter when absent.","enum":["questions","tokens",null],"type":["string","null"]}
         },
         "required": ["id"]
       },
@@ -391,15 +391,15 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:775df17108ba429940277f7510f4f5ed37d7b432d08e8db99401a9f344b1bbbd",
+      "inputSchemaDigest": "sha256:2c8a70af7e48d2c738ae49d130a1073baafcbb9607c1cf9eae734172811b0017",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"A string value","minLength":1,"type":"string"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
-          "schema": {"description":"A string value","minLength":1,"type":"string"}
+          "amount": {"description":"How much to release.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"Its id.","minLength":1,"type":"string"},
+          "meter": {"description":"The meter.","enum":["questions","tokens"],"type":"string"},
+          "schema": {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"}
         },
         "required": ["amount", "id", "id", "meter", "schema"]
       },
@@ -436,14 +436,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:b6f88f8f512d4c80fc73f5520004bfc789388baaa91e4ae54387fb403a9f29d0",
+      "inputSchemaDigest": "sha256:659e436d52138334769f4b4b6a32e2f8155d68ba362ede07a1e322a8e883a089",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "from": {"description":"A AccountStatusState value","enum":["open","out",null],"type":["string","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "to": {"description":"A AccountStatusState value","enum":["open","out"],"type":"string"}
+          "from": {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["open","out",null],"type":["string","null"]},
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"The state to move to.","enum":["open","out"],"type":"string"}
         },
         "required": ["id", "to"]
       },
@@ -480,14 +480,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:49329f61d165535749be7002fd110817254f6a5d82e924012a451e5d32f0b7b4",
+      "inputSchemaDigest": "sha256:db73764e258cb1ddebdce3b7983de22fa66165da553bec934c18467bc19ee01b",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "ids": {"description":"Array of Generic.Int64 values","items":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},"type":"array"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "ids": {"description":"The directives' numbers.","items":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},"type":"array"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
         },
         "required": ["id", "ids"]
       },
@@ -524,14 +524,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:e1e1d2573d011e11df2a997f11629f4f5532b6149b9b66a8d141d437c195b13e",
+      "inputSchemaDigest": "sha256:7c4e6ea5e0e7a30ba568d16aad1e5cb981898b28416d91e3ef24016f1ad1d3d0",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
-          "ttlMs": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1000,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
+          "ttlMs": {"description":"How long the lease lasts after its acquire and each heartbeat, in milliseconds, at most the config's ttlMs; the config's when absent.","maximum":9007199254740991,"minimum":1000,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
         },
         "required": ["id"]
       },
@@ -568,16 +568,16 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:1ad3fd8c7b0d2f761f0adfc881f7d55faed054828dbd4b51de9db805701819d8",
+      "inputSchemaDigest": "sha256:74fb5dc1e957f2da3f3e21e6b2b38fe9d7569f41dc5cd8b4c4c55084184c3b3e",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "data": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
-          "dedupeKey": {"description":"A string value","maxLength":128,"minLength":1,"type":["string","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "name": {"description":"A string value","pattern":"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$","type":"string"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+          "data": {"description":"Its data.","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "dedupeKey": {"description":"Sends the directive once per lease: when one was sent under the current token with this key, acknowledged or not, that one stands and nothing is sent.","maxLength":128,"minLength":1,"type":["string","null"]},
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"What the directive asks.","pattern":"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$","type":"string"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
         },
         "required": ["id", "name"]
       },
@@ -614,15 +614,15 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:7d47a66d837a51bc9b1392e6481e891a6bed7dc646cbf4a9fa6bd3f1f5f002c9",
+      "inputSchemaDigest": "sha256:f2060d4234cb2521e9e77e95b212cb32b238fb65b4f2afc1f2acb7d8ff835eea",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "holder": {"description":"A string value","minLength":1,"type":["string","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "notRenewedAfter": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+          "holder": {"description":"The principal whose lease to expire now, active or not; it needs overridePermission.","minLength":1,"type":["string","null"]},
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "notRenewedAfter": {"description":"With holder: an active lease its holder acquired or renewed after this time, in epoch milliseconds, is spared, since its own heartbeats show the process holding it is alive. A lapsed one expires all the same.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
         },
         "required": ["id"]
       },
@@ -659,13 +659,13 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:1b2b3dc9635589ad50cc7163330f0de778f4f2bb4bc06e8700b4f97541b7d2f3",
+      "inputSchemaDigest": "sha256:24caa7c4fb6cf4891f68a16f87a5514f43cd7a8929143a280f8d0a9deaa15b14",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "holder": {"description":"A string value","minLength":1,"type":"string"},
-          "notRenewedAfter": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+          "holder": {"description":"The principal whose leases to expire.","minLength":1,"type":"string"},
+          "notRenewedAfter": {"description":"As expire's: an active lease acquired or renewed after this time is spared.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
         },
         "required": ["holder"]
       },
@@ -702,14 +702,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:a0f6b62c0a85d37c4926cc99d3fc07c3ed09a0a6cdfccf564da2421612dfae8a",
+      "inputSchemaDigest": "sha256:87f9edf2804cbef46d2d881bd2100b7b2e248120f83e39b75b4f8ee43026b964",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "acknowledge": {"description":"Array of Generic.Int64 values","items":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},"type":["array","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+          "acknowledge": {"description":"Directives of the lease to mark handled first, as acknowledge does, so a heartbeat acknowledges in the same write; empty, none.","items":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},"type":["array","null"]},
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
         },
         "required": ["id"]
       },
@@ -746,14 +746,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:b4790edb78aea29dc7fe4d468059820cb0290b43e65f4c28cb3a233e8ca3cfbd",
+      "inputSchemaDigest": "sha256:5e20f0fc04e07d7372105f182ffa3839312178dac2a82de492219e8e2a505e9f",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "abandon": {"description":"A boolean value (true or false)","type":["boolean","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+          "abandon": {"description":"Whether the work is given up as failed, so the release counts as an expiry.","type":["boolean","null"]},
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
         },
         "required": ["id"]
       },
@@ -790,13 +790,13 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:91b101486ab2282bb46251a2a2682c893800514c7646bca2947bda9329b20ae2",
+      "inputSchemaDigest": "sha256:324cc3ce69d75608fff453ca205ac3942a716e87e0abac535ffbf521b6b54bf4",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
         },
         "required": ["id"]
       },
@@ -833,19 +833,19 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:324851bb8e36a615686bcd8daf5ba3d21be9c2a77df9384befa0bba29fc324cc",
+      "inputSchemaDigest": "sha256:670b8dbb1e6c22962fbddaf12178e9db5fb673738d4efcf5a96b027e3d6108e9",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "detail": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
-          "failure": {"description":"A JobRetriesClass value","enum":["build","rejected","timeout",null],"type":["string","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
-          "predicates": {"additionalProperties":{"description":"A boolean value (true or false)","type":"boolean"},"description":"Map of boolean values","type":["object","null"]},
-          "result": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
-          "score": {"description":"A numeric value","type":["number","null"]},
-          "signature": {"description":"A string value","maxLength":512,"minLength":1,"type":["string","null"]}
+          "detail": {"description":"Anything about the attempt worth keeping, such as validation errors: recorded in the operation's event and nowhere else.","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "failure": {"description":"The failure class; a success when absent.","enum":["build","rejected","timeout",null],"type":["string","null"]},
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
+          "predicates": {"additionalProperties":{"description":"A boolean value (true or false)","type":"boolean"},"description":"Named checks the attempt passed or failed, for keepBest's neverRegress; a predicate absent here counts as failed.","type":["object","null"]},
+          "result": {"description":"The attempt's result, written to resultField when it is kept; needs resultField.","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "score": {"description":"The attempt's score; higher is better.","type":["number","null"]},
+          "signature": {"description":"What identifies the failure, for stuckAfter: the same signature in a row is the same failure.","maxLength":512,"minLength":1,"type":["string","null"]}
         },
         "required": ["id"]
       },
@@ -882,15 +882,15 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:4d7f531f8912ca8d4dd814712f8512f6604e63346cecbd38f71ae012420a48a5",
+      "inputSchemaDigest": "sha256:8e60f9aa8a77ae657291ffe0ccf5f884de87114a70b914281f082d1186f8e9a2",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "from": {"description":"A JobStatusState value","enum":["queued","running","waiting","done","failed",null],"type":["string","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
-          "to": {"description":"A JobStatusState value","enum":["queued","running","waiting","done","failed"],"type":"string"}
+          "from": {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["queued","running","waiting","done","failed",null],"type":["string","null"]},
+          "id": {"description":"The key of the Job row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).","properties":{"Lease":{"additionalProperties":false,"description":"Lease's precondition; absent, the call presents it none.","properties":{"token":{"description":"The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
+          "to": {"description":"The state to move to.","enum":["queued","running","waiting","done","failed"],"type":"string"}
         },
         "required": ["id", "to"]
       },
@@ -927,12 +927,12 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "inputSchemaDigest": "sha256:833945e98cc76bcd13bffda927413fb4c7acb54d967117bf7cb76e09665dceb7",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Session row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       },
@@ -969,12 +969,12 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "inputSchemaDigest": "sha256:833945e98cc76bcd13bffda927413fb4c7acb54d967117bf7cb76e09665dceb7",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "id": {"description":"The key of the Session row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["id"]
       },
@@ -1011,14 +1011,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:20f78270ec326865eb7157e0762ad2e582fec5931a1190cf4c90ebc4a91a4dac",
+      "inputSchemaDigest": "sha256:9388c03a6366ab32c16c9237b264f06c3fdc9e0fae192aa6c8ebb521e0d8a773",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "from": {"description":"A SessionStatusState value","enum":["idle","turn","missing","closed",null],"type":["string","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "to": {"description":"A SessionStatusState value","enum":["idle","turn","missing","closed"],"type":"string"}
+          "from": {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["idle","turn","missing","closed",null],"type":["string","null"]},
+          "id": {"description":"The key of the Session row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"The state to move to.","enum":["idle","turn","missing","closed"],"type":"string"}
         },
         "required": ["id", "to"]
       },

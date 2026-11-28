@@ -173,3 +173,70 @@ func TestAPlatformThatServesTheUserModelOverSomeDatabases(t *testing.T) {
 	_, errs := resolve(t, reg, s, services, "Edge")
 	mustFail(t, errs, stack.CodeUnrealizable, "server notes serves notes, an API over the user model, which authenticates with the identity runtime (D50) over notes-db, and environment Edge places notes-db on partial.other, where platform partial.run runs none: its identity store runs on partial.pg alone")
 }
+
+// TestOAuthPublicBaseURLPopulatedInIdentityConfig verifies #695 item 5:
+// stack lowering populates oauth.publicBaseUrl in <API>_IDENTITY for an OAuth
+// API from its single site origin (or exposed public address), merging into
+// platform defaults and env settings while preserving an explicit
+// oauth.publicBaseUrl.
+func TestOAuthPublicBaseURLPopulatedInIdentityConfig(t *testing.T) {
+	// 1. Served on a site's origin: gets <site-origin>/api/<service>.
+	s := stacktest.Shop()
+	s.Deploy = append(s.Deploy, ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite})
+	s.Expose = nil
+	s.Origins = []*ir.Origin{{Site: ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}, APIs: []ir.ServiceRef{stacktest.ShopAPI}}}
+	services := identityShop()
+	service(services, "shop-api").OAuth = true
+	services = append(services, stack.Service{
+		Name:  "shop-web",
+		Kind:  ir.SchemaKindSite,
+		Calls: []ir.ServiceRef{stacktest.ShopAPI},
+		Site:  &ir.ResolvedSite{Dir: "web/shop-web", Build: "build", Output: "dist", Fallback: "index.html"},
+	})
+	env := mustResolve(t, assemble(t), s, services, "Staging")
+	b := identityOf(env, "shop-api", "shop-api")
+	if b == nil || b.Source != ir.BindingLiteral || b.Value != `{"oauth":{"publicBaseUrl":"https://shop-web.staging.acme.dev/api/shop-api"}}` {
+		t.Fatalf("origin OAuth binding = %+v, want oauth.publicBaseUrl on shop-web origin", b)
+	}
+
+	// 2. Merges into existing env setting while preserving other keys.
+	s2 := stacktest.Shop()
+	s2.Deploy = append(s2.Deploy, ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite})
+	s2.Expose = nil
+	s2.Origins = []*ir.Origin{{Site: ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}, APIs: []ir.ServiceRef{stacktest.ShopAPI}}}
+	s2.Environments[0].Settings = append(s2.Environments[0].Settings, &ir.DeployableSettings{
+		Of:  stacktest.Of(stacktest.ShopAPI),
+		Env: map[string]ir.EnvValue{"SHOP_API_IDENTITY": {Value: `{"cookie":{"secure":false}}`}},
+	})
+	env = mustResolve(t, assemble(t), s2, services, "Staging")
+	b = identityOf(env, "shop-api", "shop-api")
+	if b == nil || b.Value != `{"cookie":{"secure":false},"oauth":{"publicBaseUrl":"https://shop-web.staging.acme.dev/api/shop-api"}}` {
+		t.Fatalf("merged OAuth binding = %+v", b)
+	}
+
+	// 3. Explicit oauth.publicBaseUrl is never overwritten.
+	s3 := stacktest.Shop()
+	s3.Deploy = append(s3.Deploy, ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite})
+	s3.Expose = nil
+	s3.Origins = []*ir.Origin{{Site: ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}, APIs: []ir.ServiceRef{stacktest.ShopAPI}}}
+	explicit := `{"oauth":{"publicBaseUrl":"https://custom.example/api/shop-api"}}`
+	s3.Environments[0].Settings = append(s3.Environments[0].Settings, &ir.DeployableSettings{
+		Of:  stacktest.Of(stacktest.ShopAPI),
+		Env: map[string]ir.EnvValue{"SHOP_API_IDENTITY": {Value: explicit}},
+	})
+	env = mustResolve(t, assemble(t), s3, services, "Staging")
+	b = identityOf(env, "shop-api", "shop-api")
+	if b == nil || b.Value != explicit {
+		t.Fatalf("explicit OAuth binding = %+v, want %s", b, explicit)
+	}
+
+	// 4. Directly exposed API without a site origin gets its own public address.
+	s4 := stacktest.Shop()
+	services4 := identityShop()
+	service(services4, "shop-api").OAuth = true
+	env = mustResolve(t, assemble(t), s4, services4, "Staging")
+	b = identityOf(env, "shop-api", "shop-api")
+	if b == nil || b.Value != `{"oauth":{"publicBaseUrl":"https://shop-api.staging.acme.dev"}}` {
+		t.Fatalf("exposed OAuth binding = %+v, want shop-api public address", b)
+	}
+}

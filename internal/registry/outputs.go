@@ -95,6 +95,11 @@ type APIOutputConfig struct {
 	// The API's @envVars class holds it. A build whose endpoint serves a
 	// tool that asks needs it; ParseOutputs refuses it without mcp.
 	MCPConfirmationKey string `json:"mcpConfirmationKey,omitempty"`
+
+	// MCPInstructions is domain-level instructions returned to MCP clients
+	// during initialize when MCP is enabled. ParseOutputs refuses it without
+	// mcp or when blank.
+	MCPInstructions string `json:"mcpInstructions,omitempty"`
 }
 
 // SQLOutputConfig configures the DB kind's sql output. The DDL and the ORM
@@ -232,6 +237,14 @@ func (o *Outputs) MCPConfirmationKey() string {
 		return ""
 	}
 	return o.API.MCPConfirmationKey
+}
+
+// MCPInstructions is outputs.api.mcpInstructions, or "".
+func (o *Outputs) MCPInstructions() string {
+	if o == nil || o.API == nil {
+		return ""
+	}
+	return o.API.MCPInstructions
 }
 
 // SQL dialects outputs.sql.dialects may list (the SqlDialect type in
@@ -398,6 +411,16 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		}
 		if _, _, ok := SplitEncryptionKey(key); !ok {
 			return nil, fmt.Errorf("outputs.api.mcpConfirmationKey %q must name an @envVars Secret<string> by its declaring type and field, such as \"McpKeys.MCP_CONFIRMATION_KEY\" (D93)", key)
+		}
+	}
+	if apiMap, ok := raw["api"].(map[string]any); ok {
+		if _, set := apiMap["mcpInstructions"]; set {
+			if outputs.API == nil || !outputs.API.MCP {
+				return nil, fmt.Errorf("outputs.api.mcpInstructions is set and outputs.api.mcp is off: only the MCP endpoint sends instructions; turn mcp on, or remove mcpInstructions")
+			}
+			if strings.TrimSpace(outputs.API.MCPInstructions) == "" {
+				return nil, fmt.Errorf("outputs.api.mcpInstructions must be a non-empty string")
+			}
 		}
 	}
 

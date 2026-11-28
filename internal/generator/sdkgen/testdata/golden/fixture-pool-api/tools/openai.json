@@ -7,9 +7,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "exclude": {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
-          "match": {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
-          "prefer": {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]}
+          "exclude": {"description":"The keys of the members the caller tried in this attempt, which pick leaves out.","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+          "match": {"additionalProperties":false,"description":"The members to pick among, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]},
+          "prefer": {"additionalProperties":false,"description":"The members to try first, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]}
         }
       }
     },
@@ -20,9 +20,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "reason": {"description":"A string value","maxLength":256,"minLength":1,"type":"string"},
-          "until": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "reason": {"description":"Why it is out: the provider's word, or the caller's.","maxLength":256,"minLength":1,"type":"string"},
+          "until": {"description":"Until when the member is out, in epoch milliseconds, as the provider named it; outForMs from now when absent, and now for a time already past.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
         },
         "required": ["id", "reason"]
       }
@@ -34,11 +34,11 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "near": {"description":"A boolean value (true or false)","type":["boolean","null"]},
-          "reason": {"description":"A string value","maxLength":256,"minLength":1,"type":["string","null"]},
-          "resetsAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "room": {"description":"A boolean value (true or false)","type":"boolean"}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "near": {"description":"With room: whether the member is near its limit, which pick tries after the open members. Read only with room.","type":["boolean","null"]},
+          "reason": {"description":"With no room: why, the provider's word; when absent, the member's reason when it was out already, else no room. Read only without room.","maxLength":256,"minLength":1,"type":["string","null"]},
+          "resetsAt": {"description":"With no room: when the provider names the member's room back, in epoch milliseconds. Read only without room.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "room": {"description":"Whether the provider has room for the member now.","type":"boolean"}
         },
         "required": ["id", "room"]
       }
@@ -50,9 +50,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]}
+          "amount": {"description":"How much of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]}
         },
         "required": ["id"]
       }
@@ -64,11 +64,11 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-          "resetsAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "used": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"The limit the provider holds the row to, while the observation holds; the meter's own when absent.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"The meter.","enum":["tokens"],"type":"string"},
+          "resetsAt": {"description":"When the provider's count starts again, in epoch milliseconds: the observation lapses then.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "used": {"description":"What the provider counts as used.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
         },
         "required": ["id", "meter", "used"]
       }
@@ -80,9 +80,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"}
+          "amount": {"description":"How much was used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter.","enum":["tokens"],"type":"string"}
         },
         "required": ["amount", "id", "meter"]
       }
@@ -94,11 +94,11 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"A string value","minLength":1,"type":"string"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-          "released": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "schema": {"description":"A string value","minLength":1,"type":"string"}
+          "amount": {"description":"How much it used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"Its id.","minLength":1,"type":"string"},
+          "meter": {"description":"The meter.","enum":["tokens"],"type":"string"},
+          "released": {"description":"How much of its reservation the usage drew down.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "schema": {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"}
         },
         "required": ["amount", "id", "id", "meter", "released", "schema"]
       }
@@ -110,9 +110,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]}
+          "amount": {"description":"How much to reserve of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]}
         },
         "required": ["id"]
       }
@@ -124,10 +124,10 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"A string value","minLength":1,"type":"string"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-          "schema": {"description":"A string value","minLength":1,"type":"string"}
+          "amount": {"description":"How much to hold.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"Its id.","minLength":1,"type":"string"},
+          "meter": {"description":"The meter.","enum":["tokens"],"type":"string"},
+          "schema": {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"}
         },
         "required": ["amount", "id", "id", "meter", "schema"]
       }
@@ -139,9 +139,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"The new limit.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"The meter.","enum":["tokens"],"type":"string"}
         },
         "required": ["id", "limit", "meter"]
       }
@@ -153,8 +153,8 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]}
+          "id": {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"The meter; every meter when absent.","enum":["tokens",null],"type":["string","null"]}
         },
         "required": ["id"]
       }
@@ -166,10 +166,10 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"A string value","minLength":1,"type":"string"},
-          "meter": {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-          "schema": {"description":"A string value","minLength":1,"type":"string"}
+          "amount": {"description":"How much to release.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"Its id.","minLength":1,"type":"string"},
+          "meter": {"description":"The meter.","enum":["tokens"],"type":"string"},
+          "schema": {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"}
         },
         "required": ["amount", "id", "id", "meter", "schema"]
       }

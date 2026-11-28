@@ -370,6 +370,43 @@ func TestGeneratedMCPRuntime(t *testing.T) {
 	tree.runTest(t, "mcp_runtime.test.ts")
 }
 
+func TestMCPInstructionsEmittedInTSRouter(t *testing.T) {
+	fixture := mcpFixture(t, nil)
+	const primer = "Household primer:\n- Amounts are cents (negative = outflow)."
+	output, err := Generate(fixture.schema, fixture.endpoints, Options{
+		SchemaName:      fixture.name,
+		Clock:           fixedClock,
+		MCP:             true,
+		MCPInstructions: primer,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	outDir := t.TempDir()
+	if err := WriteAPI(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	mcpSrc, err := os.ReadFile(filepath.Join(outDir, MCPFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mcpSrc), "export const mcpInstructions: string = 'Household primer:\\n- Amounts are cents (negative = outflow).';") {
+		t.Errorf("mcp.ts missing mcpInstructions:\n%s", mcpSrc)
+	}
+	routerSrc, err := os.ReadFile(filepath.Join(outDir, "router.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"import { mcpInstructions, mcpTools } from './mcp';",
+		"{ ...options.mcp, instructions: options.mcp?.instructions ?? mcpInstructions }",
+	} {
+		if !strings.Contains(string(routerSrc), want) {
+			t.Errorf("router.ts missing %q:\n%s", want, routerSrc)
+		}
+	}
+}
+
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
 	data, err := json.Marshal(value)

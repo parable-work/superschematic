@@ -680,9 +680,9 @@ func TestBehaviorOperationsApply(t *testing.T) {
 		}
 	}
 
-	for _, args := range [][]any{nil, {map[string]any{"class": "Order"}, map[string]any{"class": "Shipment"}}} {
+	for _, args := range [][]any{nil, {map[string]any{"class": "Order"}, map[string]any{}, map[string]any{}}} {
 		err := apply("behaviorOperations", &ir.OperationSet{}, args...)
-		if err == nil || err.Error() != "@behaviorOperations takes one argument, the table whose behaviors' operations the set serves, imported from the API's database: @behaviorOperations(Order)" {
+		if err == nil || !strings.HasPrefix(err.Error(), "@behaviorOperations takes the table whose behaviors' operations the set serves") {
 			t.Errorf("behaviorOperations(%v): %v", args, err)
 		}
 	}
@@ -690,6 +690,57 @@ func TestBehaviorOperationsApply(t *testing.T) {
 	var argErr *ArgError
 	if !errors.As(err, &argErr) || argErr.Index != 0 || !strings.HasPrefix(argErr.Msg, "@behaviorOperations takes the table as a class, imported from the API's database: want a class") {
 		t.Errorf("behaviorOperations(\"Order\") = %v, want the class error", err)
+	}
+
+	withMCP := &ir.OperationSet{}
+	if err := apply("behaviorOperations", withMCP, map[string]any{"class": "Order"}, map[string]any{
+		"mcp": map[string]any{
+			"writeInvocationPolicy": "ask",
+			"behaviors": map[string]any{
+				"comments": map[string]any{"hidden": true, "reason": "Keep MCP tool count small."},
+			},
+			"operations": map[string]any{
+				"comments.list": map[string]any{"hidden": false},
+				"comments.post": map[string]any{"hidden": false, "invocationPolicy": "ask"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("behaviorOperations(Order, { mcp }): %v", err)
+	}
+	wantMCP := &ir.BehaviorOperationsConfig{
+		Type: "Order",
+		MCP: &ir.BehaviorOperationsMCP{
+			WriteInvocationPolicy: "ask",
+			Behaviors: map[string]*ir.BehaviorOperationMCP{
+				"comments": {Hidden: true, Reason: "Keep MCP tool count small."},
+			},
+			Operations: map[string]*ir.BehaviorOperationMCP{
+				"comments.list": {},
+				"comments.post": {InvocationPolicy: "ask"},
+			},
+		},
+	}
+	if !reflect.DeepEqual(withMCP.BehaviorOperations, wantMCP) {
+		t.Errorf("behaviorOperations(Order, { mcp }) = %+v, want %+v", withMCP.BehaviorOperations, wantMCP)
+	}
+
+	for _, c := range []struct {
+		options any
+		want    string
+	}{
+		{"bad", "@behaviorOperations takes its options as an object, { mcp? }"},
+		{map[string]any{"other": true}, "@behaviorOperations takes mcp, not other"},
+		{map[string]any{"mcp": "yes"}, "@behaviorOperations: mcp must be an object literal"},
+		{map[string]any{"mcp": map[string]any{"hidden": true}}, "@behaviorOperations: mcp: hidden: true requires a non-empty reason"},
+		{map[string]any{"mcp": map[string]any{"reason": "orphan"}}, "@behaviorOperations: mcp: reason applies only when hidden is true"},
+		{map[string]any{"mcp": map[string]any{"hidden": true, "reason": "no", "invocationPolicy": "ask"}}, "@behaviorOperations: mcp: hidden: true cannot be combined with invocationPolicy or writeInvocationPolicy"},
+		{map[string]any{"mcp": map[string]any{"invocationPolicy": "never"}}, `@behaviorOperations: mcp.invocationPolicy: invocationPolicy "never" is not one of "auto", "ask"`},
+		{map[string]any{"mcp": map[string]any{"operations": map[string]any{"comments.post": map[string]any{"writeInvocationPolicy": "ask"}}}}, "@behaviorOperations: mcp.operations.comments.post does not take writeInvocationPolicy; use invocationPolicy on an individual operation"},
+	} {
+		err := apply("behaviorOperations", &ir.OperationSet{}, map[string]any{"class": "Order"}, c.options)
+		if !errors.As(err, &argErr) || argErr.Index != 1 || argErr.Msg != c.want {
+			t.Errorf("behaviorOperations(Order, %v) = %v, want %q at options", c.options, err, c.want)
+		}
 	}
 
 	clause := &ir.OperationSet{}

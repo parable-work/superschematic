@@ -3,9 +3,11 @@ package verify
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
@@ -143,6 +145,9 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 				r.errorf("", "%s: @publicRoute contradicts @%s on the class: a public route needs no caller", set.Name, serviceClauseDecorator(set.ServiceCallers.Mode))
 			}
 		}
+		if set.BehaviorOperations.MCP != nil {
+			checkBehaviorOperationsMCPStructure(set, in.registry(), r)
+		}
 		if len(r.Errors) == failed {
 			formed = append(formed, set)
 		}
@@ -176,6 +181,9 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 			continue
 		}
 		served[typeName] = set
+		if set.BehaviorOperations.MCP != nil && !checkBehaviorOperationsMCPTargets(set, td, reg, r) {
+			continue
+		}
 		plan, err := behaviorops.PlanSet(set, in.Database, reg)
 		if err != nil {
 			r.errorf("", "%s: @behaviorOperations(%s): %v", set.Name, typeName, err)
@@ -644,4 +652,108 @@ func setNamespace(set string) string {
 		name = set
 	}
 	return codegen.ToKebabCase(name)
+}
+
+// checkBehaviorOperationsMCPStructure validates the structural and policy
+// invariants of set.BehaviorOperations.MCP (for both TS and JSON/YAML forms).
+func checkBehaviorOperationsMCPStructure(set *ir.OperationSet, reg *registry.Registry, r *Result) {
+	mcp := set.BehaviorOperations.MCP
+	policy := reg.ToolInvocationPolicy()
+	checkRule := func(path string, hidden bool, reason, inv, writeInv string, allowWrite bool) {
+		if hidden {
+			if strings.TrimSpace(reason) == "" {
+				r.errorf("", "%s: @behaviorOperations %s: hidden: true requires a non-empty reason", set.Name, path)
+			}
+			if inv != "" || writeInv != "" {
+				r.errorf("", "%s: @behaviorOperations %s: hidden: true cannot be combined with invocationPolicy or writeInvocationPolicy", set.Name, path)
+			}
+		} else if reason != "" {
+			r.errorf("", "%s: @behaviorOperations %s: reason applies only when hidden is true", set.Name, path)
+		}
+		if inv != "" {
+			if err := policy.CheckValue(inv); err != nil {
+				r.errorf("", "%s: @behaviorOperations %s.invocationPolicy: %v", set.Name, path, err)
+			}
+		}
+		if writeInv != "" {
+			if !allowWrite {
+				r.errorf("", "%s: @behaviorOperations %s does not take writeInvocationPolicy; use invocationPolicy on an individual operation", set.Name, path)
+			} else if err := policy.CheckValue(writeInv); err != nil {
+				r.errorf("", "%s: @behaviorOperations %s.writeInvocationPolicy: %v", set.Name, path, err)
+			}
+		}
+	}
+	checkRule("mcp", mcp.Hidden, mcp.Reason, mcp.InvocationPolicy, mcp.WriteInvocationPolicy, true)
+	for _, use := range slices.Sorted(maps.Keys(mcp.Behaviors)) {
+		rule := mcp.Behaviors[use]
+		if rule == nil {
+			continue
+		}
+		checkRule("mcp.behaviors."+use, rule.Hidden, rule.Reason, rule.InvocationPolicy, rule.WriteInvocationPolicy, true)
+	}
+	for _, opKey := range slices.Sorted(maps.Keys(mcp.Operations)) {
+		rule := mcp.Operations[opKey]
+		if rule == nil {
+			continue
+		}
+		checkRule("mcp.operations."+opKey, rule.Hidden, rule.Reason, rule.InvocationPolicy, rule.WriteInvocationPolicy, false)
+	}
+}
+
+// checkBehaviorOperationsMCPTargets checks that every behavior use and
+// operation named in set.BehaviorOperations.MCP exists on td and is served by
+// the set, and that no two operation keys alias the same operation.
+func checkBehaviorOperationsMCPTargets(set *ir.OperationSet, td *ir.TypeDef, reg *registry.Registry, r *Result) bool {
+	mcp := set.BehaviorOperations.MCP
+	uses := map[string]bool{}
+	var useList []string
+	// canonical maps both "<use>.<op>" and expanded OperationName(use, op) to "<use>.<op>".
+	canonical := map[string]string{}
+	var canonicalList []string
+	for _, ref := range td.TableBehaviors() {
+		use := behaviorlayout.UseMember(ref)
+		if !uses[use] {
+			uses[use] = true
+			useList = append(useList, use)
+		}
+		decl, ok := reg.Behavior(ref.Name)
+		if !ok {
+			continue
+		}
+		for _, op := range decl.Operations {
+			if !behaviorops.Serves(op) || registry.TableLeavesOut(ref.Name, op.Name) != "" {
+				continue
+			}
+			dotted := use + "." + op.Name
+			expanded := behaviorops.OperationName(use, op.Name)
+			canonical[dotted] = dotted
+			canonical[expanded] = dotted
+			canonicalList = append(canonicalList, dotted)
+		}
+	}
+	slices.Sort(useList)
+	slices.Sort(canonicalList)
+	ok := true
+	for _, use := range slices.Sorted(maps.Keys(mcp.Behaviors)) {
+		if !uses[use] {
+			r.errorf("", "%s: @behaviorOperations(%s) mcp.behaviors names %q, which is not a behavior of %s (have: %s)", set.Name, td.Name, use, td.Name, strings.Join(useList, ", "))
+			ok = false
+		}
+	}
+	seenOp := map[string]string{}
+	for _, key := range slices.Sorted(maps.Keys(mcp.Operations)) {
+		target, exists := canonical[key]
+		if !exists {
+			r.errorf("", "%s: @behaviorOperations(%s) mcp.operations names %q, which is not a served operation of %s (have: %s)", set.Name, td.Name, key, td.Name, strings.Join(canonicalList, ", "))
+			ok = false
+			continue
+		}
+		if prev, dup := seenOp[target]; dup {
+			r.errorf("", "%s: @behaviorOperations(%s) mcp.operations names %q and %q, which both refer to %s", set.Name, td.Name, prev, key, target)
+			ok = false
+			continue
+		}
+		seenOp[target] = key
+	}
+	return ok
 }

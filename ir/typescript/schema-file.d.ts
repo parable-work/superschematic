@@ -89,8 +89,25 @@ export interface AudienceDef {
   queue?: string;
 }
 
+export interface BehaviorOperationMCP {
+  hidden?: boolean;
+  invocationPolicy?: string;
+  reason?: string;
+  writeInvocationPolicy?: string;
+}
+
 export interface BehaviorOperationsConfig {
+  mcp?: BehaviorOperationsMCP;
   type: string;
+}
+
+export interface BehaviorOperationsMCP {
+  behaviors?: { [key: string]: BehaviorOperationMCP };
+  hidden?: boolean;
+  invocationPolicy?: string;
+  operations?: { [key: string]: BehaviorOperationMCP };
+  reason?: string;
+  writeInvocationPolicy?: string;
 }
 
 export interface BehaviorRef {

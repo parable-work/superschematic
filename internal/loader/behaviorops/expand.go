@@ -367,6 +367,7 @@ func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDe
 	if out.MCP.Invocation.Value == "" {
 		out.MCP.Invocation.Value = policy.Default
 	}
+	applyBehaviorOperationsMCP(set, out, use, op, policy)
 	if callers := ir.EffectiveServiceCallers(set, out); callers != nil && callers.Mode == ir.ServiceCallersRequire {
 		// Only a calling service reaches the route, so no end user's agent
 		// can call the tool: the tool documents leave it out, and the
@@ -404,6 +405,63 @@ func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDe
 	resultRef, nullable := b.typeOf(result, name, ir.RoleEmbeddedStruct)
 	out.TypeRef, out.Required = resultRef, !nullable
 	return out
+}
+
+// applyBehaviorOperationsMCP applies set.BehaviorOperations.MCP overrides to
+// out: operation-level overrides beat behavior-level overrides, which beat
+// set-level overrides. A visible override at a more specific level unhides
+// an operation whose parent behavior or set is hidden, while inheriting any
+// invocationPolicy / writeInvocationPolicy from outer rules if it sets none
+// of its own.
+func applyBehaviorOperationsMCP(set *ir.OperationSet, out *ir.FieldDef, use string, op registry.BehaviorOperation, policy registry.ToolInvocationPolicy) {
+	if set == nil || set.BehaviorOperations == nil || set.BehaviorOperations.MCP == nil {
+		return
+	}
+	mcp := set.BehaviorOperations.MCP
+	behRule := mcp.Behaviors[use]
+	opRule := mcp.Operations[use+"."+op.Name]
+	if opRule == nil {
+		opRule = mcp.Operations[out.Name]
+	}
+
+	hidden, reason := false, ""
+	switch {
+	case opRule != nil:
+		hidden, reason = opRule.Hidden, opRule.Reason
+	case behRule != nil:
+		hidden, reason = behRule.Hidden, behRule.Reason
+	case mcp.Hidden:
+		hidden, reason = true, mcp.Reason
+	}
+	if hidden {
+		out.MCP = &ir.OperationMCP{Hidden: true, HiddenReason: reason}
+		return
+	}
+
+	rulePolicy := func(rule *ir.BehaviorOperationMCP) string {
+		if rule == nil || rule.Hidden {
+			return ""
+		}
+		if op.Writes && rule.WriteInvocationPolicy != "" {
+			return rule.WriteInvocationPolicy
+		}
+		return rule.InvocationPolicy
+	}
+
+	resolved := rulePolicy(opRule)
+	if resolved == "" {
+		resolved = rulePolicy(behRule)
+	}
+	if resolved == "" && !mcp.Hidden {
+		if op.Writes && mcp.WriteInvocationPolicy != "" {
+			resolved = mcp.WriteInvocationPolicy
+		} else if mcp.InvocationPolicy != "" {
+			resolved = mcp.InvocationPolicy
+		}
+	}
+	if resolved != "" {
+		out.MCP.Invocation = ir.MCPInvocation{Key: policy.Key, Value: resolved}
+	}
 }
 
 // Expand fills each @behaviorOperations set of api with the operations of

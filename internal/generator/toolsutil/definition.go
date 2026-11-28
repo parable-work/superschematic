@@ -97,5 +97,6 @@ func NewToolScalarArg(arg apigen.Param) ToolScalarArg {
 		IsMap:           arg.IsMap,
 		Reference:       arg.Reference,
 		Search:          arg.Search,
+		Description:     arg.Description,
 	}
 }

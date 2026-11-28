@@ -291,14 +291,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f4322c17aff5cd0cafaab5122bc3eacc4acbdaf6021710cf6cc742df5eba85f1',
+    inputSchemaDigest: 'sha256:bd2ff06b4311b1e9b2b3f82b7dee28cfb790dca11699e94b4f8e56ac8c317280',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        exclude: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
-        match: {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
-        prefer: {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
+        exclude: {"description":"The keys of the members the caller tried in this attempt, which pick leaves out.","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+        match: {"additionalProperties":false,"description":"The members to pick among, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]},
+        prefer: {"additionalProperties":false,"description":"The members to try first, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]},
       }
     },
     returns: {
@@ -331,14 +331,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:33dcb8851ec5e56a38feb5f0767163e41dd3c9d06e1e65e5e960eee7c49ee4f7',
+    inputSchemaDigest: 'sha256:ddfdc4cb414f65d17392ae73b121def3b567e1828e99ab2b907e91af607ae568',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        reason: {"description":"A string value","maxLength":256,"minLength":1,"type":"string"},
-        until: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        reason: {"description":"Why it is out: the provider's word, or the caller's.","maxLength":256,"minLength":1,"type":"string"},
+        until: {"description":"Until when the member is out, in epoch milliseconds, as the provider named it; outForMs from now when absent, and now for a time already past.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'reason']
     },
@@ -372,16 +372,16 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:836df0512a192ec8612d5ef54b493bd30a7c4c4b8d663607db95f1ec1e0279ad',
+    inputSchemaDigest: 'sha256:24f899df848a668aa40b8df3336348662d7e9c8d8832736a6c150ad5bf48c90a',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        near: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        reason: {"description":"A string value","maxLength":256,"minLength":1,"type":["string","null"]},
-        resetsAt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        room: {"description":"A boolean value (true or false)","type":"boolean"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        near: {"description":"With room: whether the member is near its limit, which pick tries after the open members. Read only with room.","type":["boolean","null"]},
+        reason: {"description":"With no room: why, the provider's word; when absent, the member's reason when it was out already, else no room. Read only without room.","maxLength":256,"minLength":1,"type":["string","null"]},
+        resetsAt: {"description":"With no room: when the provider names the member's room back, in epoch milliseconds. Read only without room.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        room: {"description":"Whether the provider has room for the member now.","type":"boolean"},
       },
       required: ['id', 'room']
     },
@@ -419,14 +419,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f12fff0d0dd8816ee0e541402c225208914e56090b0f64d2a4cea180acb73bc5',
+    inputSchemaDigest: 'sha256:4df7faef8ea58d3fd3d65f9bc323b65d7cae252984baab0fcd9b90fda96dd92a',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        amount: {"description":"How much of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     },
@@ -460,16 +460,16 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:3bc161880cf28d8658c09c304253d41c50039cd10c73c57cbc8d840336a183db',
+    inputSchemaDigest: 'sha256:b06298367b060d30bdbe80a8b57e987cf20ff906b0346414a9e04895626b9c55',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        resetsAt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        used: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"The limit the provider holds the row to, while the observation holds; the meter's own when absent.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        resetsAt: {"description":"When the provider's count starts again, in epoch milliseconds: the observation lapses then.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        used: {"description":"What the provider counts as used.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'meter', 'used']
     },
@@ -503,14 +503,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:722acb6a830d84c543bc5ed5f66e9267cbc620a35518b38863828138cbc96f99',
+    inputSchemaDigest: 'sha256:e511e8dffb30636f0f99106423736da8a787541efda21100250ac5969d9f72b0',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+        amount: {"description":"How much was used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
       },
       required: ['amount', 'id', 'meter']
     },
@@ -544,16 +544,16 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:e74b2857c26222d31951ebb6d253a76144ccd9cefa558a58c41fe721184e6ec8',
+    inputSchemaDigest: 'sha256:bb4c19b2bda009778d9db26716dbeed7f31a4c33ccfd7c5d17e8606c8243ba89',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        released: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much it used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        released: {"description":"How much of its reservation the usage drew down.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'released', 'schema']
     },
@@ -587,14 +587,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f12fff0d0dd8816ee0e541402c225208914e56090b0f64d2a4cea180acb73bc5',
+    inputSchemaDigest: 'sha256:5be7645396728f8fedb6f6908bd3a282112c5e89336dc8295efbc4fcaff5a9a5',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        amount: {"description":"How much to reserve of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     },
@@ -628,15 +628,15 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:0bbb1e819b022c3fc119bf709761ac425ad61505909f86511b3d548085c384be',
+    inputSchemaDigest: 'sha256:d6f3d4bda4ded06236e33b079a8821a66afe3f3c9cae2082088ca47df248ca9b',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much to hold.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'schema']
     },
@@ -670,14 +670,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:dc15332bec7735afe6b9396044c924e3e2eccccd66a560f8860011f48cb25db9',
+    inputSchemaDigest: 'sha256:03225c11094aeea1a8f3cc3789483e5e684b51fd010287cb5a0e2457e133e0f7',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"The new limit.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
       },
       required: ['id', 'limit', 'meter']
     },
@@ -711,13 +711,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:1d748f075054e179c371ee64f1051339728f08491437995450e7d4c16773c9c8',
+    inputSchemaDigest: 'sha256:64cfe1caeefe45d5030c0c76addae90a7f1f8555392c815bbbf0f1b9820e0d6d',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     },
@@ -751,15 +751,15 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:0bbb1e819b022c3fc119bf709761ac425ad61505909f86511b3d548085c384be',
+    inputSchemaDigest: 'sha256:9b859faca0ff137e805cdbb8bd6e5fd5a1d4c6424419f66c9aaaf8f9abaefc9e',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much to release.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'schema']
     },
@@ -782,9 +782,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        exclude: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
-        match: {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
-        prefer: {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
+        exclude: {"description":"The keys of the members the caller tried in this attempt, which pick leaves out.","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+        match: {"additionalProperties":false,"description":"The members to pick among, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]},
+        prefer: {"additionalProperties":false,"description":"The members to try first, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]},
       }
     }
   },
@@ -795,9 +795,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        reason: {"description":"A string value","maxLength":256,"minLength":1,"type":"string"},
-        until: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        reason: {"description":"Why it is out: the provider's word, or the caller's.","maxLength":256,"minLength":1,"type":"string"},
+        until: {"description":"Until when the member is out, in epoch milliseconds, as the provider named it; outForMs from now when absent, and now for a time already past.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'reason']
     }
@@ -809,11 +809,11 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        near: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        reason: {"description":"A string value","maxLength":256,"minLength":1,"type":["string","null"]},
-        resetsAt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        room: {"description":"A boolean value (true or false)","type":"boolean"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        near: {"description":"With room: whether the member is near its limit, which pick tries after the open members. Read only with room.","type":["boolean","null"]},
+        reason: {"description":"With no room: why, the provider's word; when absent, the member's reason when it was out already, else no room. Read only without room.","maxLength":256,"minLength":1,"type":["string","null"]},
+        resetsAt: {"description":"With no room: when the provider names the member's room back, in epoch milliseconds. Read only without room.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        room: {"description":"Whether the provider has room for the member now.","type":"boolean"},
       },
       required: ['id', 'room']
     }
@@ -825,9 +825,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        amount: {"description":"How much of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     }
@@ -839,11 +839,11 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        resetsAt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        used: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"The limit the provider holds the row to, while the observation holds; the meter's own when absent.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        resetsAt: {"description":"When the provider's count starts again, in epoch milliseconds: the observation lapses then.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        used: {"description":"What the provider counts as used.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'meter', 'used']
     }
@@ -855,9 +855,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+        amount: {"description":"How much was used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
       },
       required: ['amount', 'id', 'meter']
     }
@@ -869,11 +869,11 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        released: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much it used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        released: {"description":"How much of its reservation the usage drew down.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'released', 'schema']
     }
@@ -885,9 +885,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        amount: {"description":"How much to reserve of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     }
@@ -899,10 +899,10 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much to hold.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'schema']
     }
@@ -914,9 +914,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"The new limit.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
       },
       required: ['id', 'limit', 'meter']
     }
@@ -928,8 +928,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     }
@@ -941,10 +941,10 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much to release.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'schema']
     }
@@ -963,9 +963,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        exclude: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
-        match: {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
-        prefer: {"additionalProperties":false,"description":"AccountPoolMatch object","properties":{"kind":{"description":"A string value","type":["string","null"]},"name":{"description":"A string value","type":["string","null"]},"owner":{"description":"A string value","type":["string","null"]},"rank":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"A string value","type":["string","null"]}},"type":["object","null"]},
+        exclude: {"description":"The keys of the members the caller tried in this attempt, which pick leaves out.","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+        match: {"additionalProperties":false,"description":"The members to pick among, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]},
+        prefer: {"additionalProperties":false,"description":"The members to try first, by the values own fields of the table hold, a null member absent; every member when absent.","properties":{"kind":{"description":"The value Account's kind holds.","type":["string","null"]},"name":{"description":"The value Account's name holds.","type":["string","null"]},"owner":{"description":"The value Account's owner holds.","type":["string","null"]},"rank":{"description":"The value Account's rank holds.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},"vendor":{"description":"The value Account's vendor holds.","type":["string","null"]}},"type":["object","null"]},
       }
     }
   },
@@ -976,9 +976,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        reason: {"description":"A string value","maxLength":256,"minLength":1,"type":"string"},
-        until: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        reason: {"description":"Why it is out: the provider's word, or the caller's.","maxLength":256,"minLength":1,"type":"string"},
+        until: {"description":"Until when the member is out, in epoch milliseconds, as the provider named it; outForMs from now when absent, and now for a time already past.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'reason']
     }
@@ -990,11 +990,11 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        near: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        reason: {"description":"A string value","maxLength":256,"minLength":1,"type":["string","null"]},
-        resetsAt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        room: {"description":"A boolean value (true or false)","type":"boolean"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        near: {"description":"With room: whether the member is near its limit, which pick tries after the open members. Read only with room.","type":["boolean","null"]},
+        reason: {"description":"With no room: why, the provider's word; when absent, the member's reason when it was out already, else no room. Read only without room.","maxLength":256,"minLength":1,"type":["string","null"]},
+        resetsAt: {"description":"With no room: when the provider names the member's room back, in epoch milliseconds. Read only without room.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        room: {"description":"Whether the provider has room for the member now.","type":"boolean"},
       },
       required: ['id', 'room']
     }
@@ -1006,9 +1006,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        amount: {"description":"How much of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     }
@@ -1020,11 +1020,11 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        resetsAt: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        used: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"The limit the provider holds the row to, while the observation holds; the meter's own when absent.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        resetsAt: {"description":"When the provider's count starts again, in epoch milliseconds: the observation lapses then.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        used: {"description":"What the provider counts as used.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'meter', 'used']
     }
@@ -1036,9 +1036,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+        amount: {"description":"How much was used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
       },
       required: ['amount', 'id', 'meter']
     }
@@ -1050,11 +1050,11 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        released: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much it used.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        released: {"description":"How much of its reservation the usage drew down.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'released', 'schema']
     }
@@ -1066,9 +1066,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        amount: {"description":"How much to reserve of the meter; its configured reservation when absent. Needs meter.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter with a configured reservation when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     }
@@ -1080,10 +1080,10 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much to hold.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'schema']
     }
@@ -1095,9 +1095,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        limit: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        limit: {"description":"The new limit.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
       },
       required: ['id', 'limit', 'meter']
     }
@@ -1109,8 +1109,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens",null],"type":["string","null"]},
+        id: {"description":"The key of the Account row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        meter: {"description":"The meter; every meter when absent.","enum":["tokens",null],"type":["string","null"]},
       },
       required: ['id']
     }
@@ -1122,10 +1122,10 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        amount: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-        id: {"description":"A string value","minLength":1,"type":"string"},
-        meter: {"description":"A AccountBudgetMeter value","enum":["tokens"],"type":"string"},
-        schema: {"description":"A string value","minLength":1,"type":"string"},
+        amount: {"description":"How much to release.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        id: {"description":"Its id.","minLength":1,"type":"string"},
+        meter: {"description":"The meter.","enum":["tokens"],"type":"string"},
+        schema: {"description":"The schema of the instance inside this scope.","minLength":1,"type":"string"},
       },
       required: ['amount', 'id', 'id', 'meter', 'schema']
     }

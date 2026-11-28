@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,12 @@ import (
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
+)
+
+const (
+	wellKnownPrefix      = "/.well-known/"
+	wellKnownOAuthPrefix = "/.well-known/oauth-"
+	wellKnownOIDCPath    = "/.well-known/openid-configuration"
 )
 
 // The proxy in front of a site's dev server (D82). stack dev serves the
@@ -58,9 +65,12 @@ func SiteProxy(site string, dev *url.URL, apis map[string]*url.URL) http.Handler
 //   - any other path reaches next.
 func OriginProxy(site string, next http.Handler, apis map[string]*url.URL, direct map[string]string) http.Handler {
 	toAPI := make(map[string]http.Handler, len(apis))
+	names := make([]string, 0, len(apis))
 	for service, target := range apis {
 		toAPI[service] = apiProxy(site, service, target)
+		names = append(names, service)
 	}
+	sort.Strings(names)
 	// The paths are matched as they come, not through a ServeMux, which
 	// would redirect a dev server's path that holds a double slash or a
 	// dot segment.
@@ -76,8 +86,90 @@ func OriginProxy(site string, next http.Handler, apis map[string]*url.URL, direc
 				return
 			}
 		}
+		if len(toAPI) > 0 && isWellKnownOAuth(r.URL.Path) {
+			serveWellKnownOAuth(w, r, names, toAPI)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isWellKnownOAuth reports whether p is a root OAuth or OpenID Connect
+// discovery path (#695).
+func isWellKnownOAuth(p string) bool {
+	return strings.HasPrefix(p, wellKnownOAuthPrefix) ||
+		p == wellKnownOIDCPath ||
+		strings.HasPrefix(p, wellKnownOIDCPath+"/")
+}
+
+// wellKnownSuffix returns the path inserted after /.well-known/<document>,
+// or "" for a bare discovery path.
+func wellKnownSuffix(p string) string {
+	rest := strings.TrimPrefix(p, wellKnownPrefix)
+	if _, suffix, ok := strings.Cut(rest, "/"); ok {
+		return "/" + suffix
+	}
+	return ""
+}
+
+// serveWellKnownOAuth forwards a root OAuth/OIDC discovery request to the
+// origin API it names (or, for a bare discovery path, the origin API that
+// answers it), keeping the well-known path intact and setting
+// X-Forwarded-Prefix to that API's prefix (#695).
+func serveWellKnownOAuth(w http.ResponseWriter, r *http.Request, names []string, toAPI map[string]http.Handler) {
+	if suffix := wellKnownSuffix(r.URL.Path); suffix != "" {
+		if rest, ok := strings.CutPrefix(suffix, ir.SiteDevAPIPrefix); ok {
+			service, _, _ := strings.Cut(rest, "/")
+			if proxy, ok := toAPI[service]; ok {
+				proxy.ServeHTTP(w, r)
+				return
+			}
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if len(names) == 1 || (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions) {
+		toAPI[names[0]].ServeHTTP(w, r)
+		return
+	}
+	var last *bufferedResponse
+	for _, service := range names {
+		rec := newBufferedResponse()
+		toAPI[service].ServeHTTP(rec, r)
+		if rec.status != http.StatusNotFound {
+			rec.writeTo(w)
+			return
+		}
+		last = rec
+	}
+	if last != nil {
+		last.writeTo(w)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+type bufferedResponse struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newBufferedResponse() *bufferedResponse {
+	return &bufferedResponse{header: make(http.Header), status: http.StatusOK}
+}
+
+func (b *bufferedResponse) Header() http.Header         { return b.header }
+func (b *bufferedResponse) WriteHeader(code int)        { b.status = code }
+func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
+
+func (b *bufferedResponse) writeTo(w http.ResponseWriter) {
+	dst := w.Header()
+	for k, vals := range b.header {
+		dst[k] = append([]string(nil), vals...)
+	}
+	w.WriteHeader(b.status)
+	_, _ = w.Write(b.body.Bytes())
 }
 
 // serveSiteDevConfig answers a GET or HEAD of the site's config.
@@ -167,18 +259,31 @@ func devProxy(site string, dev *url.URL) *httputil.ReverseProxy {
 }
 
 // prefixLocation puts prefix back on a redirect an API answered within
-// its own routes: a path-absolute location, or one on the API's own origin
-// or on the origin the proxied request named. Any other location is left
-// as it is.
+// its own routes without already carrying prefix: a path-absolute location,
+// or one on the API's own upstream origin when that differs from the site
+// origin. A location already under prefix, or an absolute URL on the site's
+// own origin or any other origin, is left as it is.
 func prefixLocation(location, prefix string, target *url.URL, req *http.Request) string {
 	u, err := url.Parse(location)
 	if err != nil {
 		return location
 	}
+	hasPrefix := func(p string) bool {
+		return p == prefix || strings.HasPrefix(p, prefix+"/")
+	}
 	switch {
 	case u.Scheme == "" && u.Host == "" && strings.HasPrefix(u.Path, "/"):
-	case u.Host == target.Host, req != nil && u.Host == req.Host:
+		if hasPrefix(u.Path) {
+			return location
+		}
+	case u.Host != "" && req != nil && u.Host == req.Host:
+		return location
+	case u.Host != "" && u.Host == target.Host:
 		u.Scheme, u.Host = "", ""
+		if hasPrefix(u.Path) {
+			u.RawPath = ""
+			return u.String()
+		}
 	default:
 		return location
 	}

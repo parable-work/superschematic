@@ -337,12 +337,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    inputSchemaDigest: 'sha256:889d9d22cb68e4f9e68fac978fbb58d82402cce448157d77a83f3f69dff3eb46',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     },
@@ -380,12 +380,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    inputSchemaDigest: 'sha256:889d9d22cb68e4f9e68fac978fbb58d82402cce448157d77a83f3f69dff3eb46',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     },
@@ -419,17 +419,17 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:c3f3966a612f3bcbbdb64770efe442cdea745183e1565e78fac6d239951c7aaf',
+    inputSchemaDigest: 'sha256:f76c6dc7d07f1c1b917d41d7c662aa6d177329c11835860cc9396187e43fdf84',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        caption: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        mediaType: {"description":"A string value","type":"string"},
-        name: {"description":"A string value","type":"string"},
-        sha256: {"description":"A string value","type":"string"},
-        size: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        caption: {"description":"Its caption; none unless given.","type":["string","null"]},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        mediaType: {"description":"The file's media type, which the upload's PUT sends.","type":"string"},
+        name: {"description":"The file's name.","type":"string"},
+        sha256: {"description":"The SHA-256 of the file's bytes, 64 lowercase hex digits.","type":"string"},
+        size: {"description":"The file's size in bytes.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'mediaType', 'name', 'sha256', 'size']
     },
@@ -463,13 +463,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677',
+    inputSchemaDigest: 'sha256:e1896b6ef60cdea8f9f8aa15c799cdd7f67c029c2d0ae88b400d4547f0c64e20',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     },
@@ -499,13 +499,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677',
+    inputSchemaDigest: 'sha256:e1896b6ef60cdea8f9f8aa15c799cdd7f67c029c2d0ae88b400d4547f0c64e20',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     },
@@ -535,16 +535,16 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:7b2ed401442d16e2aa723aaf7f830242f848b62ccfbace068d5e42f4af87c6ca',
+    inputSchemaDigest: 'sha256:f611ae724a5723b6626af148e1dbae67a5e0cab1a06a3a7b947ef36af8f5c71c',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        move: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        move: {"description":"Moves the file itself, which leaves its row; a copy unless set.","type":["boolean","null"]},
+        role: {"description":"The role of the reference the row makes to the other: filed unless given.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the file is filed onto.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['file', 'id', 'to']
     },
@@ -582,12 +582,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    inputSchemaDigest: 'sha256:889d9d22cb68e4f9e68fac978fbb58d82402cce448157d77a83f3f69dff3eb46',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     },
@@ -625,14 +625,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c',
+    inputSchemaDigest: 'sha256:e3c535e09d6bd7914b60b2e161923de0ffbb6fef3cb90b99cb5e0fdac331c5d9',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     },
@@ -662,14 +662,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c',
+    inputSchemaDigest: 'sha256:e3c535e09d6bd7914b60b2e161923de0ffbb6fef3cb90b99cb5e0fdac331c5d9',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     },
@@ -707,12 +707,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    inputSchemaDigest: 'sha256:cbaebb02a108f4452d031fdb00a88e187bff8eb43a16aa8d2420d22777af15bd',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     },
@@ -750,12 +750,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    inputSchemaDigest: 'sha256:cbaebb02a108f4452d031fdb00a88e187bff8eb43a16aa8d2420d22777af15bd',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     },
@@ -789,17 +789,17 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:c3f3966a612f3bcbbdb64770efe442cdea745183e1565e78fac6d239951c7aaf',
+    inputSchemaDigest: 'sha256:22d00ed5e7892fed919acfdf83b9713217ed95ef0dbc3276ea60e818ddacaf28',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        caption: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        mediaType: {"description":"A string value","type":"string"},
-        name: {"description":"A string value","type":"string"},
-        sha256: {"description":"A string value","type":"string"},
-        size: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        caption: {"description":"Its caption; none unless given.","type":["string","null"]},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        mediaType: {"description":"The file's media type, which the upload's PUT sends.","type":"string"},
+        name: {"description":"The file's name.","type":"string"},
+        sha256: {"description":"The SHA-256 of the file's bytes, 64 lowercase hex digits.","type":"string"},
+        size: {"description":"The file's size in bytes.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'mediaType', 'name', 'sha256', 'size']
     },
@@ -829,13 +829,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677',
+    inputSchemaDigest: 'sha256:3708971223279ee5debbdbeab7cb480dee32813750e7c06670814dd2b8e78e0f',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     },
@@ -869,13 +869,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677',
+    inputSchemaDigest: 'sha256:3708971223279ee5debbdbeab7cb480dee32813750e7c06670814dd2b8e78e0f',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     },
@@ -905,13 +905,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677',
+    inputSchemaDigest: 'sha256:3708971223279ee5debbdbeab7cb480dee32813750e7c06670814dd2b8e78e0f',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     },
@@ -941,16 +941,16 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:7b2ed401442d16e2aa723aaf7f830242f848b62ccfbace068d5e42f4af87c6ca',
+    inputSchemaDigest: 'sha256:7c5a473c58985035b3057ea66ca8259637a99abfffe98a29bc7b904fb134b8bd',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        move: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        move: {"description":"Moves the file itself, which leaves its row; a copy unless set.","type":["boolean","null"]},
+        role: {"description":"The role of the reference the row makes to the other: filed unless given.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the file is filed onto.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['file', 'id', 'to']
     },
@@ -988,12 +988,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    inputSchemaDigest: 'sha256:cbaebb02a108f4452d031fdb00a88e187bff8eb43a16aa8d2420d22777af15bd',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     },
@@ -1031,14 +1031,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c',
+    inputSchemaDigest: 'sha256:8dfc2fd94bde6fd16f0bef577736d5dd986497b4ecefbb18279502a2909889fd',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     },
@@ -1068,14 +1068,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c',
+    inputSchemaDigest: 'sha256:8dfc2fd94bde6fd16f0bef577736d5dd986497b4ecefbb18279502a2909889fd',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     },
@@ -1130,7 +1130,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1142,7 +1142,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1154,12 +1154,12 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        caption: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        mediaType: {"description":"A string value","type":"string"},
-        name: {"description":"A string value","type":"string"},
-        sha256: {"description":"A string value","type":"string"},
-        size: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        caption: {"description":"Its caption; none unless given.","type":["string","null"]},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        mediaType: {"description":"The file's media type, which the upload's PUT sends.","type":"string"},
+        name: {"description":"The file's name.","type":"string"},
+        sha256: {"description":"The SHA-256 of the file's bytes, 64 lowercase hex digits.","type":"string"},
+        size: {"description":"The file's size in bytes.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'mediaType', 'name', 'sha256', 'size']
     }
@@ -1171,8 +1171,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1184,8 +1184,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1197,11 +1197,11 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        move: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        move: {"description":"Moves the file itself, which leaves its row; a copy unless set.","type":["boolean","null"]},
+        role: {"description":"The role of the reference the row makes to the other: filed unless given.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the file is filed onto.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['file', 'id', 'to']
     }
@@ -1213,7 +1213,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1225,9 +1225,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }
@@ -1239,9 +1239,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }
@@ -1253,7 +1253,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1265,7 +1265,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1277,12 +1277,12 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        caption: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        mediaType: {"description":"A string value","type":"string"},
-        name: {"description":"A string value","type":"string"},
-        sha256: {"description":"A string value","type":"string"},
-        size: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        caption: {"description":"Its caption; none unless given.","type":["string","null"]},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        mediaType: {"description":"The file's media type, which the upload's PUT sends.","type":"string"},
+        name: {"description":"The file's name.","type":"string"},
+        sha256: {"description":"The SHA-256 of the file's bytes, 64 lowercase hex digits.","type":"string"},
+        size: {"description":"The file's size in bytes.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'mediaType', 'name', 'sha256', 'size']
     }
@@ -1294,8 +1294,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1307,8 +1307,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1320,8 +1320,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1333,11 +1333,11 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        move: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        move: {"description":"Moves the file itself, which leaves its row; a copy unless set.","type":["boolean","null"]},
+        role: {"description":"The role of the reference the row makes to the other: filed unless given.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the file is filed onto.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['file', 'id', 'to']
     }
@@ -1349,7 +1349,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1361,9 +1361,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }
@@ -1375,9 +1375,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }
@@ -1408,7 +1408,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1420,7 +1420,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1432,12 +1432,12 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        caption: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        mediaType: {"description":"A string value","type":"string"},
-        name: {"description":"A string value","type":"string"},
-        sha256: {"description":"A string value","type":"string"},
-        size: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        caption: {"description":"Its caption; none unless given.","type":["string","null"]},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        mediaType: {"description":"The file's media type, which the upload's PUT sends.","type":"string"},
+        name: {"description":"The file's name.","type":"string"},
+        sha256: {"description":"The SHA-256 of the file's bytes, 64 lowercase hex digits.","type":"string"},
+        size: {"description":"The file's size in bytes.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'mediaType', 'name', 'sha256', 'size']
     }
@@ -1449,8 +1449,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1462,8 +1462,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1475,11 +1475,11 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        move: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        move: {"description":"Moves the file itself, which leaves its row; a copy unless set.","type":["boolean","null"]},
+        role: {"description":"The role of the reference the row makes to the other: filed unless given.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the file is filed onto.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['file', 'id', 'to']
     }
@@ -1491,7 +1491,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1503,9 +1503,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }
@@ -1517,9 +1517,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Note row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }
@@ -1531,7 +1531,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1543,7 +1543,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1555,12 +1555,12 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        caption: {"description":"A string value","type":["string","null"]},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        mediaType: {"description":"A string value","type":"string"},
-        name: {"description":"A string value","type":"string"},
-        sha256: {"description":"A string value","type":"string"},
-        size: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+        caption: {"description":"Its caption; none unless given.","type":["string","null"]},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        mediaType: {"description":"The file's media type, which the upload's PUT sends.","type":"string"},
+        name: {"description":"The file's name.","type":"string"},
+        sha256: {"description":"The SHA-256 of the file's bytes, 64 lowercase hex digits.","type":"string"},
+        size: {"description":"The file's size in bytes.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
       },
       required: ['id', 'mediaType', 'name', 'sha256', 'size']
     }
@@ -1572,8 +1572,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1585,8 +1585,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1598,8 +1598,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['file', 'id']
     }
@@ -1611,11 +1611,11 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        file: {"description":"file parameter","type":"string"},
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        move: {"description":"A boolean value (true or false)","type":["boolean","null"]},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        file: {"description":"The id of the file, one of the row's.","type":"string"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        move: {"description":"Moves the file itself, which leaves its row; a copy unless set.","type":["boolean","null"]},
+        role: {"description":"The role of the reference the row makes to the other: filed unless given.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the file is filed onto.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['file', 'id', 'to']
     }
@@ -1627,7 +1627,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['id']
     }
@@ -1639,9 +1639,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }
@@ -1653,9 +1653,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        role: {"description":"A string value","type":["string","null"]},
-        to: {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"},
+        id: {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        role: {"description":"The reference's role: none unless given. A remove with none removes the references of every role.","type":["string","null"]},
+        to: {"additionalProperties":false,"description":"The row the reference points at.","properties":{"key":{"description":"The row's key in its wire form.","type":"string"},"table":{"description":"The row's table, by its type's name (Issue).","type":"string"}},"required":["key","table"],"type":"object"},
       },
       required: ['id', 'to']
     }

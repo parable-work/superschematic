@@ -191,11 +191,12 @@ type FileUploadField struct {
 
 // PathParam represents a path parameter
 type PathParam struct {
-	Name      string            // Parameter name (e.g., "orderId")
-	TSName    string            // TypeScript variable name
-	TSType    string            // TypeScript type
-	IRType    string            // Original IR type name (for JSON Schema conversion)
-	Reference *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
+	Name        string            // Parameter name (e.g., "orderId")
+	TSName      string            // TypeScript variable name
+	TSType      string            // TypeScript type
+	IRType      string            // Original IR type name (for JSON Schema conversion)
+	Reference   *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
+	Description string            // reader-facing description from the schema argument comment
 }
 
 // QueryParam represents a query string parameter (from @query directive)
@@ -214,8 +215,9 @@ type QueryParam struct {
 
 	ir.ValueRules
 
-	Reference *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
-	Search    bool              // the operation's search argument (D62)
+	Reference   *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
+	Search      bool              // the operation's search argument (D62)
+	Description string            // reader-facing description from the schema argument comment
 	// Sort is the paged operation's sort argument (D60, amended), for the
 	// tool documents, which list its values; nil for every other. The
 	// method sends it as the optional string it is, and the route refuses
@@ -531,11 +533,12 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 	tsPathParams := make([]PathParam, len(ep.PathParams))
 	for i, param := range ep.PathParams {
 		tsPathParams[i] = PathParam{
-			Name:      param.Name,
-			TSName:    tsutil.ToCamelCase(param.Name),
-			TSType:    tsutil.IRTypeToTSType(param.Type),
-			IRType:    param.Type,
-			Reference: param.Reference,
+			Name:        param.Name,
+			TSName:      tsutil.ToCamelCase(param.Name),
+			TSType:      tsutil.IRTypeToTSType(param.Type),
+			IRType:      param.Type,
+			Reference:   param.Reference,
+			Description: param.Description,
 		}
 	}
 
@@ -572,9 +575,10 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, uni
 
 			ValueRules: param.ValueRules,
 
-			Reference: param.Reference,
-			Search:    param.Search,
-			Sort:      param.Sort,
+			Reference:   param.Reference,
+			Search:      param.Search,
+			Sort:        param.Sort,
+			Description: param.Description,
 		}
 	}
 

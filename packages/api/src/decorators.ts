@@ -533,6 +533,74 @@ export function userAdministration(_cfg?: UserAdministrationConfig): ClassDecora
 }
 
 /**
+ * MCP override for one behavior operation in `@behaviorOperations`.
+ * A hidden entry names why it is hidden; a visible entry may unhide an
+ * operation from a hidden set or behavior (`hidden: false`) and/or override
+ * its invocation policy.
+ */
+export type BehaviorOperationMCP =
+  | {
+      readonly hidden: true;
+      /** Why the operation is not an MCP tool. */
+      readonly reason: string;
+    }
+  | {
+      readonly hidden?: false;
+      /** Invocation policy for this operation ("auto" or "ask"). */
+      readonly invocationPolicy?: MCPInvocationPolicy;
+    };
+
+/**
+ * MCP override for one behavior use in `@behaviorOperations` (keyed by the
+ * use's member name, such as `"comments"`, `"recurrence"`, or `"status"`).
+ */
+export type BehaviorOperationsBehaviorMCP =
+  | {
+      readonly hidden: true;
+      /** Why the behavior's operations are not MCP tools. */
+      readonly reason: string;
+    }
+  | {
+      readonly hidden?: false;
+      /** Invocation policy for every visible operation of this behavior. */
+      readonly invocationPolicy?: MCPInvocationPolicy;
+      /** Invocation policy for visible write operations of this behavior. */
+      readonly writeInvocationPolicy?: MCPInvocationPolicy;
+    };
+
+/**
+ * MCP visibility and invocation policy overrides for a `@behaviorOperations`
+ * set. More specific entries replace less specific ones (`operations` >
+ * `behaviors` > set level), so a set or behavior can be hidden while
+ * selectively exposing individual operations (`hidden: false`).
+ */
+export type BehaviorOperationsMCP = (
+  | {
+      readonly hidden: true;
+      /** Why the set's operations are not MCP tools. */
+      readonly reason: string;
+    }
+  | {
+      readonly hidden?: false;
+      /** Invocation policy for every visible operation of the set. */
+      readonly invocationPolicy?: MCPInvocationPolicy;
+      /** Invocation policy for visible write operations of the set. */
+      readonly writeInvocationPolicy?: MCPInvocationPolicy;
+    }
+) & {
+  /** Per-behavior overrides, keyed by the use's member name (e.g. `"comments"`, `"status"`). */
+  readonly behaviors?: Readonly<Record<string, BehaviorOperationsBehaviorMCP>>;
+  /** Per-operation overrides, keyed by `"<use>.<operation>"` (e.g. `"comments.list"`) or expanded name (`"commentsList"`). */
+  readonly operations?: Readonly<Record<string, BehaviorOperationMCP>>;
+};
+
+/** Options for `@behaviorOperations(Table, options)`. */
+export type BehaviorOperationsOptions = {
+  /** MCP visibility and invocation policy overrides for the set's generated tools. */
+  readonly mcp?: BehaviorOperationsMCP;
+};
+
+/**
  * Serves the operations of a table's behaviors (D103), on a class with no
  * members: superschematic adds, for each field of the table whose type is a
  * behavior and each operation that behavior declares, a route
@@ -545,16 +613,22 @@ export function userAdministration(_cfg?: UserAdministrationConfig): ClassDecora
  * such class. The class's @auth, @requirePermission and @publicRoute, its
  * service clause, rate limit, body limit and timeout apply to every route it
  * serves; a permission the behavior's config names (a Workflow transition's)
- * is the core's to check. Name the class <Table>Actions to put the SDK
- * methods under the table's name.
+ * is the core's to check. Optional `options.mcp` controls MCP visibility and
+ * invocation policy at the set, behavior, or operation level. Name the class
+ * <Table>Actions to put the SDK methods under the table's name.
  *
  * ```ts
- * @behaviorOperations(Order)
+ * @behaviorOperations(Order, {
+ *   mcp: { writeInvocationPolicy: "ask" }
+ * })
  * @requirePermission(["orders.write"])
  * export abstract class OrderActions {}
  * ```
  */
-export function behaviorOperations(_table: abstract new (...args: never[]) => unknown): ClassDecorator {
+export function behaviorOperations(
+  _table: abstract new (...args: never[]) => unknown,
+  _options?: BehaviorOperationsOptions
+): ClassDecorator {
   return noopClassDecorator;
 }
 

@@ -289,3 +289,102 @@ func TestToolName(t *testing.T) {
 		}
 	}
 }
+
+func TestParamDescriptionsPropagatePurposeCommentAndSourceTable(t *testing.T) {
+	db := &ir.Schema{
+		Name: "household-db",
+		Kind: ir.SchemaKindDB,
+		Types: map[string]*ir.TypeDef{
+			"Entry": {
+				Name: "Entry",
+				Role: ir.RoleDBTable,
+				Fields: []*ir.FieldDef{
+					{Name: "id", Key: true, TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+					{Name: "amountCents", Purpose: "Signed minor units (negative = outflow).", Comment: "Fallback comment.", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Required: true},
+					{Name: "memo", Comment: "Short household note.", TypeRef: ir.TypeRef{Name: "string"}},
+					{Name: "account", Purpose: "Account that owns the entry.", TypeRef: ir.TypeRef{Name: "Account"}, Relation: &ir.RelationDef{Type: "Account", Field: "accountId"}},
+				},
+			},
+		},
+	}
+	api := &ir.Schema{
+		Name: "household-api",
+		Kind: ir.SchemaKindAPI,
+		Scalars: map[string]*ir.ScalarDef{
+			"Identity.UUID": {Name: "Identity.UUID", TypeMappings: map[string]string{"go": "string", "json_schema": "string"}},
+			"Generic.Int64": {Name: "Generic.Int64", TypeMappings: map[string]string{"go": "int64", "json_schema": "integer"}},
+		},
+		Types: map[string]*ir.TypeDef{
+			"CreateEntryInput": {
+				Name:   "CreateEntryInput",
+				Role:   ir.RoleAPIInput,
+				Source: &ir.SourceRef{Target: "household-db.Entry"},
+				Fields: []*ir.FieldDef{
+					{Name: "amountCents", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Required: true},
+					{Name: "memo", TypeRef: ir.TypeRef{Name: "string"}},
+					{Name: "accountId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+					{Name: "override", Purpose: "Explicit @purpose wins.", Comment: "Explicit comment.", TypeRef: ir.TypeRef{Name: "string"}},
+					{Name: "commentOnly", Comment: "Explicit comment only.", TypeRef: ir.TypeRef{Name: "string"}},
+				},
+			},
+			"EntryView": {
+				Name: "EntryView",
+				Role: ir.RoleAPIView,
+				Fields: []*ir.FieldDef{
+					{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+				},
+			},
+		},
+		OperationSets: []*ir.OperationSet{
+			{
+				Name: "Entries",
+				Operations: []*ir.FieldDef{
+					{
+						Name:       "createEntry",
+						HTTPMethod: "POST",
+						RestPath:   "accounts/{accountId}/entries",
+						TypeRef:    ir.TypeRef{Name: "EntryView"},
+						Required:   true,
+						Arguments: []*ir.ArgumentDef{
+							{Name: "accountId", Comment: "Target account path key.", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+							{Name: "dryRun", Comment: "Validate without saving.", IsQuery: true, TypeRef: ir.TypeRef{Name: "boolean"}},
+							{Name: "input", TypeRef: ir.TypeRef{Name: "CreateEntryInput"}, Required: true},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	output, err := apigen.Generate(api, apigen.Options{
+		Provider:     sessionauth.Provider{},
+		SchemaName:   "household-api",
+		Dependencies: map[string]*ir.Schema{"household-db": db},
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	ep := endpointNamed(t, output, "createEntry")
+	if len(ep.PathParams) != 1 || ep.PathParams[0].Description != "Target account path key." {
+		t.Errorf("PathParams = %+v", ep.PathParams)
+	}
+	if len(ep.QueryParams) != 1 || ep.QueryParams[0].Description != "Validate without saving." {
+		t.Errorf("QueryParams = %+v", ep.QueryParams)
+	}
+	got := map[string]string{}
+	for _, f := range ep.InputTypeFields {
+		got[f.Name] = f.Description
+	}
+	want := map[string]string{
+		"amountCents": "Signed minor units (negative = outflow).",
+		"memo":        "Short household note.",
+		"accountId":   "Account that owns the entry.",
+		"override":    "Explicit @purpose wins.",
+		"commentOnly": "Explicit comment only.",
+	}
+	for name, expected := range want {
+		if got[name] != expected {
+			t.Errorf("field %s description = %q, want %q", name, got[name], expected)
+		}
+	}
+}

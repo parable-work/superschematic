@@ -112,3 +112,68 @@ func TestWriterRefusesAFilledBehaviorOperationsSet(t *testing.T) {
 		})
 	}
 }
+
+func TestBehaviorOperationsMCPRoundTrip(t *testing.T) {
+	schema, err := loader.LoadService(tsFixtures + "/fixture-workflow-api")
+	if err != nil {
+		t.Fatalf("loading fixture: %v", err)
+	}
+	db, err := loader.LoadService(tsFixtures + "/fixture-workflow-db")
+	if err != nil {
+		t.Fatalf("loading the database: %v", err)
+	}
+	// Configure MCP overrides on OrderActions and re-expand via reload to get canonical expected IR.
+	for _, set := range schema.OperationSets {
+		if set.Name == "OrderActions" {
+			set.BehaviorOperations.MCP = &ir.BehaviorOperationsMCP{
+				WriteInvocationPolicy: "ask",
+				Behaviors: map[string]*ir.BehaviorOperationMCP{
+					"status": {Hidden: true, Reason: "Only transition exposed."},
+				},
+				Operations: map[string]*ir.BehaviorOperationMCP{
+					"status.transition": {InvocationPolicy: "ask"},
+				},
+			}
+		}
+	}
+	for _, format := range []Format{FormatTS, FormatJSON, FormatYAML} {
+		t.Run(string(format), func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := WriteService(schema, format, dir); err != nil {
+				t.Fatalf("WriteService: %v", err)
+			}
+			cfg := fmt.Sprintf(`{"name": %q, "kind": "API", "dependencies": [{"name": "fixture-workflow-db", "kind": "DB"}], "outputs": {}}`+"\n", schema.Name)
+			if err := os.WriteFile(filepath.Join(dir, "schema.config.json"), []byte(cfg), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if format == FormatTS {
+				writeTSProject(t, dir, schema)
+			}
+			reloaded, err := loader.LoadService(dir, loader.WithDependencyLoader(func(name string) (*ir.Schema, error) {
+				if name != db.Name {
+					return nil, fmt.Errorf("no service %s", name)
+				}
+				return db, nil
+			}))
+			if err != nil {
+				dumpService(t, dir)
+				t.Fatalf("reloading %s output: %v", format, err)
+			}
+			for _, set := range reloaded.OperationSets {
+				if set.Name != "OrderActions" {
+					continue
+				}
+				if set.BehaviorOperations.MCP == nil || set.BehaviorOperations.MCP.WriteInvocationPolicy != "ask" {
+					t.Fatalf("reloaded OrderActions MCP = %+v", set.BehaviorOperations.MCP)
+				}
+				for _, op := range set.Operations {
+					if op.Name == "statusTransition" {
+						if op.MCP == nil || op.MCP.Hidden || op.MCP.Invocation.Value != "ask" {
+							t.Errorf("reloaded statusTransition MCP = %+v, want visible ask", op.MCP)
+						}
+					}
+				}
+			}
+		})
+	}
+}

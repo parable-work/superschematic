@@ -209,7 +209,7 @@ import type { {{ join .GraphFacades ", " }} } from '{{ .GraphFacadeModule }}';
 {{- end }}
 import type { Implementations{{ range .FilterTypeNames }}, {{ . }}{{ end }} } from './interfaces';
 {{- if .MCP }}
-import { mcpTools } from './mcp';
+import { {{ if .MCP.Instructions }}mcpInstructions, {{ end }}mcpTools } from './mcp';
 {{- end }}
 import { openAPIJSON } from './openapi';
 
@@ -890,7 +890,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     { api: {{ tsString .SchemaName }}, version: options.openAPIVersion || DEFAULT_OPENAPI_VERSION, requiresAuth: {{ .MCP.RequiresAuth }} },
 {{- if and .Identity .Identity.OAuth }}
     // The 401 names where a client signs in (#695).
-    { ...options.mcp, challenge: options.mcp?.challenge ?? oauthChallenge(runtime.identity) }
+    { ...options.mcp, challenge: options.mcp?.challenge ?? oauthChallenge(runtime.identity){{ if .MCP.Instructions }}, instructions: options.mcp?.instructions ?? mcpInstructions{{ end }} }
+{{- else if .MCP.Instructions }}
+    { ...options.mcp, instructions: options.mcp?.instructions ?? mcpInstructions }
 {{- else }}
     options.mcp
 {{- end }}

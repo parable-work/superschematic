@@ -413,14 +413,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:aed6c6b7c9e496d40c648350870a1e0c00711c9421709b615aaabdf5b0acec07',
+    inputSchemaDigest: 'sha256:506242df7020e39c128d7bfbefae02f64b8bdb4bd22ba655f92b5f20623bed7d',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        expiresInSeconds: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        name: {"description":"A string value","maxLength":100,"minLength":1,"type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+        expiresInSeconds: {"description":"How long the key lives, in seconds, from 1 to the longest the API's identity config allows; that longest when absent.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        name: {"description":"What the caller calls the key, 1 to 100 characters.","maxLength":100,"minLength":1,"type":"string"},
+        permissions: {"description":"The permissions the key holds, each of which the caller holds; every permission the caller holds, as their roles change, when absent.","items":{"description":"A string value","type":"string"},"type":["array","null"]},
       },
       required: ['name']
     },
@@ -482,14 +482,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:03a9bbcf56877a7659368d2e6fe2c41c36a38b4cd958695b2726618cc26a763b',
+    inputSchemaDigest: 'sha256:2117caf69c4395250044ffc760dd9c8cb756a481a3827dfb8cf21a6d6d7cf2c2',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        session: {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        password: {"description":"The user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        session: {"description":"How the session travels; bearer when absent.","enum":["bearer","cookie",null],"type":["string","null"]},
       },
       required: ['login', 'password']
     },
@@ -579,13 +579,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a441fcf2c75873b5f0aba80576a07ab531b13a775a0ddf218552bcf5e349383e',
+    inputSchemaDigest: 'sha256:df57aca9178b213799b156af5198e91973a0aab3155b37ea8aaadd76256e4e56',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        current: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        current: {"description":"The caller's current password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        password: {"description":"The new password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['current', 'password']
     },
@@ -615,15 +615,15 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:58d29a839e7a4125ec46e1ed00558f7548298b07c9b87f93d8cc495a89cb4213',
+    inputSchemaDigest: 'sha256:c94c07e81010c19ffc776ad53011d787c0d83f354b6c53ffe5599213082e7ba3',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        session: {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        name: {"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+        password: {"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        session: {"description":"How the session travels; bearer when absent.","enum":["bearer","cookie",null],"type":["string","null"]},
       },
       required: ['login', 'password']
     },
@@ -684,13 +684,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:6aa2e838b5f294ac3216f15cf531c881ba0d8f6fb036fc2ca0dbbe4daad8ff8e',
+    inputSchemaDigest: 'sha256:4290877c1aa21ee1585f8d9cdf76a4de74fd7539237168f603e3f3e671f62c81',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         name: {"description":"A string value","type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
+        permissions: {"description":"The permissions the role grants.","items":{"description":"A string value","type":"string"},"type":"array"},
       },
       required: ['name', 'permissions']
     },
@@ -749,14 +749,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:83795bd760cbabd100d62cc73a04fbd1e734a81a51d1d8c8f46fd86847a6249c',
+    inputSchemaDigest: 'sha256:406e67f07f0dda7c874002d0e4a978138de68ae45755e022a012ccb2b03405db',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         name: {"description":"A string value","type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
+        permissions: {"description":"The permissions the role grants.","items":{"description":"A string value","type":"string"},"type":"array"},
       },
       required: ['id', 'name', 'permissions']
     },
@@ -783,12 +783,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:cadd059fba88b02165defad0a5e28a300fe1cdf9b401d77ae842de4363a9cb6c',
+    inputSchemaDigest: 'sha256:baf325147686f2d9265e3aa0e89436d6ceebdd3ed46226fb0b1e39ba8e99d838',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        pending: {"description":"A boolean value (true or false)","type":["boolean","null"]},
+        pending: {"description":"true lists the users waiting for approval alone, false the others; every user when absent.","type":["boolean","null"]},
       }
     },
     returns: {
@@ -821,14 +821,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a5b424663f1beb52c7c0c42b6de7edecd7d0943d80f75a9821a60ca66250f9e8',
+    inputSchemaDigest: 'sha256:31da48b952e35e6042c11871f02291e9f8cb42f963bd2fa341d91b1cf69e2ffb',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        name: {"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+        password: {"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['login', 'password']
     },
@@ -1055,13 +1055,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:7cd2c492d5fb2a70dcf1a61d9cb47f7a9bb6a1ac4faa4c00994e89fa9f0ce7af',
+    inputSchemaDigest: 'sha256:fdcc3231ca90d957002d562390dcbd68c771a65f6ff704399922741913737176',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        password: {"description":"The new password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['id', 'password']
     },
@@ -1200,9 +1200,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        expiresInSeconds: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        name: {"description":"A string value","maxLength":100,"minLength":1,"type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+        expiresInSeconds: {"description":"How long the key lives, in seconds, from 1 to the longest the API's identity config allows; that longest when absent.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        name: {"description":"What the caller calls the key, 1 to 100 characters.","maxLength":100,"minLength":1,"type":"string"},
+        permissions: {"description":"The permissions the key holds, each of which the caller holds; every permission the caller holds, as their roles change, when absent.","items":{"description":"A string value","type":"string"},"type":["array","null"]},
       },
       required: ['name']
     }
@@ -1226,9 +1226,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        session: {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        password: {"description":"The user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        session: {"description":"How the session travels; bearer when absent.","enum":["bearer","cookie",null],"type":["string","null"]},
       },
       required: ['login', 'password']
     }
@@ -1260,8 +1260,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        current: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        current: {"description":"The caller's current password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        password: {"description":"The new password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['current', 'password']
     }
@@ -1273,10 +1273,10 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        session: {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        name: {"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+        password: {"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        session: {"description":"How the session travels; bearer when absent.","enum":["bearer","cookie",null],"type":["string","null"]},
       },
       required: ['login', 'password']
     }
@@ -1299,7 +1299,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       additionalProperties: false,
       properties: {
         name: {"description":"A string value","type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
+        permissions: {"description":"The permissions the role grants.","items":{"description":"A string value","type":"string"},"type":"array"},
       },
       required: ['name', 'permissions']
     }
@@ -1325,7 +1325,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         name: {"description":"A string value","type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
+        permissions: {"description":"The permissions the role grants.","items":{"description":"A string value","type":"string"},"type":"array"},
       },
       required: ['id', 'name', 'permissions']
     }
@@ -1337,7 +1337,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        pending: {"description":"A boolean value (true or false)","type":["boolean","null"]},
+        pending: {"description":"true lists the users waiting for approval alone, false the others; every user when absent.","type":["boolean","null"]},
       }
     }
   },
@@ -1348,9 +1348,9 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        name: {"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+        password: {"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['login', 'password']
     }
@@ -1436,7 +1436,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        password: {"description":"The new password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['id', 'password']
     }
@@ -1511,9 +1511,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        expiresInSeconds: {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
-        name: {"description":"A string value","maxLength":100,"minLength":1,"type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":["array","null"]},
+        expiresInSeconds: {"description":"How long the key lives, in seconds, from 1 to the longest the API's identity config allows; that longest when absent.","maximum":9007199254740991,"minimum":-9007199254740991,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+        name: {"description":"What the caller calls the key, 1 to 100 characters.","maxLength":100,"minLength":1,"type":"string"},
+        permissions: {"description":"The permissions the key holds, each of which the caller holds; every permission the caller holds, as their roles change, when absent.","items":{"description":"A string value","type":"string"},"type":["array","null"]},
       },
       required: ['name']
     }
@@ -1537,9 +1537,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        session: {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        password: {"description":"The user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        session: {"description":"How the session travels; bearer when absent.","enum":["bearer","cookie",null],"type":["string","null"]},
       },
       required: ['login', 'password']
     }
@@ -1571,8 +1571,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        current: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        current: {"description":"The caller's current password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        password: {"description":"The new password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['current', 'password']
     }
@@ -1584,10 +1584,10 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
-        session: {"description":"A SessionTransport value","enum":["bearer","cookie",null],"type":["string","null"]},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        name: {"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+        password: {"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        session: {"description":"How the session travels; bearer when absent.","enum":["bearer","cookie",null],"type":["string","null"]},
       },
       required: ['login', 'password']
     }
@@ -1610,7 +1610,7 @@ export const anthropicTools: AnthropicTool[] = [
       additionalProperties: false,
       properties: {
         name: {"description":"A string value","type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
+        permissions: {"description":"The permissions the role grants.","items":{"description":"A string value","type":"string"},"type":"array"},
       },
       required: ['name', 'permissions']
     }
@@ -1636,7 +1636,7 @@ export const anthropicTools: AnthropicTool[] = [
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         name: {"description":"A string value","type":"string"},
-        permissions: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
+        permissions: {"description":"The permissions the role grants.","items":{"description":"A string value","type":"string"},"type":"array"},
       },
       required: ['id', 'name', 'permissions']
     }
@@ -1648,7 +1648,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        pending: {"description":"A boolean value (true or false)","type":["boolean","null"]},
+        pending: {"description":"true lists the users waiting for approval alone, false the others; every user when absent.","type":["boolean","null"]},
       }
     }
   },
@@ -1659,9 +1659,9 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        login: {"description":"An email address","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
-        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        login: {"description":"The user's login, as their User row holds it.","format":"email","maxLength":255,"type":"string","x-superschematic-scalar":"Contact.Email"},
+        name: {"description":"The user's display name; the login when absent.","maxLength":80,"minLength":2,"type":["string","null"],"x-superschematic-scalar":"Identity.Name"},
+        password: {"description":"The new user's password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['login', 'password']
     }
@@ -1747,7 +1747,7 @@ export const anthropicTools: AnthropicTool[] = [
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        password: {"description":"User password (minimum 8 characters)","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
+        password: {"description":"The new password.","maxLength":128,"minLength":8,"type":"string","x-superschematic-scalar":"Auth.Password"},
       },
       required: ['id', 'password']
     }

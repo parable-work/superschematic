@@ -31,14 +31,14 @@
       "requiredPermissions": ["tickets.write"],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:4b2c8f9e996d2c288cbbbea5be6e55016663910a322f0fe0e6a6b875c1da5a4d",
+      "inputSchemaDigest": "sha256:73b60cad5d674fa142bb566d4e94cfb43e6baef5c7611061c7ff823c49f53f5e",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "from": {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed",null],"type":["string","null"]},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-          "to": {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed"],"type":"string"}
+          "from": {"description":"The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.","enum":["open","waiting","escalated","closed",null],"type":["string","null"]},
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"The state to move to.","enum":["open","waiting","escalated","closed"],"type":"string"}
         },
         "required": ["id", "to"]
       },
@@ -75,13 +75,13 @@
       "requiredPermissions": ["tickets.write"],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:32b4968b15df81c4a7524e4ea44105c816215f2972e62d83f1477efe75d66ba9",
+      "inputSchemaDigest": "sha256:c94d9adf9b020697e3f505f2c966136adb3bd5515266d7ea4336fe451c74de05",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "deadline": {"description":"A TicketTimersDeadline value","enum":["idle","remind","respond"],"type":"string"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "deadline": {"description":"The deadline's name.","enum":["idle","remind","respond"],"type":"string"},
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["deadline", "id"]
       },
@@ -118,13 +118,13 @@
       "requiredPermissions": ["tickets.write"],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:32b4968b15df81c4a7524e4ea44105c816215f2972e62d83f1477efe75d66ba9",
+      "inputSchemaDigest": "sha256:c94d9adf9b020697e3f505f2c966136adb3bd5515266d7ea4336fe451c74de05",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "deadline": {"description":"A TicketTimersDeadline value","enum":["idle","remind","respond"],"type":"string"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "deadline": {"description":"The deadline's name.","enum":["idle","remind","respond"],"type":"string"},
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["deadline", "id"]
       },
@@ -161,14 +161,14 @@
       "requiredPermissions": ["tickets.write"],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:80151998f4597cec016fa267d9b3daaad93cdbc01f5ffc725ceb230672ff5f5b",
+      "inputSchemaDigest": "sha256:39b0b97cb3bd9f59c365eca8c3c43b60534494146c3d24127aacff384986dc06",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "deadline": {"description":"A TicketTimersDeadline value","enum":["idle","remind","respond"],"type":"string"},
-          "dueAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
-          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+          "deadline": {"description":"The deadline's name.","enum":["idle","remind","respond"],"type":"string"},
+          "dueAt": {"description":"When it is due, in epoch milliseconds.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"The key of the Ticket row the operation runs on.","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
         },
         "required": ["deadline", "dueAt", "id"]
       },

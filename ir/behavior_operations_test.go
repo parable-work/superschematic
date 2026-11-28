@@ -92,4 +92,45 @@ func TestBehaviorOperationsMarshal(t *testing.T) {
 	if none.IsBehaviorOperations() || (&OperationSet{}).IsBehaviorOperations() {
 		t.Error("a nil or plain set is a @behaviorOperations set")
 	}
+
+	withMCP := &OperationSet{
+		Name:       "ObligationActions",
+		Operations: []*FieldDef{},
+		BehaviorOperations: &BehaviorOperationsConfig{
+			Type: "Obligation",
+			MCP: &BehaviorOperationsMCP{
+				WriteInvocationPolicy: "ask",
+				Behaviors: map[string]*BehaviorOperationMCP{
+					"recurrence": {Hidden: true, Reason: "Worker only."},
+					"comments":   {Hidden: true, Reason: "Only list and post are exposed."},
+				},
+				Operations: map[string]*BehaviorOperationMCP{
+					"comments.list": {},
+					"comments.post": {InvocationPolicy: "ask"},
+				},
+			},
+		},
+	}
+	mcpJSON, err := json.Marshal(withMCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mcpBack OperationSet
+	if err := json.Unmarshal(mcpJSON, &mcpBack); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&mcpBack, withMCP) {
+		t.Errorf("withMCP JSON round-trip = %+v, want %+v", mcpBack.BehaviorOperations, withMCP.BehaviorOperations)
+	}
+	mcpYAML, err := yaml.Marshal(withMCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mcpYAMLBack OperationSet
+	if err := yaml.Unmarshal(mcpYAML, &mcpYAMLBack); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&mcpYAMLBack, withMCP) {
+		t.Errorf("withMCP YAML round-trip = %+v, want %+v\n%s", mcpYAMLBack.BehaviorOperations, withMCP.BehaviorOperations, mcpYAML)
+	}
 }

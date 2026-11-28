@@ -65,6 +65,24 @@ export default {
     expect('a path with a double slash', (await ask('/api/shop-storefront//orders')).seen.path, '//orders');
     const old = await ask('/api/shop-storefront/old');
     expect('a redirect within the API', [old.status, old.headers.get('location')], [303, '/api/shop-storefront/me?from=old']);
+    const oauthConsent = await ask('/api/shop-storefront/oauth/authorize');
+    expect('an OAuth redirect to prefixed site URL does not double-prefix', [oauthConsent.status, oauthConsent.headers.get('location')], [302, `${env.SITE_URL}/api/shop-storefront/oauth/consent?request=req-1`]);
+    const oauthSpa = await ask('/api/shop-storefront/oauth/authorize?mode=spa');
+    expect('an OAuth redirect to a custom SPA consentPath on the site origin stays unprefixed', [oauthSpa.status, oauthSpa.headers.get('location')], [302, `${env.SITE_URL}/oauth/consent?request=req-1`]);
+    const oauthRel = await ask('/api/shop-storefront/oauth/authorize?mode=relative-prefixed');
+    expect('an already-prefixed path-absolute redirect does not double-prefix', [oauthRel.status, oauthRel.headers.get('location')], [302, '/api/shop-storefront/oauth/consent?request=req-1']);
+    for (const wk of [
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/oauth-protected-resource/api/shop-storefront/api/mcp',
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-authorization-server/api/shop-storefront',
+      '/.well-known/openid-configuration',
+      '/.well-known/openid-configuration/api/shop-storefront',
+    ]) {
+      const doc = await ask(wk);
+      expect(`discovery ${wk}`, [doc.status, JSON.parse(doc.body)], [200, { path: wk, prefix: '/api/shop-storefront' }]);
+    }
+    expect('discovery for unknown origin API returns 404', (await ask('/.well-known/oauth-protected-resource/api/unknown/api/mcp')).status, 404);
     const missing = await ask('/api/shop-storefront/orders/9');
     expect("the API's 404", [missing.status, missing.body], [404, '{"code":"not_found"}']);
 

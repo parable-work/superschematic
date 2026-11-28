@@ -44,6 +44,29 @@ export default {
     if (url.pathname === '/old') {
       return answer(303, null, { location: '/me?from=old' });
     }
+    if (url.pathname === '/oauth/authorize') {
+      const prefix = request.headers.get('x-forwarded-prefix') ?? '';
+      const mode = url.searchParams.get('mode');
+      if (mode === 'spa') {
+        return answer(302, null, { location: `https://${host}/oauth/consent?request=req-1` });
+      }
+      if (mode === 'relative-prefixed') {
+        return answer(302, null, { location: `${prefix}/oauth/consent?request=req-1` });
+      }
+      return answer(302, null, { location: `https://${host}${prefix}/oauth/consent?request=req-1` });
+    }
+    if (
+      url.pathname === '/.well-known/oauth-protected-resource' ||
+      url.pathname === '/.well-known/oauth-protected-resource/api/shop-storefront/api/mcp' ||
+      url.pathname === '/.well-known/oauth-authorization-server' ||
+      url.pathname === '/.well-known/oauth-authorization-server/api/shop-storefront' ||
+      url.pathname === '/.well-known/openid-configuration' ||
+      url.pathname === '/.well-known/openid-configuration/api/shop-storefront'
+    ) {
+      return answer(200, JSON.stringify({ path: url.pathname, prefix: request.headers.get('x-forwarded-prefix') }), {
+        'content-type': 'application/json',
+      });
+    }
     return answer(404, '{"code":"not_found"}', { 'content-type': 'application/json' });
   },
 };

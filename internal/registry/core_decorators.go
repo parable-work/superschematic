@@ -372,7 +372,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// pass refuses the clause on any other set. @requireOwnership has no
 	// class form: the routes run no implementation that could check what
 	// the caller owns.
-	specs = append(specs, behaviorOperationsDecorator(), behaviorWorkerDecorator())
+	specs = append(specs, behaviorOperationsDecorator(r.ToolInvocationPolicy), behaviorWorkerDecorator())
 	// A version graph's operations (D138), on a class with no members
 	// (core_graph_operations.go), which takes the same clause.
 	specs = append(specs, graphOperationsDecorator())

@@ -193,10 +193,11 @@ func endpointToTool(
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
 		pathParams[i] = ToolPathParam{
-			Name:      p.Name,
-			TSName:    tsutil.ToCamelCase(p.Name),
-			Type:      p.Type,
-			Reference: p.Reference,
+			Name:        p.Name,
+			TSName:      tsutil.ToCamelCase(p.Name),
+			Type:        p.Type,
+			Reference:   p.Reference,
+			Description: p.Description,
 		}
 	}
 
@@ -211,6 +212,7 @@ func endpointToTool(
 			Required: arg.Required, IsArray: arg.IsArray, IsMap: arg.IsMap,
 			ValueRules: arg.ValueRules,
 			Reference:  arg.Reference, Search: arg.Search, Sort: arg.Sort,
+			Description: arg.Description,
 		}
 	}
 

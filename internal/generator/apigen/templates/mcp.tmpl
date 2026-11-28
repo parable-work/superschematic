@@ -49,6 +49,12 @@ type MCPOptions = runtimemcp.EndpointOptions
 // mcpTools are the API's tools, as JSON: the table the runtime's Mount
 // reads, each tool naming its operation, <namespace>.<name>, and its route.
 const mcpTools = {{ $m.ToolsLiteral }}
+{{- if $m.Instructions }}
+
+// mcpInstructions is outputs.api.mcpInstructions, sent to clients on
+// initialize unless Config.MCP.Instructions overrides it.
+const mcpInstructions = {{ printf "%q" $m.Instructions }}
+{{- end }}
 
 // mcpEndpoint is the API's MCP endpoint over root, the router a call of a
 // tool is a request to; an error when the runtime refuses the mount{{ if $m.Confirming }}: Config.MCP.ConfirmationKey
@@ -59,6 +65,12 @@ func mcpEndpoint(root gohttp.Handler, cfg Config, version string) (gohttp.Handle
 	if err != nil {
 		return nil, err
 	}
+{{- if $m.Instructions }}
+	opts := cfg.MCP
+	if opts.Instructions == "" {
+		opts.Instructions = mcpInstructions
+	}
+{{- end }}
 	return runtimemcp.Mount{
 		API:          {{ printf "%q" .SchemaName }},
 		Version:      version,
@@ -86,7 +98,7 @@ func mcpEndpoint(root gohttp.Handler, cfg Config, version string) (gohttp.Handle
 {{- end }}
 {{- end }}
 		},
-	}.Handler(cfg.MCP)
+	}.Handler({{ if $m.Instructions }}opts{{ else }}cfg.MCP{{ end }})
 }
 
 // registerMCP mounts handler at /mcp of r, the /api group: POST, and GET

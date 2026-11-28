@@ -446,3 +446,42 @@ fn the_tool_that_asks_runs_through_an_operation_of_the_crates_table() {
     assert!(API_CRATE::operations::ALL.iter().any(|operation| operation.name == "OPERATION"));
 }
 `
+
+func TestMCPInstructionsEmittedInRustRouter(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
+	if err != nil {
+		t.Fatalf("load fixture-mcp: %v", err)
+	}
+	outDir := t.TempDir()
+	const primer = "Household primer:\n- Amounts are cents."
+	output, err := generateFrom(schema, apiSource{}, Options{
+		SchemaName:      "fixture-mcp",
+		TypesCrate:      "schemas-fixture-mcp-types",
+		TypesDir:        filepath.Join(outDir, "types", "rust", "fixture-mcp"),
+		OutputDir:       filepath.Join(outDir, "api", "fixture-mcp"),
+		Clock:           codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		MCP:             true,
+		MCPInstructions: primer,
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if err := WriteAPI(output, filepath.Join(outDir, "api", "fixture-mcp")); err != nil {
+		t.Fatal(err)
+	}
+	module, err := os.ReadFile(filepath.Join(outDir, "api", "fixture-mcp", "src", filepath.FromSlash(MCPFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"pub const INSTRUCTIONS: &str = r#\"Household primer:\n- Amounts are cents.\"#;",
+		"let mut mcp_options = options.mcp.clone();",
+		"if mcp_options.instructions.is_none() {",
+		"mcp_options.instructions = Some(INSTRUCTIONS.to_string());",
+		"match mount.router(&mcp_options) {",
+	} {
+		if !strings.Contains(string(module), want) {
+			t.Errorf("mcp.rs missing %q:\n%s", want, module)
+		}
+	}
+}
