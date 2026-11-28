@@ -23,10 +23,10 @@ stop switch ends every run in flight.
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
-| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues, and a generated Rust server that does the same on Postgres | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; `@autonomy` in a Go server, which serves no MCP endpoint |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues, and a generated Rust server that does the same on Postgres and on a SQLite file (#725) | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; `@autonomy` in a Go server, which serves no MCP endpoint |
 | the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres and SQLite | |
 | a generated Go server that builds the dispatcher, the notifier and the inbound path into its `Deps`, mounts their routes and runs their queues ([the generated Go server](#the-generated-go-server)) | the same over a database that lists `sqlite` first (#717) |
-| the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres and SQLite | a generated Rust server that builds the dispatcher over a database that lists `sqlite` first (#725) |
+| the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres and SQLite | |
 
 [D158](https://github.com/parable-work/superschematic/issues/607) and [D183](https://github.com/parable-work/superschematic/issues/612)
 record the design and what is left. `examples/agent-orchestration` is
@@ -463,5 +463,5 @@ triggers'; the `search` tool reads the FTS5 index (D186); and
 `AgentToolRun`, and an `AskThread`, a `FollowUp` and an `OnReturn` are
 given `orm::store::TxRepositories`, the repositories of the transaction on
 either dialect, whose statements answer at once on SQLite. A generated
-Rust server over a database that lists `sqlite` first does not build the
-dispatcher yet (#725).
+Rust server over a database that lists `sqlite` first builds the
+dispatcher over the file, and its requests' worker claims there (#725).

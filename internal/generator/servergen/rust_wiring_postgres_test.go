@@ -33,12 +33,19 @@ var wiredImplementation string
 // denied. It returns the repository root and the binaries' directory.
 func buildWiredFixture(t *testing.T, cargo string) (string, string) {
 	t.Helper()
+	return buildWiredFixtureOn(t, cargo, wiredImplementation, "postgres")
+}
+
+// buildWiredFixtureOn is buildWiredFixture with implementation as the
+// API's and dialects as its database's SQL dialects (#725).
+func buildWiredFixtureOn(t *testing.T, cargo, implementation string, dialects ...any) (string, string) {
+	t.Helper()
 	paths := testpaths.Local(t)
 	repoRoot := testpaths.TempDir(t)
-	f := loadWiredFixture(t)
+	f := loadWiredFixtureOn(t, dialects...)
 	f.build(t, repoRoot, paths, wiredOrder...)
 	lib := filepath.Join(naming.Default().RustImplementationDir(repoRoot, wiredAPI), rustrestgen.ImplementationLib)
-	if err := os.WriteFile(lib, []byte(wiredImplementation), 0o644); err != nil {
+	if err := os.WriteFile(lib, []byte(implementation), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	f.build(t, repoRoot, paths, wiredStack)

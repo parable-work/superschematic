@@ -241,6 +241,53 @@ pub fn call_calendar_tool(
     read_calendar(repositories, principal, &read, options)
 }
 
+/// The calendar as a tool of a generated router's MCP endpoint on a SQLite
+/// file (#617, #725), the Postgres `CalendarTool`'s: [`calendar_mcp_tool`],
+/// each call run as the endpoint's caller over the file's repositories on a
+/// reading connection ([`call_calendar_tool`]).
+///
+/// [`calendar_mcp_tool`]: super::calendar_mcp_tool
+#[derive(Clone)]
+pub struct CalendarTool {
+    /// The file, the database's definition and its fields' keys.
+    pub tables: Tables,
+    /// The permission each source needs.
+    pub options: CalendarOptions,
+}
+
+#[async_trait::async_trait]
+impl crate::mcp::EndpointTool for CalendarTool {
+    fn tool(&self) -> crate::mcp::Tool {
+        serde_json::from_value(super::calendar_mcp_tool()).expect("the calendar tool is a tool")
+    }
+
+    async fn call(
+        &self,
+        principal: &Principal,
+        arguments: &Map<String, Value>,
+    ) -> Result<crate::mcp::CallOutcome, crate::mcp::ToolError> {
+        let (tables, options) = (self.tables.clone(), self.options.clone());
+        let (principal, arguments) = (principal.clone(), arguments.clone());
+        let database = Arc::clone(tables.database());
+        let read = database
+            .read_async(move |connection| -> Result<Calendar, Error> {
+                let mut repositories = Repositories::new(connection, tables.definition()?)?;
+                if let Some(keys) = tables.keys() {
+                    repositories = repositories.with_keys(&**keys);
+                }
+                call_calendar_tool(&repositories, Some(&principal), &arguments, &options)
+            })
+            .await;
+        match read {
+            Ok(calendar) => Ok(crate::mcp::CallOutcome::Result(serde_json::json!(calendar))),
+            Err(Error::Invalid(message)) => Ok(crate::mcp::CallOutcome::Problem(
+                crate::response::problem_body(&ApiError::bad_request(message), None),
+            )),
+            Err(err) => Err(crate::mcp::ToolError::Failed(err.to_string().into())),
+        }
+    }
+}
+
 /// What [`calendar_routes`] serves from: the Postgres `CalendarRoutes`
 /// over a SQLite file.
 #[derive(Clone)]

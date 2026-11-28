@@ -4337,8 +4337,10 @@ let calendar = database.read(|connection| read_calendar(Repositories::new(connec
 let routes = calendar_routes(CalendarRoutes::new(types::orm::sqlite::tables(database), authenticator));
 ```
 
-A generated Rust server does not mount the calendar's or the search's
-routes over a SQLite file yet; an app merges them into its router.
+A generated Rust server mounts the calendar's and the search's routes
+over a SQLite file, serves their MCP tools (`calendar::sqlite::CalendarTool`,
+`search_tables::sqlite::SearchTool`) and runs a `@searchable` queue's
+worker through `index_search` on the file, as it does on Postgres (#725).
 
 A Go server serves Recurrence on Postgres as the TypeScript one does
 (D187): its `recurrence` routes run the operations through the behaviors'

@@ -522,6 +522,12 @@ func PlanEmbedded(in EmbeddedInput) (*EmbeddedCrate, error) {
 		if a.RateLimitStore != nil {
 			return nil, fmt.Errorf("%s, and %s counts its rate limits in %s, a memory store, which the binary does not reach", where, a.Service, a.RateLimitStore.Service)
 		}
+		// A server over a SQLite file builds its database's runtime parts
+		// (#725); the binary builds none of them yet, nor runs their
+		// queues' workers in the process.
+		if a.Wiring != nil {
+			return nil, fmt.Errorf("%s, and %s's database %s has runtime parts (the notifier, the agent dispatcher, the inbound path, search, the calendar, grants or an access log), which the binary does not build yet (#725); deploy it to a target with a server per API", where, a.Service, a.Database.Service)
+		}
 		stem := rustStem(a.Service)
 		api := &EmbeddedAPI{
 			RustAPI:  a,

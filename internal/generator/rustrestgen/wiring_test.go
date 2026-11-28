@@ -136,10 +136,10 @@ func TestWriteRustAPIGoldenWiring(t *testing.T) {
 	}
 }
 
-// TestWiringIsPostgresOnly: a database that lists sqlite first has no
-// generated wiring, whose parts the loader and rustgen refuse there, and
-// its workers stay the implementation's.
-func TestWiringIsPostgresOnly(t *testing.T) {
+// TestWiringOnEitherDialect: a database that lists sqlite first has the
+// generated wiring as one on Postgres does (#725), over its SQLite file,
+// and a worker of a part's queue is the runtime's on both.
+func TestWiringOnEitherDialect(t *testing.T) {
 	output := &APIOutput{databases: map[string]*ir.Schema{}}
 	output.SchemaName = wiredAPI
 	output.Workers = []WorkerInfo{{Name: "Notify", Queue: "NoticeWork"}}
@@ -153,7 +153,7 @@ func TestWiringIsPostgresOnly(t *testing.T) {
 	if err := output.setWiring(&deps); err != nil {
 		t.Fatal(err)
 	}
-	if deps.Wiring != nil || len(output.RuntimeWorkers) != 0 || len(output.Workers) != 1 {
+	if deps.Wiring == nil || !deps.Wiring.SQLite || len(output.RuntimeWorkers) != 1 || len(output.Workers) != 0 {
 		t.Errorf("on SQLite: wiring %+v, runtime workers %+v, workers %+v", deps.Wiring, output.RuntimeWorkers, output.Workers)
 	}
 	deps = DepsInfo{Database: wiredDB, DatabaseTypesCrate: "types"}

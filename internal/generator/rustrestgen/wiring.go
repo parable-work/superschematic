@@ -20,8 +20,15 @@ import (
 // methods' defaults are the generated wiring, so an app changes or adds to
 // a part where it needs to. Deps holds the notifier, the dispatcher and the
 // inbound path, a server mounts their routes, and a @worker of a queue the
-// runtime handles runs through them with no method of the Workers trait.
-// On Postgres alone: the loader and rustgen refuse each part on SQLite.
+// runtime handles runs through them with no method of the Workers trait:
+// the parts' queues, a @searchable declaration's, and an @audience
+// declaration's (#734), whose worker resolves a changed parent's children.
+// On Postgres, over the pool, or on the database's SQLite file when its DB
+// service lists sqlite first (D116, #725): the parts are built over the
+// file's Tables, the grants' authenticator and the access log are
+// access::sqlite's, the calendar's and the search's routes and tools are
+// their sqlite modules', and each queue is claimed on the file. An
+// @audience queue is Postgres's alone (the loader refuses it on SQLite).
 
 // WiringFile is the module of the API crate that builds the runtime parts.
 const WiringFile = "wiring.rs"
@@ -36,10 +43,15 @@ const (
 	RuntimeAgents   = "agents"
 	RuntimeRuns     = "runs"
 	RuntimeSearch   = "search"
+	RuntimeAudience = "audience"
 )
 
 // DepsWiring is what src/wiring.rs builds over the API's database.
 type DepsWiring struct {
+	// SQLite is whether the database's DB service lists sqlite first
+	// (D116): the parts are then built over its SQLite file (#725).
+	SQLite bool
+
 	// Dispatch is the notifier's @notifier("dispatch") queue class, empty
 	// for a database without the notifier, and DispatchConst the constant
 	// its descriptor is in the database's Rust types.
@@ -65,6 +77,11 @@ type DepsWiring struct {
 	// sorted (D155), each a SearchQueue.
 	Search []SearchQueue
 
+	// Audience are the queues of the database's @audience declarations
+	// (D156, #734), sorted, whose worker resolves a changed parent's
+	// children again a batch at a time (orm::resolve_audience).
+	Audience []SearchQueue
+
 	// Calendar is whether a table is a @calendarSource (D152).
 	Calendar bool
 
@@ -75,7 +92,8 @@ type DepsWiring struct {
 	AccessLog bool
 }
 
-// SearchQueue is a @searchable declaration's queue.
+// SearchQueue is a @searchable declaration's queue, or an @audience
+// declaration's: its class and its descriptor's constant.
 type SearchQueue struct {
 	Queue string
 	Const string
@@ -87,12 +105,13 @@ func (w *DepsWiring) Notifier() bool { return w != nil && w.Dispatch != "" }
 // Agents is whether the database has the agent orchestration.
 func (w *DepsWiring) Agents() bool { return w != nil && w.Requests != "" }
 
-// wiringOf is the wiring of db, nil for a database with none of its parts.
-func wiringOf(db *ir.Schema) *DepsWiring {
+// wiringOf is the wiring of db, nil for a database with none of its parts;
+// sqlite is whether its DB service lists sqlite first (#725).
+func wiringOf(db *ir.Schema, sqlite bool) *DepsWiring {
 	if db == nil {
 		return nil
 	}
-	w := &DepsWiring{}
+	w := &DepsWiring{SQLite: sqlite}
 	if t := db.NotifierTable(ir.NotifierDispatch); t != nil {
 		w.Dispatch, w.DispatchConst = t.Name, rustgen.QueueConst(t.Name)
 	}
@@ -111,6 +130,12 @@ func wiringOf(db *ir.Schema) *DepsWiring {
 		}
 	}
 	slices.SortFunc(w.Search, func(a, b SearchQueue) int { return strings.Compare(a.Queue, b.Queue) })
+	for _, td := range db.AudienceTables() {
+		if q := td.Audience.Queue; q != "" && !slices.ContainsFunc(w.Audience, func(a SearchQueue) bool { return a.Queue == q }) {
+			w.Audience = append(w.Audience, SearchQueue{Queue: q, Const: rustgen.QueueConst(q)})
+		}
+	}
+	slices.SortFunc(w.Audience, func(a, b SearchQueue) int { return strings.Compare(a.Queue, b.Queue) })
 	for _, td := range db.Types {
 		if td != nil && len(td.CalendarSources) > 0 {
 			w.Calendar = true
@@ -118,15 +143,15 @@ func wiringOf(db *ir.Schema) *DepsWiring {
 	}
 	w.Grants = db.AccessGrantsTable() != nil && db.UserRoleTable() != nil
 	w.AccessLog = db.AccessLogTable() != nil
-	if !w.Notifier() && !w.Agents() && len(w.Search) == 0 && !w.Calendar && !w.Grants && !w.AccessLog {
+	if !w.Notifier() && !w.Agents() && len(w.Search) == 0 && len(w.Audience) == 0 && !w.Calendar && !w.Grants && !w.AccessLog {
 		return nil
 	}
 	return w
 }
 
-// HasRuntimeParts reports whether a Rust API over db, on Postgres, builds
-// its runtime parts.
-func HasRuntimeParts(db *ir.Schema) bool { return wiringOf(db) != nil }
+// HasRuntimeParts reports whether a Rust API over db builds its runtime
+// parts, on either dialect.
+func HasRuntimeParts(db *ir.Schema) bool { return wiringOf(db, false) != nil }
 
 // RuntimeOf is the runtime that handles a message of queue, empty for a
 // queue an implementation's Workers handle. A @runRequests queue is the
@@ -144,23 +169,25 @@ func (w *DepsWiring) RuntimeOf(queue string) string {
 		return RuntimeRuns
 	case slices.ContainsFunc(w.Search, func(q SearchQueue) bool { return q.Queue == queue }):
 		return RuntimeSearch
+	case slices.ContainsFunc(w.Audience, func(q SearchQueue) bool { return q.Queue == queue }):
+		return RuntimeAudience
 	}
 	return ""
 }
 
 // RuntimeQueues are the queues of db whose @worker the runtime handles
-// (#620, #622, #617): what a build's check of an implementation's Workers
-// leaves out.
+// (#620, #622, #617, #734): what a build's check of an implementation's
+// Workers leaves out, on either dialect.
 func RuntimeQueues(db *ir.Schema) map[string]bool {
 	out := map[string]bool{}
-	w := wiringOf(db)
+	w := wiringOf(db, false)
 	for _, q := range []string{w.dispatchOf(), w.requestsOf(), w.runRequestsOf()} {
 		if q != "" && w.RuntimeOf(q) != "" {
 			out[q] = true
 		}
 	}
 	if w != nil {
-		for _, q := range w.Search {
+		for _, q := range append(slices.Clone(w.Search), w.Audience...) {
 			out[q.Queue] = true
 		}
 	}
@@ -189,7 +216,7 @@ func (w *DepsWiring) runRequestsOf() string {
 }
 
 // HasWiring reports whether the crate writes src/wiring.rs: its Deps'
-// database, on Postgres, has a runtime part.
+// database has a runtime part.
 func (o *APIOutput) HasWiring() bool { return o.Deps != nil && o.Deps.Wiring != nil }
 
 // Wiring is the crate's wiring, nil without one.
@@ -223,16 +250,16 @@ func (o *APIOutput) RoutesAuthenticator() string {
 	return "None"
 }
 
-// setWiring reads the wiring of deps' database, on Postgres, into deps,
-// and moves the @worker classes of the queues the runtime handles out of
-// Workers into RuntimeWorkers.
+// setWiring reads the wiring of deps' database, on Postgres or on its
+// SQLite file (#725), into deps, and moves the @worker classes of the
+// queues the runtime handles out of Workers into RuntimeWorkers.
 func (o *APIOutput) setWiring(deps *DepsInfo) error {
 	deps.Wiring = nil
 	workers := append(slices.Clone(o.Workers), o.RuntimeWorkers...)
 	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
 	o.Workers, o.RuntimeWorkers = nil, nil
-	if deps.Database != "" && !deps.SQLite {
-		deps.Wiring = wiringOf(o.databases[deps.Database])
+	if deps.Database != "" {
+		deps.Wiring = wiringOf(o.databases[deps.Database], deps.SQLite)
 	}
 	for _, w := range workers {
 		if runtime := deps.Wiring.RuntimeOf(w.Queue); runtime != "" {
@@ -271,15 +298,17 @@ func (o *APIOutput) RunsRuntime(runtime string) bool {
 }
 
 // WiringQueueUse is src/wiring.rs's use of the runtime's queue module:
-// the descriptors its parts and its search workers parse, the error its
-// workers' runs fail with, and the queue a search worker claims from.
+// the descriptors its parts and its search and audience workers parse, the
+// error its workers' runs fail with, and the queue a search or an audience
+// worker claims from on Postgres (on SQLite, a PartQueue over the file).
 func (o *APIOutput) WiringQueueUse() string {
 	w := o.Wiring()
 	var names []string
-	if o.RunsRuntime(RuntimeSearch) {
+	claims := o.RunsRuntime(RuntimeSearch) || o.RunsRuntime(RuntimeAudience)
+	if claims && !w.SQLite {
 		names = append(names, "PostgresQueue")
 	}
-	if w.Agents() || w.Notifier() || o.RunsRuntime(RuntimeSearch) {
+	if w.Agents() || w.Notifier() || claims {
 		names = append(names, "QueueDefinition")
 	}
 	if len(o.RuntimeWorkers) > 0 {
@@ -289,4 +318,13 @@ func (o *APIOutput) WiringQueueUse() string {
 		return ""
 	}
 	return rustutil.UseLine("crate::runtime::queue", names)
+}
+
+// WiringStoreUse is src/wiring.rs's use of the runtime's orm::store on a
+// SQLite file: the PartQueue a search worker claims on the file (#725).
+func (o *APIOutput) WiringStoreUse() string {
+	if w := o.Wiring(); w == nil || !w.SQLite || !o.RunsRuntime(RuntimeSearch) {
+		return ""
+	}
+	return "use crate::runtime::orm::store::{PartQueue, Store};"
 }

@@ -485,15 +485,6 @@ type APIOutput struct {
 	// loader of the service's @envVars type and, for a crate with Deps,
 	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
-	// PostgresFeatures are the features of the databases the API reads
-	// that a Rust server wires on Postgres alone (D193, #725): a @party
-	// table, the conversations and the run requests (D157), and the agent
-	// orchestration's tables (D158), each "Type: feature". The runtime
-	// serves them on SQLite too (#618); a Deps whose database lists sqlite
-	// first is refused them until the server's wiring builds them there.
-	// Recurrence and a calendar source (D152) are served on SQLite too
-	// (#615).
-	PostgresFeatures []string
 	// ReadsAcrossTables is whether a database the API reads has a calendar
 	// source (D152) or a @searchable table (D155): the crate's dependency
 	// on its Rust types then turns on their repositories, whose definition
@@ -927,7 +918,6 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		output.IdempotencyTable = api.IdempotencyTable
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
-	output.PostgresFeatures = postgresFeaturesOf(databases)
 	output.databases = map[string]*ir.Schema{}
 	for name, dep := range opts.Dependencies {
 		if dep != nil && dep.Kind == ir.SchemaKindDB {

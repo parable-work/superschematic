@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
-	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -16,11 +15,12 @@ import (
 // refuses an implementation that predates them.
 
 // rustWires reports whether the Rust API r builds the runtime parts of its
-// database db: db, on Postgres first, has the notifier, the orchestration,
-// a @searchable table, a calendar source, grants or an access log. Its
-// Rust types then hold the repositories and the queues the parts run over.
+// database db: db, on Postgres or on a SQLite file (#725), has the
+// notifier, the orchestration, a @searchable table, a calendar source, an
+// @audience queue, grants or an access log. Its Rust types then hold the
+// repositories and the queues the parts run over.
 func (r run) rustWires(db string) bool {
-	if r.Options.LoadDependency == nil || r.rustDatabaseOnSQLite(db) {
+	if r.Options.LoadDependency == nil {
 		return false
 	}
 	schema, err := r.LoadDependency(db)
@@ -28,23 +28,6 @@ func (r run) rustWires(db string) bool {
 		return false
 	}
 	return rustrestgen.HasRuntimeParts(schema)
-}
-
-// rustDatabaseOnSQLite reports whether db's DB service lists sqlite first
-// (D116), where no runtime part is built.
-func (r run) rustDatabaseOnSQLite(db string) bool {
-	if r.Options.DependencyConfig == nil {
-		return false
-	}
-	cfg, ok := r.Options.DependencyConfig(db)
-	if !ok {
-		return false
-	}
-	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
-	if err != nil {
-		return false
-	}
-	return outputs.SQLDialects()[0] == registry.SQLDialectSQLite
 }
 
 // rustRuntimeQueues are the queues of the databases of the Rust API api
@@ -69,9 +52,6 @@ func (r run) rustRuntimeQueues(services []stack.Service, api string) map[string]
 			}
 		}
 		for _, db := range dbs {
-			if r.rustDatabaseOnSQLite(db) {
-				continue
-			}
 			schema, err := r.Options.LoadDependency(db)
 			if err != nil || schema == nil {
 				continue

@@ -56,7 +56,12 @@ import (
 // worker open the database's SQLite file in a pool's place, as a server
 // does, and a worker's main.rs (worker_sqlite.rs.tmpl, and for a behavior
 // worker behavior_worker_sqlite.rs.tmpl) runs the runtime's loop over the
-// worker's drain, on connections of the worker's own to the file.
+// worker's drain, on connections of the worker's own to the file. A worker
+// of a runtime part's queue (the notifier's, the dispatcher's, the run
+// requests', a @searchable declaration's) runs it through the API crate's
+// Wired on either dialect, in the claim loop (worker.rs.tmpl, #725): on the
+// file the part's PartQueue claims on a connection of its own, with no
+// slot and no next due time.
 //
 // A Rust app's entrypoint (D78) is a crate beside the servers' too,
 // `<output-root>/server/<stack>/<app>/`. Its main.rs (app_main.rs.tmpl)
@@ -1855,7 +1860,9 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	}
 	switch {
 	case s.Worker == nil:
-	case !s.Worker.OnSQLite():
+	case !s.Worker.OnSQLite() || s.Worker.Runtime != "":
+		// A runtime part's queue is claimed in the claim loop on either
+		// dialect (#725).
 		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "Options"}))
 	case s.Worker.Behavior != nil:
 		// On a SQLite file a worker is drained (D116).
@@ -2018,7 +2025,9 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "behavior_worker_sqlite.rs.tmpl"
 	case s.Worker != nil && s.Worker.Behavior != nil:
 		main = "behavior_worker.rs.tmpl"
-	case s.Worker != nil && s.Worker.OnSQLite():
+	case s.Worker != nil && s.Worker.OnSQLite() && s.Worker.Runtime == "":
+		// A runtime part's worker on a SQLite file runs the claim loop
+		// over the part's queue on the file (#725), as on Postgres.
 		main = "worker_sqlite.rs.tmpl"
 	case s.Worker != nil:
 		main = "worker.rs.tmpl"
