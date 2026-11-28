@@ -27,8 +27,8 @@ import (
 // once the schema loads. Each build persists them as a depfile under
 // dist/.schema-references/<schema>.json, and the next hash reads it, as the
 // authoring imports do (authoring.go): a new reference can only appear by
-// editing a file the service's own tree digest already covers, and a fresh
-// worktree, having no depfile, rebuilds a referencing service once.
+// editing a file the service's own tree digest already covers. A fresh
+// worktree has no depfile and reads it from the cache (depfiles.go).
 
 // SchemaReferences is the depfile's content.
 type SchemaReferences struct {
@@ -100,6 +100,14 @@ func ReadSchemaReferences(repoRoot, name string) SchemaReferences {
 	if err != nil {
 		return SchemaReferences{}
 	}
+	return parseSchemaReferences(data)
+}
+
+// parseSchemaReferences reads the depfile's bytes, the zero value for none.
+func parseSchemaReferences(data []byte) SchemaReferences {
+	if data == nil {
+		return SchemaReferences{}
+	}
 	var refs SchemaReferences
 	if err := json.Unmarshal(data, &refs); err != nil {
 		return SchemaReferences{}
@@ -108,8 +116,7 @@ func ReadSchemaReferences(repoRoot, name string) SchemaReferences {
 }
 
 // writeReferences adds a schema's references and identities to its hash.
-func (ih *InputHasher) writeReferences(h io.Writer, name string) {
-	refs := ReadSchemaReferences(ih.repoRoot, name)
+func (ih *InputHasher) writeReferences(h io.Writer, refs SchemaReferences) {
 	for _, ref := range refs.References {
 		_, _ = fmt.Fprintf(h, "|ref:%s:%s", ref, ih.sourcesDigest(ref))
 	}

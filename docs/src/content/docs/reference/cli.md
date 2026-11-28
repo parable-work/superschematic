@@ -513,6 +513,13 @@ reference does not order the build, so two services may name each other.
 The IR lists the references under `references`, and a JSON or YAML schema
 file states them there, as it states `imports`.
 
+A cache entry keeps both files. A fresh checkout, or one whose
+`<schemas-root>/dist` was removed, has neither file and no stamp for the
+service. With `--cache` it reads them from the newest entry built from the
+same service directory, so it restores the service rather than rebuilding
+it. The key still covers each listed file as it is now. The restore writes
+the files back under `dist`.
+
 ## `migrate plan <service-dir>`
 
 Plan the migration of a DB service's database from a previous version of
