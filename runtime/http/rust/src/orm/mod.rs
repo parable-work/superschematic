@@ -40,13 +40,15 @@
 //! the system's, read every row.
 
 pub mod agents;
+#[cfg(feature = "postgres")]
+pub mod audience_resolve;
 pub mod calendar;
 pub mod fieldcrypt;
 pub mod file_processing;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod inbound;
 pub mod notify;
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod parties;
 mod plan;
 #[cfg(feature = "postgres")]
@@ -59,6 +61,8 @@ pub mod search_tables;
 pub mod sqlite;
 #[cfg(feature = "sqlite")]
 mod sqlite_file;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod store;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -72,6 +76,8 @@ use crate::auth::{ActingFor, GrantReach, Principal, PrincipalKind};
 use crate::civil::from_days;
 use crate::uuid62::parse_uuid;
 
+#[cfg(feature = "postgres")]
+pub use audience_resolve::{resolve_audience, AudienceResolving, AUDIENCE_RESOLVE_BATCH};
 pub use fieldcrypt::FieldKeyring;
 pub use plan::fill;
 // A value in its wire form, as a member of [`Values`] holds one, for a
@@ -562,6 +568,11 @@ pub struct Audience {
     /// A projection's probe of its source's rows.
     #[serde(default)]
     pub probe: Option<String>,
+    /// The statement that resolves again a batch of the table's rows that
+    /// inherit from one parent, on a table whose `@audience` names a queue
+    /// (#734): [`resolve_audience`] runs it.
+    #[serde(default)]
+    pub resolve: Option<String>,
 }
 
 /// What [`Table::access`] names: the table of grants (D156).
@@ -1874,15 +1885,9 @@ pub fn epoch_millis(text: &str) -> Option<i64> {
         }
         _ => return None,
     };
-    // Howard Hinnant's `days_from_civil`.
-    let shifted = if month <= 2 { year - 1 } else { year };
-    let era = shifted.div_euclid(400);
-    let yoe = shifted.rem_euclid(400);
-    let mp = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second - offset;
+    let seconds =
+        crate::civil::to_days(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second
+            - offset;
     Some(seconds * 1000 + millis)
 }
 

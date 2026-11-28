@@ -1,5 +1,10 @@
 package ir
 
+import (
+	"maps"
+	"slices"
+)
+
 // The core user model (D50). A project turns it on by giving one DB table
 // the User trait and, for roles, one the UserRole trait, both core traits
 // from @superschematic/db:
@@ -240,7 +245,7 @@ func (s *Schema) identityTable(is func(*TypeDef) bool) *TypeDef {
 	if s == nil {
 		return nil
 	}
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		if td := s.Types[name]; td != nil && is(td) {
 			return td
 		}

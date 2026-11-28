@@ -152,7 +152,7 @@ export const filingTable: TableDefinition = {
     deleteMany: "DELETE FROM filing%s",
   },
   calendar: [
-    { name: "filing", kind: "deadline", title: "title", color: "filing", occurrences: { table: "filing_recurrence_occurrences", row: "filing_id", key: "key", due: "due", dueAt: "due_at", state: "state" } },
+    { name: "filing", kind: "deadline", title: "title", color: "filing", permission: "filings.work", occurrences: { table: "filing_recurrence_occurrences", row: "filing_id", key: "key", due: "due", dueAt: "due_at", state: "state" } },
   ],
   uniqueKeys: {
     "id": { conflict: "(id)", keep: "id = filing.id", rows: "SELECT \"id\", \"title\", \"holiday_calendar\", \"contract_id\", \"recurrence_recurrence\", \"recurrence_next_due_at\", \"recurrence_last_done_at\", \"_version\" FROM filing WHERE (id) IN (VALUES %s)" },
@@ -408,6 +408,13 @@ export const fixtureRecurrenceDbRules: RulesLayout = {
                   "name": "remindedAt",
                   "field": "remindedAt",
                   "column": "reminded_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "fellDueAt",
+                  "field": "fellDueAt",
+                  "column": "fell_due_at",
                   "type": "Temporal.DateTime",
                   "convert": "epochMillis"
                 },

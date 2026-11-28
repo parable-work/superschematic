@@ -129,6 +129,64 @@ func ToPascalCase(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+// JoinCamelCase joins the parts of a snake_case or, without an underscore,
+// kebab-case name in camelCase, keeping each part's case past its first
+// letter: the first part's first letter is lowered and each other part's
+// raised. A name with neither separator only has its first letter lowered.
+// It is not ToCamelCase, which lowers each part first ("user_ID" is userID
+// here and userId there): the TypeScript SDK and the tool documents name
+// members and tool parameters with it (tsutil.ToCamelCase), so changing it
+// would move the names they expose.
+// Examples:
+//   - "send_magic_link" -> "sendMagicLink"
+//   - "SendMagicLink" -> "sendMagicLink"
+//   - "my-namespace" -> "myNamespace"
+func JoinCamelCase(name string) string {
+	separator := ""
+	switch {
+	case strings.Contains(name, "_"):
+		separator = "_"
+	case strings.Contains(name, "-"):
+		separator = "-"
+	default:
+		if len(name) > 0 {
+			return strings.ToLower(name[:1]) + name[1:]
+		}
+		return name
+	}
+	var result strings.Builder
+	for i, part := range strings.Split(name, separator) {
+		if len(part) == 0 {
+			continue
+		}
+		if i == 0 {
+			result.WriteString(strings.ToLower(part[:1]))
+		} else {
+			result.WriteString(strings.ToUpper(part[:1]))
+		}
+		result.WriteString(part[1:])
+	}
+	return result.String()
+}
+
+// JoinPascalCase joins the parts of a snake_case or kebab-case name in
+// PascalCase, raising each part's first letter and keeping the rest, as
+// JoinCamelCase does: the TypeScript SDK's class names (tsutil.ToClassName).
+// Examples:
+//   - "auth" -> "Auth"
+//   - "my-namespace" -> "MyNamespace"
+//   - "line_item" -> "LineItem"
+func JoinPascalCase(name string) string {
+	var result strings.Builder
+	for _, part := range strings.Split(strings.ReplaceAll(name, "_", "-"), "-") {
+		if len(part) > 0 {
+			result.WriteString(strings.ToUpper(part[:1]))
+			result.WriteString(part[1:])
+		}
+	}
+	return result.String()
+}
+
 // TitleCase converts strings to title case using English language rules.
 func TitleCase(s string) string {
 	return cases.Title(language.English).String(s)

@@ -25,7 +25,12 @@ declare module "../src/index" {
   sections: {
     forge: { tiers: ["pr", "nightly"] },
     other: { anything: true },
-    github: { on: { pull_request: { branches: ["main"] } }, imageRepository: "ghcr.io/acme/ci", permissions: { contents: "read" } }
+    github: {
+      on: { pull_request: { branches: ["main"] } },
+      imageRepository: "ghcr.io/acme/ci",
+      permissions: { contents: "read" },
+      reuse: { command: ["acme-schematic"] }
+    }
   }
 })
 export abstract class Repo {}
@@ -37,6 +42,7 @@ export abstract class Repo {}
     { kind: "schema", spec: { service: "shop-db", root: "schemas" } },
     { kind: "rust-crate", spec: { dir: "crates/shop" } },
     { kind: "js-package", spec: { dir: "web/shop" } },
+    { kind: "js-package", spec: { dir: "typescript/shop-cart", workspace: "schemas/dist" } },
     { kind: "image", spec: { dockerfile: "docker/api.Dockerfile", context: "." } },
     { kind: "bazel-target", spec: { label: "//shop:api" } }
   ],
@@ -64,6 +70,10 @@ export abstract class GoTest {}
 // @ts-expect-error the github section's part of the file names the workflow's triggers
 @tasks({ sections: { github: { imageRepository: "ghcr.io/acme/ci" } } })
 export abstract class NoTriggers {}
+
+// @ts-expect-error the plan command is an argument list with at least one word
+@tasks({ sections: { github: { on: { push: {} }, reuse: { command: [] } } } })
+export abstract class NoPlanCommand {}
 
 // @ts-expect-error a job's timeout is a number of minutes
 @task({ run: ["true"], sections: { github: { timeoutMinutes: "20" } } })

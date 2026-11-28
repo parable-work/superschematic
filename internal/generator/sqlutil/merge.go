@@ -2,7 +2,9 @@ package sqlutil
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -498,7 +500,7 @@ func mergeAliasedSteps(schema *ir.Schema, tables []TableModel, target *TableMode
 		}
 		var aliases, names *TableModel
 		var aliasesType *ir.TypeDef
-		for _, name := range sortedStringKeys(schema.Types) {
+		for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 			sub := schema.Types[name]
 			if sub == nil || sub.BehaviorTable == nil || sub.BehaviorTable.Row != target.Type || sub.BehaviorTable.Use != use.UseID() || sub.BehaviorTable.Behavior != aliasedBehavior {
 				continue
@@ -550,16 +552,6 @@ func mergeAliasedSteps(schema *ir.Schema, tables []TableModel, target *TableMode
 	return steps, nil
 }
 
-// sortedStringKeys are a map's keys in order.
-func sortedStringKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // mergeHiddenSteps are the steps of the foreign keys that reference target
 // and that no table's columns model (D147), as sqlgen writes them: the
 // column a @hasMany of target adds to a table that declares no relation
@@ -596,7 +588,7 @@ func mergeHiddenSteps(schema *ir.Schema, tables []TableModel, target *TableModel
 				side := func(moved, kept string) MergeStep {
 					return MergeStep{
 						Source:     owner.Type + "." + f.Name,
-						Field:      strings.Trim(moved, `"`),
+						Field:      Unquote(moved),
 						Collisions: []MergeStatement{{SQL: "DELETE FROM " + join + " AS moved WHERE moved." + moved + " = $1 AND EXISTS (SELECT 1 FROM " + join + " AS held WHERE held." + moved + " = $2 AND held." + kept + " = moved." + kept + ")"}},
 						Repoint:    MergeStatement{SQL: "UPDATE " + join + " SET " + moved + " = $2 WHERE " + moved + " = $1"},
 					}

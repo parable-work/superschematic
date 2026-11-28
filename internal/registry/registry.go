@@ -11,7 +11,6 @@
 package registry
 
 import (
-	"bytes"
 	"fmt"
 	"path"
 	"regexp"
@@ -25,6 +24,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -386,21 +386,9 @@ func compileSchema(schema []byte, url string) (*validator.Schema, error) {
 		result := cached.(compiledSchemaResult)
 		return result.schema, result.err
 	}
-	compiled, err := compileSchemaDocument(schema, url)
+	compiled, err := jsonschemas.Compile(url, schema)
 	compiledSchemas.Store(key, compiledSchemaResult{schema: compiled, err: err})
 	return compiled, err
-}
-
-func compileSchemaDocument(schema []byte, url string) (*validator.Schema, error) {
-	resource, err := validator.UnmarshalJSON(bytes.NewReader(schema))
-	if err != nil {
-		return nil, err
-	}
-	compiler := validator.NewCompiler()
-	if err := compiler.AddResource(url, resource); err != nil {
-		return nil, err
-	}
-	return compiler.Compile(url)
 }
 
 // RegisterDocument adds a sidecar document. Duplicate names are an error.

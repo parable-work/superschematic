@@ -56,14 +56,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/archive.sh
+. "$ROOT/scripts/lib/archive.sh"
 
 # Go binaries link this archive beside the version graph's
-# (scripts/versiongraph-archive.sh), and the standard libraries of two Rust
-# releases both define rust_eh_personality: archives that different
-# toolchains built do not link into one binary. Both scripts build with
-# tools.env's RUST_VERSION, which overrides the checkout's own pin.
-RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
-export RUSTUP_TOOLCHAIN
+# (scripts/versiongraph-archive.sh) and the behaviors' core's,
+# so every archive builds with tools.env's RUST_VERSION, which overrides
+# the checkout's own pin (scripts/lib/archive.sh says why).
+archive_toolchain
 
 DEP="$ROOT/third_party/superscalar"
 PIN="$ROOT/superscalar.pin"
@@ -98,9 +98,8 @@ if [ "${1:-}" = "--checkout" ]; then
   exit 0
 fi
 
-goos="$(go env GOOS)"
-goarch="$(go env GOARCH)"
-ldflags="-L$DEP/go/lib/${goos}_${goarch}"
+archive_target
+ldflags="-L$(archive_lib_dir "$DEP/go")"
 
 archive_only=0
 prebuilt=0

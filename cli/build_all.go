@@ -64,7 +64,7 @@ func newBuildAllCmd(a *app) *cobra.Command {
 	cmd.Flags().BoolVar(&flags.isolatedTS, "isolated-ts-programs", false, "use one TypeScript compiler program per schema service instead of the build-all shared program")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
 	cmd.Flags().BoolVar(&flags.scaffold, "scaffold", false, "write the implementation scaffold of each Go, TypeScript or Rust API whose package is missing, at the [implementation_paths] template of its language")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <services-root>/../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <services-root>/../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.depsCopy, "deps-copy", "", "also write the dependency graph to this path (default: [deps] copy in the naming file, relative to the repository root)")
 	return cmd
 }
@@ -126,11 +126,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 
 	// Resolved before any schema loads: the loader and generators take it as
 	// an option; schemadeps (EmitFromDist, below) reads the active value.
-	activeNaming, err := resolveNaming(flags.namingPath, filepath.Join(servicesRoot, ".."))
-	if err != nil {
-		return err
-	}
-	reg, err := a.resolveRegistry(activeNaming)
+	activeNaming, reg, err := a.openNaming(flags.namingPath, filepath.Join(servicesRoot, ".."))
 	if err != nil {
 		return err
 	}

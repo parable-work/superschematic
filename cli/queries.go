@@ -71,33 +71,21 @@ Examples:
 		},
 	}
 	cmd.Flags().StringVar(&flags.databaseURL, "database-url", "", "a Postgres server whose role may create a database (default $"+QueriesDatabaseEnv+", else Postgres in Docker)")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml)")
 	return cmd
 }
 
 func runQueriesVerify(cmd *cobra.Command, a *app, flags *queriesVerifyFlags, servicePath string) error {
-	absService, err := filepath.Abs(servicePath)
-	if err != nil {
-		return fmt.Errorf("resolving service path: %w", err)
-	}
-	if info, err := os.Stat(absService); err != nil || !info.IsDir() {
-		return fmt.Errorf("service directory not found: %s", servicePath)
-	}
-	schemasRoot := filepath.Dir(filepath.Dir(absService))
-	names, err := resolveNaming(flags.namingPath, schemasRoot)
+	svc, err := a.openService(servicePath, flags.namingPath)
 	if err != nil {
 		return err
 	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return err
-	}
-	version, err := openSchemaVersion(filepath.Dir(absService), names, reg)
+	version, err := openSchemaVersion(filepath.Dir(svc.dir), svc.names, svc.reg)
 	if err != nil {
 		return err
 	}
 	defer version.close()
-	service, err := version.serviceAt(absService)
+	service, err := version.serviceAt(svc.dir)
 	if err != nil {
 		return err
 	}

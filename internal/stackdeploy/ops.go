@@ -167,7 +167,7 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 		return nil, err
 	}
 	out := &PlanResult{Run: s.run.Name(), Databases: plans, Unpinned: unpinned, Unpublished: sites.missing(s.env), Unbundled: bundles.missing(s.env), Unallowed: o.Gate.unallowed(plans), Jobs: deployJobs(s.env), Lock: held}
-	for _, database := range sortedKeys(pending) {
+	for _, database := range slices.Sorted(maps.Keys(pending)) {
 		for _, p := range pending[database] {
 			out.Pending = append(out.Pending, PendingNote{Database: database, Service: p.Plan.Service, Phase: p.Phase, Plan: p.Plan.Hash})
 		}

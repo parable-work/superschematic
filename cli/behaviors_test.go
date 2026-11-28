@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,7 +99,7 @@ func TestBehaviorsCommand(t *testing.T) {
 	assert.Equal(t, "behaviors: 2 declaration(s) in "+out+"\n", log)
 	files, err := behaviorFiles(out)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"acme.Audited.behavior.json", "acme.Stock.behavior.json"}, sortedKeys(files))
+	require.ElementsMatch(t, []string{"acme.Audited.behavior.json", "acme.Stock.behavior.json"}, slices.Sorted(maps.Keys(files)))
 
 	// The copy is canonical: the declaration's keys in order, schema keys
 	// sorted, whatever the embedded file's layout.
@@ -188,7 +190,7 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"Aliased.behavior.json", "Approvals.behavior.json", "Assignment.behavior.json", "Blueprint.behavior.json", "Budget.behavior.json", "Calendar.behavior.json", "Comments.behavior.json", "Constants.behavior.json", "Dependencies.behavior.json", "Derived.behavior.json", "Holds.behavior.json", "Lease.behavior.json",
 		"Numbering.behavior.json", "Payments.behavior.json", "Pool.behavior.json", "Presence.behavior.json", "Provenance.behavior.json", "Reactions.behavior.json", "Reconcile.behavior.json", "Recurrence.behavior.json", "Retries.behavior.json", "Revisions.behavior.json", "Rollups.behavior.json",
-		"Schedules.behavior.json", "Seats.behavior.json", "StateRules.behavior.json", "Stock.behavior.json", "Timers.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, sortedKeys(written))
+		"Schedules.behavior.json", "Seats.behavior.json", "StateRules.behavior.json", "Stock.behavior.json", "Timers.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, slices.Sorted(maps.Keys(written)))
 	_, err = runCommandWith(t, nil, "behaviors", "--out", out, "--check")
 	require.ErrorContains(t, err, "acme.Audited.behavior.json is no registered behavior's declaration")
 
@@ -214,7 +216,7 @@ func TestBehaviorsCommand_Package(t *testing.T) {
 	assert.Equal(t, []string{"Approvals.behavior.json", "Assignment.behavior.json", "Blueprint.behavior.json", "Budget.behavior.json", "Calendar.behavior.json", "Comments.behavior.json",
 		"Constants.behavior.json", "Dependencies.behavior.json", "Derived.behavior.json", "Holds.behavior.json", "Lease.behavior.json", "Numbering.behavior.json", "Payments.behavior.json",
 		"Presence.behavior.json", "Provenance.behavior.json", "Reactions.behavior.json", "Retries.behavior.json", "Revisions.behavior.json", "Rollups.behavior.json", "StateRules.behavior.json",
-		"Stock.behavior.json", "Timers.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, sortedKeys(files))
+		"Stock.behavior.json", "Timers.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, slices.Sorted(maps.Keys(files)))
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine", "--out", engine, "--check")
 	require.NoError(t, err)
 
@@ -226,7 +228,7 @@ func TestBehaviorsCommand_Package(t *testing.T) {
 	assert.Equal(t, "behaviors: 6 declaration(s) in "+rules+"\n", log)
 	files, err = behaviorFiles(rules)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Aliased.behavior.json", "Pool.behavior.json", "Reconcile.behavior.json", "Recurrence.behavior.json", "Schedules.behavior.json", "Seats.behavior.json"}, sortedKeys(files))
+	assert.Equal(t, []string{"Aliased.behavior.json", "Pool.behavior.json", "Reconcile.behavior.json", "Recurrence.behavior.json", "Schedules.behavior.json", "Seats.behavior.json"}, slices.Sorted(maps.Keys(files)))
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/rules", "--out", rules, "--check")
 	require.NoError(t, err)
 

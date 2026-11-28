@@ -173,6 +173,38 @@ func TestRepositoriesKeepBehaviorOperationsToTheCaller(t *testing.T) {
 	}
 }
 
+//go:embed testdata/orm/audience_rules_sqlite.rs
+var audienceRulesSQLiteTest string
+
+// TestRepositoriesKeepBehaviorOperationsToTheCallerOnSQLite runs
+// fixture-audience-behaviors-db's Task on a SQLite file (D156, D182, D201,
+// #626), the cases of TestRepositoriesKeepBehaviorOperationsToTheCaller
+// but the deriver's, which ormgen's
+// TestBehaviorOperationsKeepToTheCallerOnSQLite runs over the Go
+// repositories: the SQLite repositories opened for a caller run a behavior
+// operation on a row only for a caller who may write it, or for a list
+// one who sees it, and any other caller's is not found before the core
+// runs and writes nothing; a private row answers its owner, a named row
+// the principals it names, a party the row its grant names, an agent run
+// with read-only access its conversation's reads; and Pool's pick answers
+// no member for a runner the caller does not see.
+//
+// It needs cargo, which it skips without, and runs outside -short.
+func TestRepositoriesKeepBehaviorOperationsToTheCallerOnSQLite(t *testing.T) {
+	out := runBehaviorRepositoriesWith(t, "fixture-audience-behaviors-db", "audience_rules_sqlite", audienceRulesSQLiteTest, true)
+	for _, name := range audienceRulesCases {
+		if strings.HasPrefix(name, "a deriver") {
+			continue
+		}
+		if !strings.Contains(out, "case: "+name+"\n") {
+			t.Errorf("the case %q did not run on SQLite:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(out, "the repositories ran on SQLite") {
+		t.Errorf("the SQLite cases did not finish:\n%s", out)
+	}
+}
+
 //go:embed testdata/orm/merge_access_rules.rs
 var mergeAccessRulesTest string
 
@@ -313,9 +345,11 @@ func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, run
 	if err != nil {
 		t.Fatalf("cargo test in %s: %v\n%s", crateDir, err, out)
 	}
+	// A source of SQLite cases alone has no Postgres half.
+	postgresHalf := strings.Contains(source, "the repositories ran on Postgres")
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
 		t.Log("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL is unset: the Postgres half did not run")
-	} else if !strings.Contains(string(out), "the repositories ran on Postgres") {
+	} else if postgresHalf && !strings.Contains(string(out), "the repositories ran on Postgres") {
 		t.Errorf("the Postgres half did not run:\n%s", out)
 	}
 	t.Logf("%s", out)

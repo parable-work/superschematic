@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -55,7 +57,7 @@ func queryOf(td *ir.TypeDef, args []any) (*ir.QueryDef, error) {
 		return nil, ArgErrorf(2, "@query takes one options object: { name?, sql, notNull?, orderBy?, page?, returns?, dialects? }")
 	}
 	def := &ir.QueryDef{Params: params, Row: row, Name: lowerFirstRune(td.Name)}
-	for _, key := range sortedKeys(opts) {
+	for _, key := range slices.Sorted(maps.Keys(opts)) {
 		value := opts[key]
 		switch key {
 		case "name", "sql":
@@ -117,7 +119,7 @@ func queryOrderBy(value any) (*ir.QueryOrderBy, error) {
 		return nil, ArgErrorf(2, "@query orderBy must be an object: { param, options, default? }")
 	}
 	out := &ir.QueryOrderBy{Options: map[string]string{}}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		switch key {
 		case "param", "default":
 			s, ok := obj[key].(string)
@@ -158,7 +160,7 @@ func queryPage(value any) (*ir.QueryPage, error) {
 		return nil, ArgErrorf(2, "@query page must be an object: { key, desc? }")
 	}
 	out := &ir.QueryPage{}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		switch key {
 		case "key":
 			list, err := stringList(obj[key])

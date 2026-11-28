@@ -13,8 +13,8 @@ import (
 // by Field (to End), or its Recurrence's occurrences by their due, through
 // Occurrences' sub-table.
 type ORMCalendarSource struct {
-	Name, Kind, Title, Color, Field, End, Owner string
-	Occurrences                                 *ORMCalendarOccurrences
+	Name, Kind, Title, Color, Field, End, Owner, Permission string
+	Occurrences                                             *ORMCalendarOccurrences
 }
 
 // ORMCalendarOccurrences is where an occurrences source's occurrences are:
@@ -39,6 +39,8 @@ func calendarSourcesOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.Table
 			Field: source.Field,
 			End:   source.End,
 			Owner: source.Owner,
+			// Permission is the schema's (#601).
+			Permission: source.Permission,
 		}
 		if source.Occurrences {
 			occurrences, err := occurrencesTableOf(schema, td, tables)

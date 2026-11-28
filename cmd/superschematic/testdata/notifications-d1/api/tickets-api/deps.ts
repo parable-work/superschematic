@@ -15,7 +15,7 @@ import type { ReferenceCleared } from '@schemas/tickets-db-types';
 import type { TicketsDbOrm, TicketsDbTx } from '@schemas/tickets-db-types/orm';
 import type { Notifier, NotifierOptions, NotifierRoutesOptions } from '@superschematic/http-runtime/d1';
 import type { Providers } from '@superschematic/http-runtime/providers';
-import type { DutyRecurrenceMissedEvent, DutyRecurrenceOpenedEvent, DutyRecurrenceRemindedEvent } from '@schemas/tickets-api-types/types';
+import type { DutyRecurrenceDueEvent, DutyRecurrenceMissedEvent, DutyRecurrenceOpenedEvent, DutyRecurrenceRemindedEvent } from '@schemas/tickets-api-types/types';
 import type { EnvConfig } from './config';
 import type { Implementations } from './interfaces';
 
@@ -123,6 +123,8 @@ export interface Workers {
   dutyDeadlinesRecurrenceOpened(event: DutyRecurrenceOpenedEvent, tx: TicketsDbTx, signal: AbortSignal): Promise<void>;
   /** Handles an event reminded of Duty's Recurrence, which the behavior worker DutyDeadlines claims from DutyEvent: tx is tickets-db's repositories in the transaction the event's completion commits in, as the worker's caller (tickets-api/DutyDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
   dutyDeadlinesRecurrenceReminded(event: DutyRecurrenceRemindedEvent, tx: TicketsDbTx, signal: AbortSignal): Promise<void>;
+  /** Handles an event due of Duty's Recurrence, which the behavior worker DutyDeadlines claims from DutyEvent: tx is tickets-db's repositories in the transaction the event's completion commits in, as the worker's caller (tickets-api/DutyDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
+  dutyDeadlinesRecurrenceDue(event: DutyRecurrenceDueEvent, tx: TicketsDbTx, signal: AbortSignal): Promise<void>;
   /** Handles an event missed of Duty's Recurrence, which the behavior worker DutyDeadlines claims from DutyEvent: tx is tickets-db's repositories in the transaction the event's completion commits in, as the worker's caller (tickets-api/DutyDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
   dutyDeadlinesRecurrenceMissed(event: DutyRecurrenceMissedEvent, tx: TicketsDbTx, signal: AbortSignal): Promise<void>;
 }

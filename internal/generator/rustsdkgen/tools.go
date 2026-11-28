@@ -1,52 +1,38 @@
 package rustsdkgen
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
-	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
-	ir "github.com/parable-work/superschematic/ir"
 )
 
 // ToolDefinition represents a single tool for LLM function calling.
 type ToolDefinition struct {
-	Name                     string                   // Namespaced name (e.g. "auth.sendMagicLink")
-	OperationID              string                   // OpenAPI operation id (the handler name)
-	Title                    string                   // @docs title
-	MCP                      *ir.OperationMCP         // resolved @mcp record, _meta with the guidance; nil without @mcp
-	Capability               string                   // @docs capability
-	Lifecycle                string                   // @docs lifecycle
-	Visibility               string                   // @docs visibility
-	Audience                 string                   // @docs audience
-	Guidance                 ir.ToolOperationGuidance // @docs guidance
-	ReplayMode               string                   // @docs replay mode
-	IdempotencyKeyPointers   []string                 // pointers into Parameters
-	ExpectedRevisionPointers []string                 // pointers into Parameters
-	RequiredPerms            []string                 // permissions the route requires
-	APIID                    string                   // generated API identifier
-	MethodName               string                   // Rust SDK method name (e.g. "send_magic_link")
-	HTTPMethod               string                   // HTTP method e.g., "GET", "POST"
-	HTTPPath                 string                   // HTTP path template e.g., "/api/auth/send-magic-link"
-	Description              string                   // @docs description, else the comment with an auth note
-	RequiresAuth             bool                     // Whether authentication is required
-	Namespace                string                   // Namespace for grouping (e.g. "auth")
-	IsScopedNS               bool                     // Whether the endpoint's namespace hoists a scope parameter
-	Parameters               JSONSchemaObject         // JSON Schema for parameters
-	Returns                  JSONSchemaReturn         // JSON Schema for return type
-	PathParams               []ToolPathParam          // Path parameters for invocation helpers
-	HasInput                 bool                     // Whether endpoint has input type
-	InputType                string                   // Input type name when HasInput
-	ScalarArgs               []ToolScalarArg          // Scalar arguments (not path params)
-	QueryArgs                []ToolQueryArg           // Query arguments, with shape and bounds
-	Encrypted                bool                     // Whether endpoint payload must be encrypted
-	BindingStatus            string                   // ready, or unsupported_multipart for a file upload
-	InputSchemaDigest        string                   // sha256 of the encoded Parameters
+	toolsutil.ToolOperation // the operation as every SDK's tool documents write it
+
+	Name         string           // Namespaced name (e.g. "auth.sendMagicLink")
+	OperationID  string           // OpenAPI operation id (the handler name)
+	APIID        string           // generated API identifier
+	MethodName   string           // Rust SDK method name (e.g. "send_magic_link")
+	HTTPMethod   string           // HTTP method e.g., "GET", "POST"
+	HTTPPath     string           // HTTP path template e.g., "/api/auth/send-magic-link"
+	Description  string           // @docs description, else the comment with an auth note
+	RequiresAuth bool             // Whether authentication is required
+	Namespace    string           // Namespace for grouping (e.g. "auth")
+	IsScopedNS   bool             // Whether the endpoint's namespace hoists a scope parameter
+	Parameters   JSONSchemaObject // JSON Schema for parameters
+	Returns      JSONSchemaReturn // JSON Schema for return type
+	PathParams   []ToolPathParam  // Path parameters for invocation helpers
+	HasInput     bool             // Whether endpoint has input type
+	InputType    string           // Input type name when HasInput
+	ScalarArgs   []ToolScalarArg  // Scalar arguments (not path params)
+	QueryArgs    []ToolQueryArg   // Query arguments, with shape and bounds
+	Encrypted    bool             // Whether endpoint payload must be encrypted
 }
 
 type ToolPathParam = toolsutil.ToolPathParam
@@ -68,6 +54,12 @@ type ToolsOutput struct {
 	VisibleTools  []ToolDefinition            // Tools with a visible @mcp record: the provider tool lists
 	Namespaces    []ToolsNamespace            // Tools grouped by namespace
 	Timestamp     string                      // Generation timestamp
+}
+
+// SDKClassName is the SDK's struct, under the name the tool documents
+// (toolsutil.WriteDocuments) title it with.
+func (t *ToolsOutput) SDKClassName() string {
+	return t.SDKStructName
 }
 
 // ToolsNamespace groups tools by namespace.
@@ -196,14 +188,7 @@ func endpointToTool(
 	if endpoint.Docs != nil {
 		description = endpoint.Docs.Description
 	}
-	if description == "" {
-		description = fmt.Sprintf("%s endpoint", endpoint.Name)
-	}
-	if endpoint.Docs == nil && endpoint.RequiresAuth {
-		description = fmt.Sprintf("%s (Requires authentication)", description)
-	}
-	description = toolsutil.PagedDescription(description, endpoint.Page)
-	description = toolsutil.FilteredDescription(description, endpoint.Filter, endpoint.Page)
+	description = toolsutil.ToolDescription(description, endpoint.Name, endpoint.Docs, endpoint.RequiresAuth, endpoint.Page, endpoint.Filter)
 
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
@@ -217,30 +202,15 @@ func endpointToTool(
 
 	scalarArgs := make([]ToolScalarArg, len(endpoint.ScalarArgs))
 	for i, arg := range endpoint.ScalarArgs {
-		scalarArgs[i] = ToolScalarArg{
-			Name:     arg.Name,
-			TSName:   tsutil.ToCamelCase(arg.Name),
-			Type:     arg.Type,
-			Required: arg.Required,
-			// The shape: the argument schema is T, T[] or T[][], or a map
-			// of T or T[].
-			IsArray:         arg.IsArray,
-			IsArrayOfArrays: arg.IsArrayOfArrays,
-			IsMap:           arg.IsMap,
-			Reference:       arg.Reference,
-			Search:          arg.Search,
-		}
+		scalarArgs[i] = toolsutil.NewToolScalarArg(arg)
 	}
 	queryArgs := make([]ToolQueryArg, len(endpoint.QueryParams))
 	for i, arg := range endpoint.QueryParams {
 		queryArgs[i] = ToolQueryArg{
 			Name: arg.Name, TSName: tsutil.ToCamelCase(arg.Name), Type: arg.Type,
 			Required: arg.Required, IsArray: arg.IsArray, IsMap: arg.IsMap,
-			ValidateMin: arg.ValidateMin, ValidateMax: arg.ValidateMax,
-			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
-			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
-			ValidatePattern: arg.ValidatePattern,
-			Reference:       arg.Reference, Search: arg.Search, Sort: arg.Sort,
+			ValueRules: arg.ValueRules,
+			Reference:  arg.Reference, Search: arg.Search, Sort: arg.Sort,
 		}
 	}
 
@@ -254,55 +224,25 @@ func endpointToTool(
 		endpoint.Page,
 		endpoint.Filter,
 	)
-	parametersJSON, _ := parameters.DigestJSON(keys.DigestInternalTypes)
 
-	bindingStatus := "ready"
-	if endpoint.HasFileUpload {
-		bindingStatus = "unsupported_multipart"
-	}
-	guidance := toolsutil.OperationGuidance(endpoint.Docs)
-
-	tool := ToolDefinition{
-		Name:                     toolName,
-		OperationID:              endpoint.HandlerName,
-		Title:                    endpoint.Title,
-		MCP:                      toolsutil.MCPWithGuidance(endpoint.MCP, guidance, keys.Guidance),
-		Guidance:                 guidance,
-		ReplayMode:               toolsutil.ReplayMode(endpoint.Docs),
-		IdempotencyKeyPointers:   toolsutil.IdempotencyKeyPointers(endpoint.Docs),
-		ExpectedRevisionPointers: toolsutil.ExpectedRevisionPointers(endpoint.Docs),
-		RequiredPerms:            append([]string(nil), endpoint.RequiredPerms...),
-		MethodName:               methodName,
-		HTTPMethod:               strings.ToUpper(endpoint.Method),
-		HTTPPath:                 endpoint.Path,
-		Description:              description,
-		RequiresAuth:             endpoint.RequiresAuth,
-		Namespace:                ns.Name,
-		IsScopedNS:               ns.IsScopedNS || endpoint.IsScopedEndpoint,
-		Parameters:               parameters,
-		Returns:                  toolsutil.BuildEndpointReturnSchema(endpoint.OutputType, endpoint.OutputArrayDepth(), endpoint.Page, scalars),
-		PathParams:               pathParams,
-		HasInput:                 endpoint.HasInput,
-		InputType:                endpoint.InputType,
-		ScalarArgs:               scalarArgs,
-		QueryArgs:                queryArgs,
-		Encrypted:                endpoint.Encrypted,
-		BindingStatus:            bindingStatus,
-		InputSchemaDigest:        fmt.Sprintf("sha256:%x", sha256.Sum256(parametersJSON)),
-	}
-	if docs := endpoint.Docs; docs != nil {
-		tool.Capability = docs.Capability
-		tool.Lifecycle = string(docs.Lifecycle)
-		tool.Visibility = string(docs.Visibility)
-		tool.Audience = string(docs.Audience)
-	}
-	return tool
-}
-
-func toolsTemplateFuncs() template.FuncMap {
-	return template.FuncMap{
-		"escapeJSON": toolsutil.EscapeJSON,
-		"schemaJSON": toolsutil.JSONSchemaPropertyLiteral,
-		"jsonValue":  toolsutil.JSONLiteral,
+	return ToolDefinition{
+		ToolOperation: toolsutil.NewToolOperation(endpoint.Title, endpoint.Docs, endpoint.MCP, endpoint.RequiredPerms, endpoint.HasFileUpload, parameters, keys),
+		Name:          toolName,
+		OperationID:   endpoint.HandlerName,
+		MethodName:    methodName,
+		HTTPMethod:    strings.ToUpper(endpoint.Method),
+		HTTPPath:      endpoint.Path,
+		Description:   description,
+		RequiresAuth:  endpoint.RequiresAuth,
+		Namespace:     ns.Name,
+		IsScopedNS:    ns.IsScopedNS || endpoint.IsScopedEndpoint,
+		Parameters:    parameters,
+		Returns:       toolsutil.BuildEndpointReturnSchema(endpoint.OutputType, endpoint.OutputArrayDepth(), endpoint.Page, scalars),
+		PathParams:    pathParams,
+		HasInput:      endpoint.HasInput,
+		InputType:     endpoint.InputType,
+		ScalarArgs:    scalarArgs,
+		QueryArgs:     queryArgs,
+		Encrypted:     endpoint.Encrypted,
 	}
 }

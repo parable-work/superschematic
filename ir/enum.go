@@ -3,6 +3,7 @@ package ir
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -72,7 +73,7 @@ const EnumTitlePattern = `^[^\x00-\x1f\x7f` + "\u2028\u2029" + ` ]([^\x00-\x1f\x
 // loader runs on every form, holds it.
 func (s *Schema) validateEnums() []error {
 	var errs []error
-	for _, name := range sortedStringMapKeys(s.Enums) {
+	for _, name := range slices.Sorted(maps.Keys(s.Enums)) {
 		e := s.Enums[name]
 		if e == nil {
 			continue

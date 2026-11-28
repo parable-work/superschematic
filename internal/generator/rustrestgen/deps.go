@@ -77,6 +77,12 @@ type DepsInfo struct {
 	DatabaseTypesCrate string
 	DatabaseTypesPath  string
 
+	// FileProcessing is whether the API's @envVars class names a files
+	// slot and Database declares @attachments (D159, #614): the crate then
+	// writes src/files.rs, the file processor's pass over the database's
+	// attachments.
+	FileProcessing bool
+
 	// Behaviors is what the crate runs its behavior operations with
 	// (D103), when its @behaviorOperations sets serve tables of Database
 	// whose fields are behaviors: the layout of Database's tables and the
@@ -430,7 +436,7 @@ func (o *APIOutput) DepsExports() string {
 // table operations, graph operations and, on a database whose rows keep
 // to a caller, behavior operations read through (D106, D138, D181).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations() || o.BehaviorsHeld() || o.HasWiring())
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasFileProcessing() || o.BehaviorsHeld() || o.HasWiring())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
@@ -459,7 +465,7 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // the repositories (BehaviorsHeld, D181), or that builds its database's
 // runtime parts (HasWiring); empty for any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld() && !o.HasWiring()) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasRowFeatureOperations() && !o.HasFileProcessing() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld() && !o.HasWiring()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -517,6 +523,18 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		return err
 	}
 	if err := o.checkGraphDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkRowFeatureDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkFileProcessingDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkFileProcessingDeps(); err != nil {
 		o.Deps = nil
 		return err
 	}
@@ -642,9 +660,11 @@ func (o *APIOutput) DepsUses() []string {
 // method of an impl: the handlers, the identity runtime's authenticator for
 // an API over the user model (D50), the service authenticator for an API
 // with a service clause (D37), the pool of its database for an API with
-// behavior operations (D103) or table operations (D106), and the keyring
-// of the database's Encrypted<T> fields for table operations over one
-// (D85), on one line when it fits.
+// behavior operations (D103), table operations (D106), graph operations
+// (D138) or row feature operations (#723), the keyring of the database's
+// Encrypted<T> fields for table operations over one (D85), and the bucket
+// the row feature operations sign a file's URLs of (#723), on one line
+// when it fits.
 func (o *APIOutput) NewSignature() string {
 	params := []string{"handlers: Handlers"}
 	if o.Identity != nil {
@@ -653,11 +673,14 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() || o.HasIdempotent() {
+	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasIdempotent() {
 		params = append(params, "db: "+o.DatabaseType())
 	}
 	if o.TableFieldKeys() {
 		params = append(params, "field_keys: Arc<crate::runtime::orm::FieldKeyring>")
+	}
+	if o.RowFeatureBucket() != "" {
+		params = append(params, "attachments: Arc<dyn Bucket>")
 	}
 	return rustFn("    ", "pub fn new", params, "Self")
 }

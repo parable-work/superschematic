@@ -19,10 +19,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -227,11 +227,11 @@ func (e *emitter) importRelative(module, symbol string) {
 // renderImports writes the import block: packages sorted by name, then
 // relative modules, each with sorted named imports.
 func (e *emitter) renderImports(out *strings.Builder) {
-	for _, pkg := range sortedKeys(e.pkgImports) {
-		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(sortedKeys(e.pkgImports[pkg]), ", "), pkg)
+	for _, pkg := range slices.Sorted(maps.Keys(e.pkgImports)) {
+		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(slices.Sorted(maps.Keys(e.pkgImports[pkg])), ", "), pkg)
 	}
-	for _, module := range sortedKeys(e.relImports) {
-		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(sortedKeys(e.relImports[module]), ", "), module)
+	for _, module := range slices.Sorted(maps.Keys(e.relImports)) {
+		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(slices.Sorted(maps.Keys(e.relImports[module])), ", "), module)
 	}
 }
 
@@ -245,20 +245,20 @@ func (e *emitter) emitDocument() {
 	if len(e.doc.Extensions) > 0 || len(e.doc.Documents) > 0 {
 		e.failf("schema-level extension data and documents have no TypeScript form; they are document metadata in JSON and YAML only")
 	}
-	for _, name := range sortedKeys(e.doc.Unions) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Unions)) {
 		if !e.doc.Unions[name].IsVariant() {
 			e.failf("union %s: unions have no TypeScript authoring form but a variant union's (Variant<By, Arms>, D149)", name)
 		}
 	}
 	e.checkScalars()
 
-	for _, name := range sortedKeys(e.doc.Enums) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Enums)) {
 		e.emitEnum(e.doc.Enums[name])
 	}
 	for _, name := range e.sortedTypes() {
 		e.emitType(e.doc.Types[name])
 	}
-	for _, name := range sortedKeys(e.doc.Unions) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Unions)) {
 		if def := e.doc.Unions[name]; def.IsVariant() {
 			e.emitVariant(def)
 		}
@@ -470,7 +470,7 @@ func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
 		parts = append(parts, "when: ["+strings.Join(conditions, ", ")+"]")
 	}
 	var message []string
-	for _, field := range sortedKeys(def.Message) {
+	for _, field := range slices.Sorted(maps.Keys(def.Message)) {
 		message = append(message, propertyName(field)+": "+quote(def.Message[field]))
 	}
 	parts = append(parts, "message: "+objectLiteral(message))
@@ -613,7 +613,7 @@ func (e *emitter) emitJob(job *ir.Job) {
 // a scalar must use a namespaced name and carry no metadata beyond its
 // language primitive (the scalar registry owns the rich metadata).
 func (e *emitter) checkScalars() {
-	for _, name := range sortedKeys(e.doc.Scalars) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Scalars)) {
 		def := e.doc.Scalars[name]
 		if !strings.Contains(name, ".") {
 			e.failf("scalar %s: TypeScript schemas can only reference namespaced %s scalars", name, naming.Active().ScalarNpmPackage)
@@ -732,7 +732,7 @@ func equalOptionalInt64(left, right *int64) bool {
 // (ir.EnvironmentNames), since the reader numbers them by their place.
 func (e *emitter) sortedTypes() []string {
 	var names []string
-	for _, name := range sortedKeys(e.doc.Types) {
+	for _, name := range slices.Sorted(maps.Keys(e.doc.Types)) {
 		if def := e.doc.Types[name]; def == nil || def.Environment == nil {
 			names = append(names, name)
 		}
@@ -919,15 +919,6 @@ func (e *emitter) ident(name, what string) string {
 func quote(s string) string {
 	out := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s)
 	return `"` + out + `"`
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // parentOf returns the parent type a graph member names, or "".

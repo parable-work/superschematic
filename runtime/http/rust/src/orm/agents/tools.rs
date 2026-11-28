@@ -11,7 +11,7 @@ use serde_json::{json, Map, Value};
 use super::super::inbound::{SendInput, SendOutcome};
 use super::super::parties::PartyRef;
 use super::super::rowfeatures::RowRef;
-use super::super::search_tables::{call_search_tool, search_mcp_tool};
+use super::super::search_tables::search_mcp_tool;
 use super::super::{AccessCaller, Error, FindOptions, Values, WriteOptions};
 use super::dispatcher::{
     as_number, number, obj, opt, string, targets_of, AgentRunRequest, AgentToolContext, Agents,
@@ -22,7 +22,6 @@ use crate::auth::{covers, Principal};
 use crate::mcp::{CallOutcome, Tool, ToolError, ToolSet};
 use crate::orm::routes::acting;
 use crate::providers::{ModelMessage, ModelRole, ModelTool, ModelToolCall, ModelTurn};
-use crate::queue::enqueue_in;
 
 /// What a tool of the run's set is.
 #[derive(Clone, Debug)]
@@ -189,10 +188,10 @@ impl Agents {
         counts: &[(&str, i64)],
     ) -> Result<(), AgentsError> {
         if !counts.is_empty() {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             {
-                let repositories = self.sys_tx(&tx, None)?;
+                let repositories = self.sys_tx(tx.db(), None)?;
                 let runs = repositories.table(&self.parts().runs)?;
                 let current = runs
                     .find_one(
@@ -385,10 +384,10 @@ impl Agents {
         }
         let spent = (self.inner.cost_of)(&completion.usage);
         {
-            let mut client = self.pool().get().await?;
+            let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             {
-                let repositories = self.sys_tx(&tx, None)?;
+                let repositories = self.sys_tx(tx.db(), None)?;
                 let runs = repositories.table(&self.parts().runs)?;
                 let current = runs
                     .find_one(
@@ -578,10 +577,10 @@ impl RunTools {
             }
         };
         let ran: Result<Value, AgentsError> = async {
-            let mut client = agents.pool().get().await?;
+            let mut client = agents.store().client().await?;
             let tx = client.transaction().await?;
             let result = {
-                let repositories = agents.as_principal(&tx, &self.principal)?;
+                let repositories = agents.as_principal(tx.db(), &self.principal)?;
                 let ctx = AgentToolContext {
                     repositories: &repositories,
                     principal: &self.principal,
@@ -602,11 +601,11 @@ impl RunTools {
                 }
                 agents.record(&run_id, name, args, "done", &counts).await?;
                 if mode == Autonomy::Tell {
-                    let mut client = agents.pool().get().await?;
+                    let mut client = agents.store().client().await?;
                     let tx = client.transaction().await?;
                     agents
                         .raise_in(
-                            &tx,
+                            tx.db(),
                             &agents.parts().runs,
                             &run_id,
                             "agent.acted",
@@ -646,15 +645,18 @@ impl RunTools {
         let agents = &self.agents;
         let run_id = string(&self.run, "id");
         let options = agents.inner.search.clone().unwrap_or_default();
-        let client = agents.pool().get().await?;
-        let mut repositories =
-            super::super::postgres::Repositories::new(&client, agents.definition())?
-                .acting(acting(Some(&self.principal)))
-                .with_access(AccessCaller::of(Some(&self.principal)));
+        let client = agents.store().client().await?;
+        let mut repositories = client
+            .db()
+            .repositories(agents.definition())?
+            .acting(acting(Some(&self.principal)))
+            .with_access(AccessCaller::of(Some(&self.principal)));
         if let Some(keys) = agents.tables().keys() {
             repositories = repositories.with_keys(keys.as_ref());
         }
-        let answer = call_search_tool(&repositories, Some(&self.principal), args, &options).await;
+        let answer = repositories
+            .call_search_tool(Some(&self.principal), args, &options)
+            .await;
         drop(repositories);
         drop(client);
         match answer {
@@ -854,10 +856,10 @@ impl RunTools {
         let question = text("question");
         let principal = args.get("principal").and_then(Value::as_str);
         let message = {
-            let mut client = agents.pool().get().await?;
+            let mut client = agents.store().client().await?;
             let tx = client.transaction().await?;
             let message = {
-                let repositories = agents.as_principal(&tx, &self.principal)?;
+                let repositories = agents.as_principal(tx.db(), &self.principal)?;
                 agents
                     .thread()
                     .post(&repositories, &row, &question, principal)
@@ -883,9 +885,11 @@ impl RunTools {
             ..AgentRunRequest::default()
         };
         {
-            let mut client = agents.pool().get().await?;
+            let mut client = agents.store().client().await?;
             let tx = client.transaction().await?;
-            enqueue_in(&tx, agents.requests(), &follow, Duration::from_secs(delay)).await?;
+            tx.db()
+                .enqueue(agents.requests(), &follow, Duration::from_secs(delay))
+                .await?;
             tx.commit().await?;
         }
         agents

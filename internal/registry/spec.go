@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -272,11 +272,7 @@ func (s DecoratorSpec) ValidateArgs(args []any) error {
 	if err != nil {
 		return fmt.Errorf("@%s argument: %w", s.Name, err)
 	}
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		return fmt.Errorf("@%s argument: %w", s.Name, err)
-	}
-	if err := s.compiledArgs.Validate(instance); err != nil {
+	if err := jsonschemas.Validate(s.compiledArgs, raw); err != nil {
 		return fmt.Errorf("@%s argument: %w", s.Name, err)
 	}
 	return nil

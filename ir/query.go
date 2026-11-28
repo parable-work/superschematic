@@ -1,6 +1,10 @@
 package ir
 
-import "sort"
+import (
+	"maps"
+	"slices"
+	"sort"
+)
 
 // RoleQuery marks a @query declaration in a DB schema (D86): a named SQL
 // statement the DB service declares, whose parameters and rows are two
@@ -123,7 +127,7 @@ func (o *QueryOrderBy) OptionValues() []string {
 // Queries returns the schema's RoleQuery types, sorted by query name.
 func (s *Schema) Queries() []*TypeDef {
 	var defs []*TypeDef
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		if td := s.Types[name]; td != nil && td.Role == RoleQuery && td.Query != nil {
 			defs = append(defs, td)
 		}

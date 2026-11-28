@@ -180,7 +180,7 @@ func TestNotificationsExampleLoads(t *testing.T) {
 	if w := workers["Notify"]; w == nil || w.Queue != "NoticeWork" {
 		t.Errorf("Notify is %+v", w)
 	}
-	if w := workers["DutyDeadlines"]; w == nil || len(w.Events) != 3 {
+	if w := workers["DutyDeadlines"]; w == nil || len(w.Events) != 4 {
 		t.Errorf("DutyDeadlines hands %+v", w)
 	}
 	used := reg.RuntimeFeaturesUsed(registry.RuntimeFeatureInput{API: api, Databases: map[string]*ir.Schema{db.Name: db}})

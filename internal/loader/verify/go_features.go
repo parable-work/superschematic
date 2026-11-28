@@ -1,7 +1,6 @@
 package verify
 
 import (
-	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -32,9 +31,8 @@ import (
 // served on Postgres (D187): a Go server runs a Recurrence's operations,
 // deadlines and occurrences through the Go adapter, the generated ORM
 // carries a table's calendar sources and search index, and the schema
-// runtime's crosstable package reads them. A calendar source a Go server
-// reads is refused a title of an Encrypted<T> field, which the Go read
-// across tables takes from its column. On SQLite they are served too
+// runtime's crosstable package reads them, a title of an Encrypted<T>
+// field opened under the database's keys (#616). On SQLite they are served too
 // (#615, part 2 of Go on SQLite): the behaviors' core runs a Recurrence's
 // operations in the SQLite repositories' transactions, and the SQLite
 // database's CrossTables is a crosstable.DialectHost, whose calendar and
@@ -101,11 +99,6 @@ func checkGoTables(schema *ir.Schema, where string, r *Result) {
 		td := schema.Types[name]
 		if td == nil {
 			continue
-		}
-		for i, source := range td.CalendarSources {
-			if fd := sqlutil.FieldNamed(td, source.Title); fd != nil && fd.EncryptedAtRest {
-				r.errorf(td.Owner, "%s does not serve @calendarSource %s titled by %s, an Encrypted<T> field (D152, D187): the Go calendar reads a title from its column, sealed; title it by a plain field, or serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\")", where, ir.CalendarSourceName(td, i), source.Title)
-			}
 		}
 	}
 	// The inbound path and the dispatcher run through the notifier's host

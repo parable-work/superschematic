@@ -125,6 +125,12 @@ type EndpointInfo struct {
 	// other: the router's handler runs it through the graph's facade
 	// (src/graphs.rs), and its namespace's trait has no method for it.
 	Graph *GraphInfo
+
+	// RowFeature is the row feature operation the endpoint is (#723), nil
+	// for every other: the router's handler runs it through the
+	// repositories' references and attachments (src/rowfeatures.rs), and
+	// its namespace's trait has no method for it.
+	RowFeature *RowFeatureInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -480,11 +486,13 @@ type APIOutput struct {
 	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
 	// PostgresFeatures are the features of the databases the API reads
-	// that a Rust server serves on Postgres alone (D193): a @party table,
-	// the conversations and the run requests (D157), and the agent
-	// orchestration's tables (D158), each "Type: feature". A Deps whose
-	// database lists sqlite first is refused them. Recurrence and a
-	// calendar source (D152) are served on SQLite too (#615).
+	// that a Rust server wires on Postgres alone (D193, #725): a @party
+	// table, the conversations and the run requests (D157), and the agent
+	// orchestration's tables (D158), each "Type: feature". The runtime
+	// serves them on SQLite too (#618); a Deps whose database lists sqlite
+	// first is refused them until the server's wiring builds them there.
+	// Recurrence and a calendar source (D152) are served on SQLite too
+	// (#615).
 	PostgresFeatures []string
 	// ReadsAcrossTables is whether a database the API reads has a calendar
 	// source (D152) or a @searchable table (D155): the crate's dependency
@@ -1026,6 +1034,14 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 				return nil, err
 			}
 		}
+		// A row feature operation's handler runs it through the
+		// repositories' references and attachments (#723): its namespace
+		// has no method for it either.
+		if info.Behavior == nil && info.Table == nil && info.Graph == nil {
+			if info.RowFeature, err = rowFeatureInfo(endpoint, info); err != nil {
+				return nil, err
+			}
+		}
 		if !info.RouterServed() {
 			namespaceSet[info.Namespace] = struct{}{}
 		}
@@ -1215,6 +1231,8 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{output.BehaviorsTemplate(), "behaviors.rs", output.HasBehaviors()},
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
+		{"rowfeatures.tmpl", RowFeaturesFile, output.HasRowFeatureOperations()},
+		{"files.tmpl", FilesFile, output.HasFileProcessing()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
 		{"wiring.tmpl", WiringFile, output.HasWiring()},
 	} {
@@ -1367,9 +1385,9 @@ func templateFuncs() template.FuncMap {
 	})
 }
 
-// rustString renders a Rust string literal.
+// rustString renders a Rust string literal (rustutil.Quote).
 func rustString(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s) + `"`
+	return rustutil.Quote(s)
 }
 
 // SetReplacePaths computes dependency path fields for generated Cargo.toml.

@@ -166,7 +166,7 @@ func (s *session) planBundles(ctx context.Context, prev *Manifest, given map[str
 			bundled = append(bundled, d)
 		}
 	}
-	for _, name := range sortedKeys(given) {
+	for _, name := range slices.Sorted(maps.Keys(given)) {
 		if d := s.env.Deployable(name); d == nil || !d.HasBundle() {
 			return p, fmt.Errorf("--bundle names %s, which is no server, job or worker of environment %s that runs a bundle", name, s.env.Environment)
 		}
@@ -309,7 +309,7 @@ func (s *session) publishBundles(ctx context.Context, p *bundlePlan, force bool)
 // bundle the plan gives a digest and holds no files of, and checks them
 // against the digest.
 func (s *session) fetchBundles(ctx context.Context, p *bundlePlan) error {
-	for _, name := range sortedKeys(p.digests) {
+	for _, name := range slices.Sorted(maps.Keys(p.digests)) {
 		if p.files[name] != nil {
 			continue
 		}
@@ -364,7 +364,7 @@ func PinBundles(env *ir.ResolvedEnvironment, bundles map[string]Bundle) (*ir.Res
 	if err != nil {
 		return nil, err
 	}
-	for _, name := range sortedKeys(bundles) {
+	for _, name := range slices.Sorted(maps.Keys(bundles)) {
 		b := bundles[name]
 		hex, ok := strings.CutPrefix(b.Digest, "sha256:")
 		if !ok || !digestPattern.MatchString(b.Digest) {
@@ -400,7 +400,7 @@ func PinBundles(env *ir.ResolvedEnvironment, bundles map[string]Bundle) (*ir.Res
 		}
 		if len(unknown) > 0 {
 			slices.Sort(unknown)
-			return nil, fmt.Errorf("%s: its nodes name file %s of its bundle %s, which holds %s", kindOf(env, name), strings.Join(slices.Compact(unknown), ", "), shortDigest(b.Digest), strings.Join(sortedKeys(b.Files), ", "))
+			return nil, fmt.Errorf("%s: its nodes name file %s of its bundle %s, which holds %s", kindOf(env, name), strings.Join(slices.Compact(unknown), ", "), shortDigest(b.Digest), strings.Join(slices.Sorted(maps.Keys(b.Files)), ", "))
 		}
 		if count == 0 {
 			return nil, fmt.Errorf("%s: no property of its nodes holds %s, where its platform writes the digest of its bundle's files", kindOf(env, name), ir.BundleDigestToken)
@@ -421,7 +421,7 @@ func placeArtifacts(dir string, files map[string]*ArtifactFiles) error {
 	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
-	for _, name := range sortedKeys(files) {
+	for _, name := range slices.Sorted(maps.Keys(files)) {
 		f := files[name]
 		dest := filepath.Join(root, name, strings.TrimPrefix(f.Digest, "sha256:"))
 		if err := copyFiles(f.Dir, dest); err != nil {
@@ -478,7 +478,7 @@ func copyFiles(src, dest string) error {
 // deployable order.
 func (r *BuildResult) BundleFlags() []string {
 	var out []string
-	for _, name := range sortedKeys(r.Bundles) {
+	for _, name := range slices.Sorted(maps.Keys(r.Bundles)) {
 		out = append(out, name+"="+r.Bundles[name])
 	}
 	return out

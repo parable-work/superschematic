@@ -1,37 +1,42 @@
 //! fixture-parties-plain-messages-db's inbound path in the Rust
-//! repositories and runtime (D157, D193), run by
+//! repositories and runtime (D157, D193, #618), run by
 //! TestRustPartiesPlainMessages: the messages keep references and hold no
 //! files, and the reports hold files. A party's text is filed onto a
 //! report and onto the granted job once, with no error: filing asks no
 //! table for files it does not hold, so the run request is handled the
-//! first time and is not run again. The generated create.sql is applied in
-//! a schema of the test's own at PARTIES_TEST_DATABASE_URL.
+//! first time and is not run again. The case runs on the database
+//! RUST_E2E_STORE names (tests/backend): a SQLite file with the build's
+//! SQLite DDL applied, or a schema of the test's own at
+//! RUST_E2E_DATABASE_URL with create.sql applied; it prints its answer,
+//! which the Go test holds equal on the two databases.
+
+mod backend;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use runtime::access::{issue_grant, IssueGrant};
+use backend::{answer, in_tx, Backend};
+use runtime::access::IssueGrant;
 use runtime::bucket::{
     Body, Bucket, BucketError, ListOptions, Object, Page, PutOptions, PutResult, Reader,
     SignedUrlOptions,
 };
-use runtime::orm::inbound::{Inbound, RunRequest};
+use runtime::orm::inbound::Inbound;
 use runtime::orm::notify::Notifier;
 use runtime::orm::parties::PartyRef;
-use runtime::orm::postgres::{deadpool_postgres, tokio_postgres};
 use runtime::orm::rowfeatures::RowRef;
+use runtime::orm::store::Store;
 use runtime::orm::{AccessCaller, Values};
 use runtime::providers::{
     providers_from, ChannelAdapter, ChannelHealth, ConfigValue, InboundAttachment, InboundMessage,
     OutboundMessage, ProviderDefinition, ProviderInstance, ProvidersOptions, RuntimeInterface,
     SendResult, WebhookRequest,
 };
-use runtime::queue::{PostgresQueue, QueueDefinition};
+use runtime::queue::QueueDefinition;
 use runtime::{BoxError, PrincipalKind};
 use serde_json::{json, Value};
-use types::orm::postgres::Repositories;
 
 const RELAY_TOKEN: &str = "relay-token";
 const PHOTO: [u8; 8] = [0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4];
@@ -138,17 +143,10 @@ impl Bucket for NoBucket {
     }
 }
 
-async fn connect(config: &tokio_postgres::Config) -> tokio_postgres::Client {
-    let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
-    tokio::spawn(connection);
-    client
-}
-
-async fn backlinks(pool: &deadpool_postgres::Pool, table: &str, key: &str) -> Vec<String> {
-    let client = pool.get().await.unwrap();
-    let repos = Repositories::new(&client).unwrap().as_system();
+async fn backlinks(store: &Store, table: &str, key: &str) -> Vec<String> {
+    let client = store.client().await.unwrap();
+    let repos = client.db().repositories(store.definition().unwrap()).unwrap().as_system();
     repos
-        .untyped()
         .references()
         .unwrap()
         .referenced_by(&RowRef::new(table, key), None)
@@ -164,16 +162,8 @@ async fn backlinks(pool: &deadpool_postgres::Pool, table: &str, key: &str) -> Ve
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn parties_plain_messages() {
     println!("case: a text from a party with a grant is filed onto the granted record once, as references alone, when the messages hold no files");
-    let url = std::env::var("PARTIES_TEST_DATABASE_URL").expect("PARTIES_TEST_DATABASE_URL names the database");
-    let config: tokio_postgres::Config = url.parse().unwrap();
-    let admin = connect(&config).await;
-    let schema = format!("parties_plain_rust_{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
-    admin.batch_execute(&format!("CREATE SCHEMA {schema}")).await.unwrap();
-    let mut scoped = config;
-    scoped.options(format!("-c search_path={schema},public"));
-    connect(&scoped).await.batch_execute(include_str!("../create.sql")).await.unwrap();
-    let manager = deadpool_postgres::Manager::new(scoped, tokio_postgres::NoTls);
-    let pool = deadpool_postgres::Pool::builder(manager).max_size(8).build().unwrap();
+    let backend = Backend::open("parties_plain_rust", include_str!("../create.sqlite.sql"), include_str!("../create.sql")).await;
+    let store = backend.store();
 
     let providers = Arc::new(
         providers_from(ProvidersOptions {
@@ -188,54 +178,45 @@ async fn parties_plain_messages() {
         .unwrap(),
     );
     let dispatch = QueueDefinition::parse(types::queues::NOTICE_WORK_QUEUE).unwrap();
-    let notifier = Notifier::new(types::orm::postgres::tables(pool.clone()), dispatch).unwrap().with_providers(providers.clone());
+    let notifier = Notifier::new(store.clone(), dispatch).unwrap().with_providers(providers.clone());
     let runs = QueueDefinition::parse(types::queues::RUN_REQUEST_QUEUE).unwrap();
-    let inbound = Inbound::new(types::orm::postgres::tables(pool.clone()), notifier, runs)
+    let inbound = Inbound::new(store.clone(), notifier, runs)
         .unwrap()
         .with_providers(providers)
         .with_bucket(Arc::new(NoBucket));
 
-    let (dee, job, grant) = {
-        let mut client = pool.get().await.unwrap();
-        let tx = client.transaction().await.unwrap();
-        let out = {
-            let repos = Repositories::new(&tx).unwrap().as_system();
-            let r = repos.untyped();
-            r.table("Role")
-                .unwrap()
-                .create_one(&values(json!({ "name": "contractor", "permissions": ["reports.write"], "reaches": ["Report:job"] })))
-                .await
-                .unwrap();
-            let dee = text(&r.table("Contact").unwrap().create_one(&values(json!({ "name": "Dee" }))).await.unwrap(), "id");
-            let job = text(&r.table("Job").unwrap().create_one(&values(json!({ "title": "Fix the gate" }))).await.unwrap(), "id");
-            r.table("ChannelIdentity")
-                .unwrap()
-                .create_one(&values(json!({
-                    "kind": "phone", "address": DEE, "principalKind": "party", "principalTable": "Contact",
-                    "principal": dee, "trust": "verified", "verifiedAt": "2026-01-01T00:00:00Z",
-                })))
-                .await
-                .unwrap();
-            let issued = issue_grant(
-                r,
-                &IssueGrant {
-                    holder: dee.clone(),
-                    holder_kind: PrincipalKind::Party,
-                    role: "contractor".to_owned(),
-                    target_type: "Job".to_owned(),
-                    target_id: job.clone(),
-                    starts_at: None,
-                    ends_at: None,
-                    ends_when: None,
-                },
-            )
+    let (dee, job, grant) = in_tx(&store, async |r| {
+        r.table("Role")
+            .unwrap()
+            .create_one(&values(json!({ "name": "contractor", "permissions": ["reports.write"], "reaches": ["Report:job"] })))
             .await
             .unwrap();
-            (dee, job, text(&issued.grant, "id"))
-        };
-        tx.commit().await.unwrap();
-        out
-    };
+        let dee = text(&r.table("Contact").unwrap().create_one(&values(json!({ "name": "Dee" }))).await.unwrap(), "id");
+        let job = text(&r.table("Job").unwrap().create_one(&values(json!({ "title": "Fix the gate" }))).await.unwrap(), "id");
+        r.table("ChannelIdentity")
+            .unwrap()
+            .create_one(&values(json!({
+                "kind": "phone", "address": DEE, "principalKind": "party", "principalTable": "Contact",
+                "principal": dee, "trust": "verified", "verifiedAt": "2026-01-01T00:00:00Z",
+            })))
+            .await
+            .unwrap();
+        let issued = r
+            .issue_grant(&IssueGrant {
+                holder: dee.clone(),
+                holder_kind: PrincipalKind::Party,
+                role: "contractor".to_owned(),
+                target_type: "Job".to_owned(),
+                target_id: job.clone(),
+                starts_at: None,
+                ends_at: None,
+                ends_when: None,
+            })
+            .await
+            .unwrap();
+        (dee, job, text(&issued.grant, "id"))
+    })
+    .await;
 
     let request = WebhookRequest {
         headers: BTreeMap::from([("x-relay-token".to_owned(), RELAY_TOKEN.to_owned())]),
@@ -253,19 +234,18 @@ async fn parties_plain_messages() {
     // The run request's handler, as the party through its grant: a report
     // on the granted job, the message filed onto it and onto the job. A
     // handler that fails is a run request run again.
-    let queue: PostgresQueue<RunRequest> = inbound.run_queue();
+    let queue = inbound.run_queue();
     let claims = queue.claim(10, Duration::from_secs(30)).await.unwrap();
     assert_eq!(claims.len(), 1);
     let claim = &claims[0];
     let party = inbound.principal_of(&claim.message.party, Some(&claim.message.grant)).await.unwrap();
     let granted = party.grants.as_ref().and_then(|g| g.first()).cloned().unwrap();
     let report = {
-        let mut client = pool.get().await.unwrap();
+        let mut client = store.client().await.unwrap();
         let tx = client.transaction().await.unwrap();
         let report = {
-            let repos = Repositories::new(&tx).unwrap().with_access(AccessCaller::of(Some(&party)));
+            let repos = tx.db().repositories(store.definition().unwrap()).unwrap().with_access(AccessCaller::of(Some(&party)));
             repos
-                .untyped()
                 .table("Report")
                 .unwrap()
                 .create_one(&values(json!({ "jobId": granted.target_id, "body": "Gate fixed" })))
@@ -284,18 +264,28 @@ async fn parties_plain_messages() {
     // The message is on the report, the job and the party, once each, and
     // the report holds no file of it.
     for (table, key) in [("Report", report.clone()), ("Job", job.clone()), ("Contact", dee.clone())] {
-        assert_eq!(backlinks(&pool, table, &key).await, vec![id.clone()], "{table}");
+        assert_eq!(backlinks(&store, table, &key).await, vec![id.clone()], "{table}");
     }
-    {
-        let client = pool.get().await.unwrap();
-        let repos = Repositories::new(&client).unwrap().as_system();
-        assert!(repos.untyped().attachments().unwrap().list(&RowRef::new("Report", report.clone())).await.unwrap().is_empty());
-    }
+    let files = {
+        let client = store.client().await.unwrap();
+        let repos = client.db().repositories(store.definition().unwrap()).unwrap().as_system();
+        repos.attachments().unwrap().list(&RowRef::new("Report", report.clone())).await.unwrap()
+    };
+    assert!(files.is_empty(), "{files:?}");
     // Filing it again changes nothing.
     let filer = inbound.principal_of(&PartyRef::new("Contact", dee.clone()), None).await.unwrap();
     inbound.file(&id, &RowRef::new("Report", report.clone()), &filer, None).await.unwrap();
-    assert_eq!(backlinks(&pool, "Report", &report).await, vec![id.clone()]);
+    assert_eq!(backlinks(&store, "Report", &report).await, vec![id.clone()]);
+    answer(
+        "a text filed onto rows when the messages hold no files",
+        json!({
+            "outcome": outcome.outcome,
+            "reportBacklinks": backlinks(&store, "Report", &report).await.len(),
+            "jobBacklinks": backlinks(&store, "Job", &job).await.len(),
+            "reportFiles": files.len(),
+        }),
+    );
 
-    pool.close();
-    admin.batch_execute(&format!("DROP SCHEMA {schema} CASCADE")).await.unwrap();
+    drop((store, inbound));
+    backend.drop_database().await;
 }

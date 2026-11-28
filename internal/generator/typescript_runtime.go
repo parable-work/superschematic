@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,7 +25,7 @@ func (r run) typeScriptProviders() (*tsrestgen.DepsProviders, error) {
 		return nil, err
 	}
 	out := &tsrestgen.DepsProviders{}
-	for _, slot := range sortedKeys(slots) {
+	for _, slot := range slices.Sorted(maps.Keys(slots)) {
 		out.Slots = append(out.Slots, tsrestgen.DepsProviderSlot{Slot: slot, Interface: slots[slot]})
 	}
 	providers := slices.Clone(r.Schema.Providers)
@@ -81,6 +82,12 @@ func typeScriptRuntime(deps *tsrestgen.DepsInfo, db *ir.Schema) {
 		}
 	}
 	slices.Sort(deps.Routes.SearchQueues)
+	for _, td := range db.AudienceTables() {
+		if q := td.Audience.Queue; q != "" && !slices.Contains(deps.Routes.AudienceQueues, q) {
+			deps.Routes.AudienceQueues = append(deps.Routes.AudienceQueues, q)
+		}
+	}
+	slices.Sort(deps.Routes.AudienceQueues)
 	for _, td := range db.Types {
 		if td != nil && len(td.CalendarSources) > 0 {
 			deps.Routes.Calendar = true
@@ -95,19 +102,10 @@ func typeScriptRuntime(deps *tsrestgen.DepsInfo, db *ir.Schema) {
 	deps.Routes.AccessLog = db.AccessLogTable() != nil
 }
 
-// sortedKeys are m's keys, sorted.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
-}
-
 // typeScriptRuntimeQueues are the queues of db, schema, whose @worker a
 // runtime piece runs in TypeScript beside the dispatcher's: the notifier's
-// dispatch queue (D153) and the @searchable declarations' queues (D155),
+// dispatch queue (D153), the @searchable declarations' queues (D155) and
+// the @audience declarations' (D156, #734),
 // whichever dialect the database's DB service lists first (#702).
 // typeScriptRuntime sets the same for the API's own build.
 func (r run) typeScriptRuntimeQueues(db string, schema *ir.Schema) []string {
@@ -117,5 +115,6 @@ func (r run) typeScriptRuntimeQueues(db string, schema *ir.Schema) []string {
 	if deps.Notifier != nil {
 		out = append(out, deps.Notifier.Dispatch)
 	}
-	return append(out, deps.Routes.SearchQueues...)
+	out = append(out, deps.Routes.SearchQueues...)
+	return append(out, deps.Routes.AudienceQueues...)
 }

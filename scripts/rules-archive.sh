@@ -26,13 +26,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/archive.sh
+. "$ROOT/scripts/lib/archive.sh"
 CRATE="$ROOT/runtime/engine/rust/rules-wasm"
 GO_DIR="$ROOT/runtime/rules/go"
 ARCHIVE_NAME="libsuperschematic_rules.a"
 
-goos="$(go env GOOS)"
-goarch="$(go env GOARCH)"
-DEST="$GO_DIR/lib/${goos}_${goarch}"
+archive_target
+DEST="$(archive_lib_dir "$GO_DIR")"
 
 # A project's rules crate (D103's step 5, internal/generator/rulescore)
 # builds in its place: --crate <dir> --out <dir> stages that crate's
@@ -69,72 +70,31 @@ fi
 
 # Go binaries link this archive beside superscalar's and the version
 # graph's, so all three are built with tools.env's RUST_VERSION
-# (scripts/superscalar-dep.sh says why).
-RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
-export RUSTUP_TOOLCHAIN
+# (scripts/lib/archive.sh says why).
+archive_toolchain
 
 # The crate is a member of the workspace runtime/engine/rust, which cargo
 # loads whole: the behaviors (rules-behaviors) read scalars through
 # superscalar's core by path, so the checkout must be there, nothing of it
 # built.
-if [ ! -f "$ROOT/third_party/superscalar/crates/core/Cargo.toml" ]; then
-  "$ROOT/scripts/superscalar-dep.sh" --checkout
-fi
+archive_superscalar_sources
 
-BUILD_LOG="$(mktemp)"
-NEW_STAMP="$(mktemp)"
-trap 'rm -f "$BUILD_LOG" "$NEW_STAMP"' EXIT
-
-# cargo names the archive it built in its artifact records, wherever
-# CARGO_TARGET_DIR or a config puts the target directory: the staticlib of
-# the package whose manifest is rules-wasm's. The crate is a member of the
-# runtime/engine/rust workspace, so it builds against the workspace's
-# committed lock file.
+# The crate is a member of the runtime/engine/rust workspace, so it builds
+# against the workspace's committed lock file; a project's crate against
+# its own.
 LOCKED=--locked
 if [ -n "$PROJECT" ]; then
   LOCKED=""
 fi
-cargo build --release $LOCKED --manifest-path "$CRATE/Cargo.toml" \
-  --message-format=json-render-diagnostics >"$BUILD_LOG"
-ARCHIVE="$(python3 - "$BUILD_LOG" "$CRATE/Cargo.toml" <<'PY'
-import json, os, sys
-
-manifest = os.path.realpath(sys.argv[2])
-found = None
-for line in open(sys.argv[1], encoding="utf-8"):
-    try:
-        message = json.loads(line)
-    except ValueError:
-        continue
-    if message.get("reason") != "compiler-artifact":
-        continue
-    if os.path.realpath(message.get("manifest_path") or "") != manifest:
-        continue
-    if "staticlib" not in (message.get("target") or {}).get("kind", []):
-        continue
-    for path in message.get("filenames") or []:
-        if path.endswith(".a"):
-            found = path
-if found:
-    print(found)
-PY
-)"
-if [ -z "$ARCHIVE" ] || [ ! -f "$ARCHIVE" ]; then
-  echo "cargo reported no static library for $CRATE" >&2
-  exit 1
-fi
-
-mkdir -p "$DEST"
-cp "$ARCHIVE" "$DEST/$ARCHIVE_NAME"
+archive_build "$CRATE" ${LOCKED:+"$LOCKED"}
+archive_stage "$ARCHIVE" "$DEST" "$ARCHIVE_NAME"
 if [ -n "$PROJECT" ]; then
   echo "rules archive of $CRATE staged under $DEST" >&2
   echo "-L$DEST"
   exit 0
 fi
 
-DIGEST="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$DEST/$ARCHIVE_NAME")"
-STAMP="$GO_DIR/archive_stamp_${goos}_${goarch}.go"
-cat >"$NEW_STAMP" <<EOF
+archive_stamp "$GO_DIR/archive_stamp_${goos}_${goarch}.go" <<EOF
 //go:build ${goos} && ${goarch}
 
 package rules
@@ -146,10 +106,6 @@ package rules
 // one.
 const archiveSHA256 = "${DIGEST}"
 EOF
-# Rewrite only on a change, so an unchanged archive keeps the cache warm.
-if ! cmp -s "$NEW_STAMP" "$STAMP"; then
-  cp "$NEW_STAMP" "$STAMP"
-fi
 
 echo "rules archive ${DIGEST:0:12} staged under $DEST" >&2
 echo "-L$DEST"

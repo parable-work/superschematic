@@ -72,4 +72,15 @@ describe('notifierRoutes', () => {
       ['read', { kind: 'user', id: 'ada' }, '7'],
     ]);
   });
+
+  test('a refusal is the shared problem envelope, with the request id and code', async () => {
+    const { notifier } = recording();
+    const routes = notifierRoutes({ notifier, slots: ['SMS'], authenticate });
+    const refused = await routes(new Request('http://x/api/inbox', { headers: { 'x-request-id': 'req-7' } }));
+    expect(refused!.headers.get('content-type')).toBe('application/problem+json');
+    expect(refused!.headers.get('x-request-id')).toBe('req-7');
+    expect(await refused!.json()).toEqual({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Authentication required', code: 'unauthorized', requestId: 'req-7' });
+    const method = await routes(new Request('http://x/webhooks/sms/inbound', { headers: { 'x-request-id': 'req-8' } }));
+    expect(await method!.json()).toEqual({ type: 'about:blank', title: 'Method Not Allowed', status: 405, detail: 'a relay posts its callbacks', code: 'method_not_allowed', requestId: 'req-8' });
+  });
 });

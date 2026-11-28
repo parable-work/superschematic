@@ -3,6 +3,7 @@ Per-record access (D156): who may see a row of a table, the grants that let a
 caller who is no user reach rows, and the log of sensitive reads.
 */
 
+import type { SchemaClass } from "./decorators";
 import type { RelationKeyOf } from "./wrappers";
 
 /** Who may see a row: every principal the route admits, the owner alone, the owner and the principals it names, or what its parent sees. */
@@ -30,6 +31,16 @@ export interface AudienceOptions<T> {
   readonly default?: AudienceValue;
   /** What an agent run may do with a row whose create names nothing: followRole unless set. */
   readonly agents?: AgentAccessValue;
+  /**
+   * A @queue class, beside inheritFrom, declared with no fields, which the
+   * build fills (childTable, parentKey): when a parent's audience changes,
+   * its rows of this table are resolved again by the queue's worker after
+   * the parent's write commits, a batch at a time, instead of in the
+   * writer's transaction. For a parent with very many children; until the
+   * worker has run, a read of such a row keeps to the audience it had
+   * (#734). Postgres alone.
+   */
+  readonly queue?: SchemaClass;
 }
 
 /**
@@ -108,6 +119,8 @@ export interface CalendarSourceOptions<T> {
   readonly color?: string;
   /** The field that holds a row's owner, which a read's scope "mine" keeps to the caller. */
   readonly owner?: keyof T & string;
+  /** The permission a caller needs to read any entry of the source, beside its table's audience and grants (#601). A server's calendar options may name another for the source, which wins. */
+  readonly permission?: string;
 }
 
 /**

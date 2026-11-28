@@ -3,7 +3,6 @@ package sqlgen
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -103,7 +102,7 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string
 		for i, idx := range message.Indexes {
 			columns := make([]string, len(idx.Columns))
 			for j, column := range idx.Columns {
-				columns[j] = strings.Trim(column, `"`)
+				columns[j] = sqlutil.Unquote(column)
 			}
 			if idx.Name, err = sqlutil.IndexName(name, columns, typeDef.Indexes[i].Name, idx.Unique); err != nil {
 				return Table{}, fmt.Errorf("queue %s: %w", typeDef.Name, err)

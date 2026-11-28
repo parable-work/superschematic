@@ -16,6 +16,7 @@ export const ErrorCode = {
   /** A verified service that is no caller of this server, or that the route does not list (D37). */
   SERVICE_FORBIDDEN: 'service_forbidden',
   NOT_FOUND: 'not_found',
+  METHOD_NOT_ALLOWED: 'method_not_allowed',
   CONFLICT: 'conflict',
   PAYLOAD_TOO_LARGE: 'payload_too_large',
   UNPROCESSABLE_ENTITY: 'unprocessable_entity',
@@ -155,6 +156,11 @@ export function serviceForbidden(detail = 'Service not permitted', extra: Extra 
 
 export function notFound(detail = 'Not Found', extra: Extra = {}): HttpProblem {
   return new HttpProblem(404, detail, { code: ErrorCode.NOT_FOUND, ...extra });
+}
+
+/** A route that serves the path but not the method; the Rust runtime answers the same code. */
+export function methodNotAllowed(detail = 'Method Not Allowed', extra: Extra = {}): HttpProblem {
+  return new HttpProblem(405, detail, { code: ErrorCode.METHOD_NOT_ALLOWED, ...extra });
 }
 
 export function conflict(detail = 'Conflict', extra: Extra = {}): HttpProblem {

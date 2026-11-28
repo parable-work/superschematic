@@ -335,12 +335,12 @@ export const {{.Const}}: TableDefinition = {
   search: {{jsonString .Search}},
 {{- end}}
 {{- if .Audience}}
-  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}} },
+  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}}{{if .Audience.Resolve}}, resolve: {{jsonString .Audience.Resolve}}{{end}} },
 {{- end}}
 {{- if .Calendar}}
   calendar: [
 {{- range .Calendar}}
-    { name: {{jsonString .Name}}, kind: {{jsonString .Kind}}, title: {{jsonString .Title}}{{if .Color}}, color: {{jsonString .Color}}{{end}}{{if .Field}}, field: {{jsonString .Field}}{{end}}{{if .End}}, end: {{jsonString .End}}{{end}}{{if .Owner}}, owner: {{jsonString .Owner}}{{end}}{{with .Occurrences}}, occurrences: { table: {{jsonString .Table}}, row: {{jsonString .Row}}, key: {{jsonString .Key}}, due: {{jsonString .Due}}, dueAt: {{jsonString .DueAt}}, state: {{jsonString .State}} }{{end}} },
+    { name: {{jsonString .Name}}, kind: {{jsonString .Kind}}, title: {{jsonString .Title}}{{if .Color}}, color: {{jsonString .Color}}{{end}}{{if .Field}}, field: {{jsonString .Field}}{{end}}{{if .End}}, end: {{jsonString .End}}{{end}}{{if .Owner}}, owner: {{jsonString .Owner}}{{end}}{{if .Permission}}, permission: {{jsonString .Permission}}{{end}}{{with .Occurrences}}, occurrences: { table: {{jsonString .Table}}, row: {{jsonString .Row}}, key: {{jsonString .Key}}, due: {{jsonString .Due}}, dueAt: {{jsonString .DueAt}}, state: {{jsonString .State}} }{{end}} },
 {{- end}}
   ],
 {{- end}}

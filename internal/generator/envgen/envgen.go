@@ -611,7 +611,7 @@ func buildImportedEnumMapIR(schema *ir.Schema, dependencies map[string]*ir.Schem
 	})
 
 	for _, imp := range imports {
-		depName := dependencyServiceName(imp.Package)
+		depName := codegen.DependencyServiceName(imp.Package)
 		depSchema := dependencies[depName]
 		if depSchema == nil {
 			return nil, fmt.Errorf("envgen: dependency schema %q (package %q) not loaded", depName, imp.Package)
@@ -646,13 +646,6 @@ func buildImportedEnumMapIR(schema *ir.Schema, dependencies map[string]*ir.Schem
 	}
 
 	return result, nil
-}
-
-func dependencyServiceName(pkg string) string {
-	if idx := strings.LastIndex(pkg, "/"); idx >= 0 {
-		return pkg[idx+1:]
-	}
-	return pkg
 }
 
 // buildScalarMapIR creates a map of scalar types to their info from IR.

@@ -169,6 +169,10 @@
         "owner": {
           "default": "",
           "type": "string"
+        },
+        "queue": {
+          "default": "",
+          "type": "string"
         }
       },
       "type": "object"
@@ -4202,6 +4206,10 @@
           "type": "boolean"
         },
         "owner": {
+          "default": "",
+          "type": "string"
+        },
+        "permission": {
           "default": "",
           "type": "string"
         },

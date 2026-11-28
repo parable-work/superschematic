@@ -32,28 +32,15 @@ var templatesFS embed.FS
 // localObjectRoles are the type roles emitted as TypeScript interfaces.
 var localObjectRoles = []ir.Role{ir.RoleDBTable, ir.RoleAPIView, ir.RoleEmbeddedStruct}
 
-// ScalarInfo holds information about a scalar type for TypeScript generation.
+// ScalarInfo holds information about a scalar type for TypeScript
+// generation: the scalar as codegen extracts it, its TargetType its
+// TypeScript type, and what the TypeScript generator reads off it.
 type ScalarInfo struct {
-	Name                         string
-	Symbol                       string
-	Module                       string
-	TSType                       string
-	Primitive                    ir.LanguagePrimitive
-	Doc                          string
-	MaxLength                    int
-	MinLength                    int
-	Pattern                      string
-	Format                       string
-	CaseInsensitive              bool
-	ReservedWords                []string
-	ReservedWordsCaseInsensitive bool
-	ReservedWordsMatchPartial    bool
-	Minimum                      *int64
-	Maximum                      *int64
-	Example                      string
-	HasCustomNormalize           bool
-	HasCustomValidate            bool
-	HasCustomParse               bool
+	codegen.ScalarInfo
+
+	// Doc is the scalar's description and its comment, as a doc comment
+	// gives them (codegen.DocText).
+	Doc string
 
 	// HasJSONParse marks a custom-parse scalar with a JSON shape (a map such
 	// as Generic.StringMap): superscalar's parser takes a value or its JSON
@@ -87,6 +74,15 @@ type ScalarInfo struct {
 	// array scalar.
 	UsesLibValidate bool
 }
+
+// Symbol is the scalar's TypeScript name, as superscalar exports it.
+func (s ScalarInfo) Symbol() string { return s.Tokens.Symbol }
+
+// Module is the scalar's module, the file of its validator.
+func (s ScalarInfo) Module() string { return s.Tokens.Module }
+
+// TSType is the scalar's TypeScript type.
+func (s ScalarInfo) TSType() string { return s.TargetType }
 
 // FieldInfo holds information about a struct field for TypeScript generation.
 // The schema field name is the JSON name; TypeScript keeps it as-is.
@@ -602,32 +598,14 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 	scalars := make([]ScalarInfo, len(codegenScalars))
 	for i, s := range codegenScalars {
 		scalars[i] = ScalarInfo{
-			Name:                         s.Name,
-			Symbol:                       s.Tokens.Symbol,
-			Module:                       s.Tokens.Module,
-			TSType:                       s.TargetType,
-			Primitive:                    s.Primitive,
-			Doc:                          codegen.DocText(s.Description, s.Comment),
-			MaxLength:                    s.MaxLength,
-			MinLength:                    s.MinLength,
-			Pattern:                      s.Pattern,
-			Format:                       s.Format,
-			CaseInsensitive:              s.CaseInsensitive,
-			ReservedWords:                s.ReservedWords,
-			ReservedWordsCaseInsensitive: s.ReservedWordsCaseInsensitive,
-			ReservedWordsMatchPartial:    s.ReservedWordsMatchPartial,
-			Minimum:                      s.Minimum,
-			Maximum:                      s.Maximum,
-			Example:                      s.Example,
-			HasCustomNormalize:           s.HasCustomNormalize,
-			HasCustomValidate:            s.HasCustomValidate,
-			HasCustomParse:               s.HasCustomParse,
-			HasJSONParse:                 s.HasCustomParse && s.Traits.IsJSONLike,
-			IsIntegerLike:                s.Traits.IsIntegerLike,
-			HasParseFromJSON:             s.HasCustomParse && s.TargetType == "JSDate",
-			IsAnyJSON:                    s.Traits.IsAnyJSON,
-			StructuredJSON:               s.Traits.StructuredJSON,
-			UsesLibValidate:              s.HasCustomValidate || s.Traits.StructuredJSON != "",
+			ScalarInfo:       s,
+			Doc:              codegen.DocText(s.Description, s.Comment),
+			HasJSONParse:     s.HasCustomParse && s.Traits.IsJSONLike,
+			IsIntegerLike:    s.Traits.IsIntegerLike,
+			HasParseFromJSON: s.HasCustomParse && s.TargetType == "JSDate",
+			IsAnyJSON:        s.Traits.IsAnyJSON,
+			StructuredJSON:   s.Traits.StructuredJSON,
+			UsesLibValidate:  s.HasCustomValidate || s.Traits.StructuredJSON != "",
 		}
 	}
 	return scalars

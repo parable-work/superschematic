@@ -149,7 +149,7 @@ export function payeesImplementation(deps: Deps): PayeesImplementation {
  * which go to the notifier. Notify's and IndexSearch's are the generated
  * server's.
  */
-export function platformWorkers(deps: Deps): Pick<Workers, 'runs' | 'billRemindersRecurrenceOpened' | 'billRemindersRecurrenceReminded' | 'billRemindersRecurrenceMissed'> {
+export function platformWorkers(deps: Deps): Pick<Workers, 'runs' | 'billRemindersRecurrenceOpened' | 'billRemindersRecurrenceReminded' | 'billRemindersRecurrenceDue' | 'billRemindersRecurrenceMissed'> {
   const toNotifier = (kind: string) => (event: { key: string; payload: unknown }, tx: unknown) =>
     deps.notifier.fromBehaviorEvent(tx, 'Bill', 'recurrence', { kind, key: event.key, payload: event.payload }).then(() => undefined);
   return {
@@ -167,6 +167,7 @@ export function platformWorkers(deps: Deps): Pick<Workers, 'runs' | 'billReminde
     },
     billRemindersRecurrenceOpened: toNotifier('opened'),
     billRemindersRecurrenceReminded: toNotifier('reminded'),
+    billRemindersRecurrenceDue: toNotifier('due'),
     billRemindersRecurrenceMissed: toNotifier('missed'),
   };
 }

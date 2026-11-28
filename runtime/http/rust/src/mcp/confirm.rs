@@ -484,20 +484,11 @@ fn system_clock() -> u64 {
         })
 }
 
-// rfc3339_utc is a Unix second in UTC, `2026-10-26T12:01:00Z`: the date by
-// Howard Hinnant's `civil_from_days`.
+// rfc3339_utc is a Unix second in UTC, `2026-10-26T12:01:00Z`.
 fn rfc3339_utc(seconds: u64) -> String {
-    let days = seconds / 86_400;
     let of_day = seconds % 86_400;
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z % 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + u64::from(month <= 2);
+    let (year, month, day) =
+        crate::civil::from_days(i64::try_from(seconds / 86_400).unwrap_or(i64::MAX));
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
         of_day / 3600,

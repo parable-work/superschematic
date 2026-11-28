@@ -11,8 +11,8 @@
 //! the same process sleeps on between its drains (D116).
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError, Weak};
 use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
@@ -42,7 +42,20 @@ impl Default for DatabaseOptions {
 /// A SQLite file: one writing connection and a few reading ones.
 pub struct Database {
     path: PathBuf,
-    writer: Mutex<Connection>,
+    /// The writing connection; none while a [`HeldWrite`] holds it.
+    writer: Mutex<Option<Connection>>,
+    /// Told when the writing connection comes back, for a write that
+    /// waits on a thread.
+    returned: Condvar,
+    /// Told when the writing connection comes back, for a write that
+    /// waits on a task.
+    freed: tokio::sync::Notify,
+    busy_timeout: Duration,
+    /// The held write and the task holding it: a write or a read of the
+    /// same task while it holds one runs in it (#618).
+    holder: Mutex<Option<(Runner, Weak<Held>)>>,
+    /// Names each nested write's savepoint.
+    savepoints: AtomicU64,
     readers: Vec<Mutex<Connection>>,
     next: AtomicUsize,
     /// What a sleeping worker of the process waits on, notified after each
@@ -121,7 +134,12 @@ impl Database {
         }
         Ok(Self {
             path,
-            writer: Mutex::new(writer),
+            writer: Mutex::new(Some(writer)),
+            returned: Condvar::new(),
+            freed: tokio::sync::Notify::new(),
+            busy_timeout: options.busy_timeout,
+            holder: Mutex::new(None),
+            savepoints: AtomicU64::new(0),
             readers,
             next: AtomicUsize::new(0),
             wake: Arc::new(Wake::new()),
@@ -143,12 +161,22 @@ impl Database {
     /// Runs `work` in a transaction on the writing connection, which it
     /// commits when `work` answers and rolls back when it fails. The
     /// transaction takes the write lock as it begins.
+    ///
+    /// Called by the task that holds a [`HeldWrite`] of the file, it runs in
+    /// that write instead, in a savepoint it releases when `work` answers
+    /// and rolls back to when it fails: the task would wait on itself
+    /// otherwise. Its rows commit with the held write.
     pub fn write<T, E>(&self, work: impl FnOnce(&Connection) -> Result<T, E>) -> Result<T, E>
     where
         E: From<Error>,
     {
-        let mut writer = held(&self.writer);
+        if let Some(held) = self.held_here() {
+            let savepoint = self.savepoint();
+            return held.with(|connection| in_savepoint(connection, &savepoint, &self.path, work));
+        }
+        let mut guard = self.writer()?;
         let context = || format!("write to {}", self.path.display());
+        let writer = guard.as_mut().ok_or_else(|| self.busy())?;
         let transaction = writer
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|err| failure(&context(), &err))?;
@@ -162,10 +190,16 @@ impl Database {
 
     /// Runs `work` on a reading connection, in a transaction of its own,
     /// so its statements read one state of the file.
+    ///
+    /// Called by the task that holds a [`HeldWrite`] of the file, it reads
+    /// in that write, so it sees the write's rows.
     pub fn read<T, E>(&self, work: impl FnOnce(&Connection) -> Result<T, E>) -> Result<T, E>
     where
         E: From<Error>,
     {
+        if let Some(held) = self.held_here() {
+            return held.with(work);
+        }
         let mut reader = self.reader();
         let context = || format!("read {}", self.path.display());
         let transaction = reader
@@ -176,6 +210,116 @@ impl Database {
             .commit()
             .map_err(|err| failure(&context(), &err))?;
         Ok(out)
+    }
+
+    /// The writing connection, waiting up to the busy timeout while a
+    /// [`HeldWrite`] holds it.
+    fn writer(&self) -> Result<MutexGuard<'_, Option<Connection>>, Error> {
+        let (guard, _) = self
+            .returned
+            .wait_timeout_while(
+                self.writer.lock().unwrap_or_else(PoisonError::into_inner),
+                self.busy_timeout,
+                |writer| writer.is_none(),
+            )
+            .unwrap_or_else(PoisonError::into_inner);
+        if guard.is_none() {
+            return Err(self.busy());
+        }
+        Ok(guard)
+    }
+
+    fn busy(&self) -> Error {
+        Error::Busy(format!(
+            "write to {}: the writing connection was held past the busy timeout",
+            self.path.display()
+        ))
+    }
+
+    /// Begins a write that a task holds across its awaits (#618): an
+    /// IMMEDIATE transaction on the writing connection, which the
+    /// [`HeldWrite`] holds until it commits or drops, and which every other
+    /// write waits for, a task's without blocking its thread. A
+    /// transaction of the notifier, the inbound path or the agent
+    /// dispatcher runs in one, its statements ready at once, so it holds
+    /// the file no longer than its statements and its callbacks take.
+    ///
+    /// Begun by the task that holds one already, it is a savepoint of that
+    /// write, released at its commit and rolled back to at its drop.
+    pub async fn begin_async(self: &Arc<Self>) -> Result<HeldWrite, Error> {
+        if let Some(held) = self.held_here() {
+            let savepoint = self.savepoint();
+            held.with(|connection| {
+                connection
+                    .execute_batch(&format!("SAVEPOINT {savepoint}"))
+                    .map_err(|err| failure(&format!("write to {}", self.path.display()), &err))
+            })?;
+            return Ok(HeldWrite {
+                database: Arc::clone(self),
+                held,
+                savepoint: Some(savepoint),
+                done: false,
+            });
+        }
+        let connection = loop {
+            let notified = self.freed.notified();
+            let mut notified = std::pin::pin!(notified);
+            // Registered before the connection is looked for, so a return
+            // between the two is not missed.
+            notified.as_mut().enable();
+            let taken = self
+                .writer
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some(connection) = taken {
+                break connection;
+            }
+            if tokio::time::timeout(self.busy_timeout, notified)
+                .await
+                .is_err()
+            {
+                return Err(self.busy());
+            }
+        };
+        if let Err(err) = connection.execute_batch("BEGIN IMMEDIATE") {
+            self.give_back(connection);
+            return Err(failure(&format!("write to {}", self.path.display()), &err));
+        }
+        let held = Arc::new(Held {
+            connection: Mutex::new(Some(connection)),
+        });
+        *self.holder.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((Runner::current(), Arc::downgrade(&held)));
+        Ok(HeldWrite {
+            database: Arc::clone(self),
+            held,
+            savepoint: None,
+            done: false,
+        })
+    }
+
+    /// The held write of the calling task, when it holds one.
+    fn held_here(&self) -> Option<Arc<Held>> {
+        let runner = Runner::current();
+        let holder = self.holder.lock().unwrap_or_else(PoisonError::into_inner);
+        match holder.as_ref() {
+            Some((holding, held)) if *holding == runner => held.upgrade(),
+            _ => None,
+        }
+    }
+
+    fn savepoint(&self) -> String {
+        format!(
+            "held_write_{}",
+            self.savepoints.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    fn give_back(&self, connection: Connection) {
+        *self.writer.lock().unwrap_or_else(PoisonError::into_inner) = Some(connection);
+        self.returned.notify_all();
+        self.freed.notify_waiters();
     }
 
     /// A reading connection: one that is free, or the next in turn.
@@ -235,6 +379,181 @@ where
         Ok(out) => out,
         Err(err) => {
             Err(Error::Database(format!("the database's work did not finish: {err}")).into())
+        }
+    }
+}
+
+/// Runs `work` on `connection` in the savepoint `name`, released when it
+/// answers and rolled back to when it fails.
+fn in_savepoint<T, E: From<Error>>(
+    connection: &Connection,
+    name: &str,
+    path: &Path,
+    work: impl FnOnce(&Connection) -> Result<T, E>,
+) -> Result<T, E> {
+    let context = || format!("write to {}", path.display());
+    connection
+        .execute_batch(&format!("SAVEPOINT {name}"))
+        .map_err(|err| failure(&context(), &err))?;
+    match work(connection) {
+        Ok(out) => {
+            connection
+                .execute_batch(&format!("RELEASE {name}"))
+                .map_err(|err| failure(&context(), &err))?;
+            Ok(out)
+        }
+        Err(err) => {
+            let _ = connection.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"));
+            Err(err)
+        }
+    }
+}
+
+/// What runs a held write's statements: a tokio task, or a thread's own
+/// future that no task runs (a runtime's `block_on`), which stays on its
+/// thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Runner {
+    Task(tokio::task::Id),
+    Thread(std::thread::ThreadId),
+}
+
+impl Runner {
+    fn current() -> Self {
+        match tokio::task::try_id() {
+            Some(task) => Runner::Task(task),
+            None => Runner::Thread(std::thread::current().id()),
+        }
+    }
+}
+
+/// The writing connection a held write took, in its transaction.
+struct Held {
+    connection: Mutex<Option<Connection>>,
+}
+
+impl Held {
+    fn with<T, E: From<Error>>(
+        &self,
+        work: impl FnOnce(&Connection) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let guard = self
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let connection = guard
+            .as_ref()
+            .ok_or_else(|| Error::Database("the held write has ended".to_owned()))?;
+        work(connection)
+    }
+}
+
+/// A write a task holds across its awaits ([`Database::begin_async`]): the
+/// writing connection in an IMMEDIATE transaction, which
+/// [`HeldWrite::commit`] commits and a drop rolls back, giving the
+/// connection back either way; or, begun by the task that holds one
+/// already, a savepoint of it.
+pub struct HeldWrite {
+    database: Arc<Database>,
+    held: Arc<Held>,
+    savepoint: Option<String>,
+    done: bool,
+}
+
+impl std::fmt::Debug for HeldWrite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeldWrite")
+            .field("path", &self.database.path)
+            .field("savepoint", &self.savepoint)
+            .finish_non_exhaustive()
+    }
+}
+
+impl HeldWrite {
+    /// Runs `work` on the transaction's connection.
+    pub fn with<T, E: From<Error>>(
+        &self,
+        work: impl FnOnce(&Connection) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.held.with(work)
+    }
+
+    /// The file the write is to.
+    pub fn database(&self) -> &Arc<Database> {
+        &self.database
+    }
+
+    /// Commits the transaction, gives the connection back and notifies
+    /// the file's wake; a savepoint is released.
+    pub fn commit(mut self) -> Result<(), Error> {
+        self.done = true;
+        let context = || format!("commit to {}", self.database.path.display());
+        if let Some(savepoint) = &self.savepoint {
+            return self.held.with(|connection| {
+                connection
+                    .execute_batch(&format!("RELEASE {savepoint}"))
+                    .map_err(|err| failure(&context(), &err))
+            });
+        }
+        let taken = self
+            .held
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let Some(connection) = taken else {
+            return Ok(());
+        };
+        let done = connection.execute_batch("COMMIT");
+        if done.is_err() {
+            let _ = connection.execute_batch("ROLLBACK");
+        }
+        self.release(connection);
+        done.map_err(|err| failure(&context(), &err))?;
+        self.database.wake.notify();
+        Ok(())
+    }
+
+    fn release(&self, connection: Connection) {
+        {
+            let mut holder = self
+                .database
+                .holder
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if holder
+                .as_ref()
+                .is_some_and(|(_, held)| held.ptr_eq(&Arc::downgrade(&self.held)))
+            {
+                *holder = None;
+            }
+        }
+        self.database.give_back(connection);
+    }
+}
+
+impl Drop for HeldWrite {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        if let Some(savepoint) = &self.savepoint {
+            let _ = self.held.with(|connection| {
+                connection
+                    .execute_batch(&format!("ROLLBACK TO {savepoint}; RELEASE {savepoint}"))
+                    .map_err(|err| failure("rollback", &err))
+            });
+            return;
+        }
+        let taken = self
+            .held
+            .connection
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(connection) = taken {
+            let _ = connection.execute_batch("ROLLBACK");
+            self.release(connection);
         }
     }
 }

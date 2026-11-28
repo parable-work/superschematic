@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 )
 
 // formatTSDefaultLiteral renders the raw @default value as a TypeScript
@@ -46,30 +47,7 @@ func formatTSDefaultLiteral(raw string, kind codegen.DefaultLiteralKind, field F
 }
 
 // jsonQuote produces a double-quoted TypeScript string literal that is also
-// valid JSON. It escapes control characters, quotes, and backslashes.
+// valid JSON (tsutil.EscapeString).
 func jsonQuote(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			if r < 0x20 {
-				fmt.Fprintf(&b, `\u%04x`, r)
-				continue
-			}
-			b.WriteRune(r)
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
+	return `"` + tsutil.EscapeString(s) + `"`
 }

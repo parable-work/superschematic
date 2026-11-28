@@ -20,13 +20,12 @@
 
 use std::time::SystemTime;
 
-use deadpool_postgres::GenericClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::postgres::Repositories;
+use super::store::{Db, PgClient};
 use super::{Definition, Error, FindOptions, Values, ACCESS_GRANTS, ACCESS_ROLES};
-use crate::access::{active_grants, grant_ended, reaches_of, ActiveGrantsFilter};
+use crate::access::{reaches_of, ActiveGrantsFilter};
 use crate::auth::{GrantReach, Principal, PrincipalKind};
 use crate::civil::parse_rfc3339;
 use crate::uuid62::parse_uuid;
@@ -90,15 +89,15 @@ fn strings(row: Option<&Values>, member: &str) -> Vec<String> {
 
 /// The role named `name`, a row of the UserRole table, read as the system;
 /// none for a database without one, or no such role.
-pub(crate) async fn role_named<C: GenericClient + Sync>(
-    client: &C,
+pub(crate) async fn role_named<C: PgClient>(
+    client: Db<'_, C>,
     definition: &Definition,
     name: &str,
 ) -> Result<Option<Values>, Error> {
     let Some(roles) = definition.access_table(ACCESS_ROLES) else {
         return Ok(None);
     };
-    let system = Repositories::new(client, definition)?.as_system();
+    let system = client.repositories(definition)?.as_system();
     let mut filter = Values::new();
     filter.insert("name".to_owned(), json!({ "eq": name }));
     system
@@ -112,23 +111,23 @@ pub(crate) async fn role_named<C: GenericClient + Sync>(
 /// `grant` names, when it is active), and the permissions of those grants'
 /// roles, each once in the order the grants give them. A party with no
 /// active grant is a principal that reaches nothing.
-pub async fn party_principal<C: GenericClient + Sync>(
-    client: &C,
+pub async fn party_principal<C: PgClient>(
+    client: Db<'_, C>,
     definition: &Definition,
     party: &PartyRef,
     grant: Option<&str>,
     now: SystemTime,
 ) -> Result<Principal, Error> {
-    let active = active_grants(
-        client,
-        definition,
-        &ActiveGrantsFilter {
-            holder: Some(party.key.clone()),
-            now: Some(now),
-            ..ActiveGrantsFilter::default()
-        },
-    )
-    .await?;
+    let active = client
+        .active_grants(
+            definition,
+            &ActiveGrantsFilter {
+                holder: Some(party.key.clone()),
+                now: Some(now),
+                ..ActiveGrantsFilter::default()
+            },
+        )
+        .await?;
     let mut permissions: Vec<String> = Vec::new();
     let mut grants = Vec::new();
     for row in active {
@@ -166,8 +165,8 @@ fn time(row: &Values, member: &str) -> Option<SystemTime> {
 /// of the party did not end before the identity was verified (its
 /// `verifiedAt`, else its `createdAt`). A user's identity never lapses, and
 /// neither does a party's that has held no grant since it was verified.
-pub async fn identity_lapsed<C: GenericClient + Sync>(
-    client: &C,
+pub async fn identity_lapsed<C: PgClient>(
+    client: Db<'_, C>,
     definition: &Definition,
     identity: &Values,
     now: SystemTime,
@@ -178,7 +177,7 @@ pub async fn identity_lapsed<C: GenericClient + Sync>(
     let Some(grants) = definition.access_table(ACCESS_GRANTS) else {
         return Ok(false);
     };
-    let system = Repositories::new(client, definition)?.as_system();
+    let system = client.repositories(definition)?.as_system();
     let mut filter = Values::new();
     filter.insert(
         "holder".to_owned(),
@@ -204,7 +203,7 @@ pub async fn identity_lapsed<C: GenericClient + Sync>(
         .unwrap_or(SystemTime::UNIX_EPOCH);
     let mut ended_since = false;
     for grant in &rows {
-        if grant_ended(client, definition, grant, now).await?.is_none() {
+        if client.grant_ended(definition, grant, now).await?.is_none() {
             // An active grant: the identity stands.
             return Ok(false);
         }

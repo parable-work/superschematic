@@ -1,8 +1,9 @@
 // The calendar's iCalendar document (D152): an entry's dates, a title
 // escaped and folded, and a busy feed that shows nothing of the row but a
-// reference number.
+// reference number; and a route's refusal, the shared problem envelope.
 import { expect, test } from 'bun:test';
-import { calendarIcs, calendarReference, type CalendarEntry } from './calendar.js';
+import type { Principal } from './auth.js';
+import { calendarIcs, calendarReference, calendarRoutes, readCalendar, type CalendarEntry } from './calendar.js';
 
 const now = new Date('2026-11-25T12:00:00Z');
 
@@ -38,4 +39,36 @@ test('a busy feed shows Busy and a reference number, and no title', () => {
   expect(ics).toContain(`SUMMARY:Busy (${calendarReference(entries[0]!)})`);
   expect(calendarReference(entries[0]!)).toMatch(/^[A-Z2-9]{8}$/u);
   expect(calendarReference(entries[0]!)).not.toBe(calendarReference(entries[1]!));
+});
+
+// A source's permission (#601): the schema's, from the definition, unless
+// the options name one for the source, which wins.
+test("a source needs the schema's permission unless the options name another", async () => {
+  let reads = 0;
+  const repository = {
+    def: { name: 'Contract', key: 'id', calendar: [{ name: 'contract', kind: 'renewal', title: 'title', field: 'endsOn', permission: 'contracts.read' }], columns: [{ name: 'endsOn' }] },
+    async findMany() {
+      reads += 1;
+      return { rows: [{ id: 'c1', title: 'Renew', endsOn: '2027-01-05' }] };
+    },
+    async findOne() {
+      return null;
+    },
+  };
+  const orm: object = { contracts: repository, as: () => orm, asSystem: () => orm, query: async () => ({ rows: [] }) };
+  const principal = (permissions: string[]) => ({ subject: 'u1', kind: 'user', permissions }) as unknown as Principal;
+  const read = { from: '2027-01-01', to: '2027-02-01' };
+  expect((await readCalendar(orm, principal([]), read)).entries).toEqual([]);
+  expect((await readCalendar(orm, principal(['contracts.read']), read)).entries.map(e => e.key)).toEqual(['c1']);
+  expect((await readCalendar(orm, principal(['contracts.read']), read, { permissions: { contract: 'calendar.all' } })).entries).toEqual([]);
+  expect((await readCalendar(orm, principal(['calendar.all']), read, { permissions: { contract: 'calendar.all' } })).entries.map(e => e.key)).toEqual(['c1']);
+  expect(reads).toBe(2);
+});
+
+test("a route's refusal is the shared problem envelope, with the request id and code", async () => {
+  const routes = calendarRoutes({ orm: {}, authenticate: async () => null });
+  const refused = (await routes(new Request('http://api.test/api/calendar?from=a&to=b', { headers: { 'x-request-id': 'req-3' } })))!;
+  expect(refused.headers.get('content-type')).toBe('application/problem+json');
+  expect(refused.headers.get('x-request-id')).toBe('req-3');
+  expect(await refused.json()).toEqual({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Authentication required', code: 'unauthorized', requestId: 'req-3' });
 });

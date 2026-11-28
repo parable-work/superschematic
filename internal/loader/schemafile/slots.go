@@ -3,6 +3,7 @@ package schemafile
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -106,7 +107,7 @@ func checkExtensionNames(node map[string]any, where string, reg *registry.Regist
 	if !ok {
 		return nil
 	}
-	for _, name := range sortedKeys(exts) {
+	for _, name := range slices.Sorted(maps.Keys(exts)) {
 		if !slices.Contains(reg.Extensions(), name) {
 			return unknownSlotName("extensions", name, where, reg.Extensions())
 		}
@@ -123,7 +124,7 @@ func checkDocumentNames(payload map[string]any, reg *registry.Registry) error {
 	for _, spec := range reg.Documents() {
 		registered = append(registered, spec.Name)
 	}
-	for _, name := range sortedKeys(docs) {
+	for _, name := range slices.Sorted(maps.Keys(docs)) {
 		if !slices.Contains(registered, name) {
 			return unknownSlotName("documents", name, "the document", registered)
 		}
@@ -191,13 +192,13 @@ func unknownSlotName(slot, name, where string, registered []string) error {
 // data beside it.
 func applyExtensionDecorators(node registry.Node, exts map[string]json.RawMessage, target registry.DecoratorTarget, kind ir.SchemaKind, where, owner string, reg *registry.Registry) []error {
 	var errs []error
-	for _, ext := range sortedKeys(exts) {
+	for _, ext := range slices.Sorted(maps.Keys(exts)) {
 		var decorators map[string]json.RawMessage
 		if err := json.Unmarshal(exts[ext], &decorators); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %s: extension %q: %w", owner, where, ext, err))
 			continue
 		}
-		for _, name := range sortedKeys(decorators) {
+		for _, name := range slices.Sorted(maps.Keys(decorators)) {
 			spec, ok := reg.Decorator(name, target)
 			if !ok || spec.Extension != ext {
 				errs = append(errs, fmt.Errorf("%s: %s: extension %q has no decorator %q for %s", owner, where, ext, name, target))

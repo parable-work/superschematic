@@ -12,6 +12,9 @@
 package access
 
 import (
+	"slices"
+
+	"github.com/parable-work/superschematic/internal/loader/fielddef"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -35,6 +38,8 @@ func Expand(schema *ir.Schema) []string {
 		if addAudience(td) {
 			used = true
 		}
+		addAudienceIndex(td)
+		fillAudienceQueue(schema, td.Audience.Queue)
 	}
 	if td := schema.AccessGrantsTable(); td != nil && len(td.Fields) == 0 {
 		fillGrants(td)
@@ -109,28 +114,89 @@ func addAudience(td *ir.TypeDef) bool {
 	return added
 }
 
+// AudienceIndexName is the purpose of the index over an @audience table's
+// effective audience: idx_<table>_effective_audience.
+const AudienceIndexName = "effective_audience"
+
+// addAudienceIndex gives an @audience table a GIN index over its
+// effective audience, which serves a read's overlap of the column with
+// the caller's ids (D156), unless the table has one of that name. SQLite,
+// whose audience is a JSON array, builds none (sqlmigrate's model drops
+// it).
+//
+// A table whose @audience names a queue gets a second, over its
+// inheritFrom and its key, idx_<table>_audience_parent, which serves the
+// queue's worker's batches of one parent's rows in key order (#734).
+func addAudienceIndex(td *ir.TypeDef) {
+	has := func(name string) bool {
+		return slices.ContainsFunc(td.Indexes, func(idx ir.IndexDef) bool { return idx.Name == name })
+	}
+	if !has(AudienceIndexName) {
+		td.Indexes = append(td.Indexes, ir.IndexDef{Keys: []string{ir.EffectiveAudienceField}, Name: AudienceIndexName, Method: ir.IndexMethodGIN, Origin: ir.OriginAccess})
+	}
+	a := td.Audience
+	if a.Queue == "" || a.InheritFrom == "" || has(AudienceParentIndexName) {
+		return
+	}
+	for _, fd := range td.Fields {
+		if fd != nil && fd.Key {
+			td.Indexes = append(td.Indexes, ir.IndexDef{Keys: []string{a.InheritFrom, fd.Name}, Name: AudienceParentIndexName, Origin: ir.OriginAccess})
+			return
+		}
+	}
+}
+
+// AudienceParentIndexName is the purpose of the index over the
+// inheritFrom and the key of an @audience table that names a queue.
+const AudienceParentIndexName = "audience_parent"
+
+// fillAudienceQueue gives the queue class an @audience declaration names
+// the fields of its message, when it is a @queue class of the schema that
+// declares none (#734). A parent keeps one ready message per table that
+// inherits from it, however many changes it takes before a worker claims
+// it, and one claim at a time, so two workers never resolve one parent's
+// rows at once (D80's key).
+func fillAudienceQueue(schema *ir.Schema, queue string) {
+	td := schema.Types[queue]
+	if queue == "" || td == nil || td.Queue == nil || len(td.Fields) > 0 {
+		return
+	}
+	td.Fields = []*ir.FieldDef{
+		{Name: ir.AudienceResolveTableField, Description: "The table whose rows inherit their audience from the parent, by its type's name.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Origin: ir.OriginAccess},
+		{Name: ir.AudienceResolveParentField, Description: "The parent row's key as the database writes it as text.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Origin: ir.OriginAccess},
+	}
+	q := td.Queue
+	if q.Key == "" && len(q.Keys) == 0 {
+		q.Keys = slices.Clone(ir.AudienceResolveFields)
+		if q.OnDuplicate == "" {
+			q.OnDuplicate = ir.QueueOnDuplicateSkip
+		}
+		q.Serialize = true
+	}
+}
+
 // fillGrants fills an @accessGrants class's fields: one row per grant.
 func fillGrants(td *ir.TypeDef) {
 	td.Fields = []*ir.FieldDef{
-		keyField(),
-		required(ir.AccessGrantHolderField, uuidScalar, "The principal the grant lets reach rows: a party's or an agent run's id."),
-		required(ir.AccessGrantHolderKindField, "string", "The kind of that principal: party or agent."),
-		required(ir.AccessGrantRoleField, "string", "The name of the role, a row of the UserRole table, whose permissions the holder acts with and whose reaches say which rows beside the target it reaches."),
-		required(ir.AccessGrantTargetTypeField, "string", "The table of the target row, by its type's name."),
-		required(ir.AccessGrantTargetIDField, uuidScalar, "The target row's key."),
-		required(ir.AccessGrantStartsAtField, dateTimeScalar, "When the grant starts."),
-		optional(ir.AccessGrantEndsAtField, dateTimeScalar, "When the grant ends; null for no date."),
-		optional(ir.AccessGrantEndsWhenFieldField, "string", "The target's field whose state ends the grant; null for no such end."),
-		optional(ir.AccessGrantEndsWhenStateField, "string", "The state of that field that ends the grant."),
-		optional(ir.AccessGrantRevokedAtField, dateTimeScalar, "When the grant was revoked."),
+		fielddef.Key(),
+		fielddef.Required(ir.AccessGrantHolderField, uuidScalar, "The principal the grant lets reach rows: a party's or an agent run's id."),
+		fielddef.Required(ir.AccessGrantHolderKindField, "string", "The kind of that principal: party or agent."),
+		fielddef.Required(ir.AccessGrantRoleField, "string", "The name of the role, a row of the UserRole table, whose permissions the holder acts with and whose reaches say which rows beside the target it reaches."),
+		fielddef.Required(ir.AccessGrantTargetTypeField, "string", "The table of the target row, by its type's name."),
+		fielddef.Required(ir.AccessGrantTargetIDField, uuidScalar, "The target row's key."),
+		fielddef.Required(ir.AccessGrantStartsAtField, dateTimeScalar, "When the grant starts."),
+		fielddef.Optional(ir.AccessGrantEndsAtField, dateTimeScalar, "When the grant ends; null for no date."),
+		fielddef.Optional(ir.AccessGrantEndsWhenFieldField, "string", "The target's field whose state ends the grant; null for no such end."),
+		fielddef.Optional(ir.AccessGrantEndsWhenStateField, "string", "The state of that field that ends the grant."),
+		fielddef.Optional(ir.AccessGrantRevokedAtField, dateTimeScalar, "When the grant was revoked."),
 		{
 			Name:    ir.AccessGrantTokenHashField,
 			Comment: "The SHA-256 of the token the holder presents, which only the holder has; null for a grant resolved another way.",
 			TypeRef: ir.TypeRef{Name: sha256Scalar},
 			Unique:  true,
 		},
-		required(ir.AccessGrantCreatedAtField, dateTimeScalar, ""),
-		optional(ir.AccessGrantCreatedByField, uuidScalar, "Who made the grant."),
+		fielddef.Required(ir.AccessGrantCreatedAtField, dateTimeScalar, ""),
+		fielddef.Optional(ir.AccessGrantCreatedByField, uuidScalar, "Who made the grant."),
 	}
 	for _, fd := range td.Fields {
 		fd.Origin = ir.OriginAccess
@@ -145,17 +211,17 @@ func fillGrants(td *ir.TypeDef) {
 // records.
 func fillLog(td *ir.TypeDef) {
 	td.Fields = []*ir.FieldDef{
-		keyField(),
-		required(ir.AccessLogAtField, dateTimeScalar, "When the access happened."),
-		required(ir.AccessLogKindField, "string", "What happened: reveal, agentRead, keyCall or grantCall."),
-		optional(ir.AccessLogPrincipalField, "string", "The subject of the principal that acted."),
-		optional(ir.AccessLogPrincipalKindField, "string", "Its kind: user, party or agent."),
-		optional(ir.AccessLogActingForField, "string", "The subject the principal acted for; null when it acted for itself."),
-		optional(ir.AccessLogCredentialField, "string", "The API key's or the grant's id the call came with; null for a session."),
-		optional(ir.AccessLogOperationField, "string", "The operation the call ran."),
-		optional(ir.AccessLogTargetTypeField, "string", "The table of the row read."),
-		optional(ir.AccessLogTargetIDField, "string", "The key of the row read."),
-		optional(ir.AccessLogFieldField, "string", "The field revealed."),
+		fielddef.Key(),
+		fielddef.Required(ir.AccessLogAtField, dateTimeScalar, "When the access happened."),
+		fielddef.Required(ir.AccessLogKindField, "string", "What happened: reveal, agentRead, keyCall or grantCall."),
+		fielddef.Optional(ir.AccessLogPrincipalField, "string", "The subject of the principal that acted."),
+		fielddef.Optional(ir.AccessLogPrincipalKindField, "string", "Its kind: user, party or agent."),
+		fielddef.Optional(ir.AccessLogActingForField, "string", "The subject the principal acted for; null when it acted for itself."),
+		fielddef.Optional(ir.AccessLogCredentialField, "string", "The API key's or the grant's id the call came with; null for a session."),
+		fielddef.Optional(ir.AccessLogOperationField, "string", "The operation the call ran."),
+		fielddef.Optional(ir.AccessLogTargetTypeField, "string", "The table of the row read."),
+		fielddef.Optional(ir.AccessLogTargetIDField, "string", "The key of the row read."),
+		fielddef.Optional(ir.AccessLogFieldField, "string", "The field revealed."),
 	}
 	for _, fd := range td.Fields {
 		fd.Origin = ir.OriginAccess
@@ -164,18 +230,6 @@ func fillLog(td *ir.TypeDef) {
 		ir.IndexDef{Keys: []string{ir.AccessLogAtField}, Name: "at", Origin: ir.OriginAccess},
 		ir.IndexDef{Keys: []string{ir.AccessLogPrincipalField, ir.AccessLogAtField}, Name: "principal", Origin: ir.OriginAccess},
 	)
-}
-
-func keyField() *ir.FieldDef {
-	return &ir.FieldDef{Name: "id", TypeRef: ir.TypeRef{Name: uuidScalar}, Required: true, Key: true, AutoGenerated: true}
-}
-
-func required(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}, Required: true}
-}
-
-func optional(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}}
 }
 
 func hasField(td *ir.TypeDef, name string) bool {

@@ -676,6 +676,15 @@ async fn handle_{{ .SnakeName }}(
         args,
     )
     .await;
+{{- else if .RowFeature }}
+    // {{ .RowFeature.Type }}'s {{ .RowFeature.Operation }} (#723): run through the references and
+    // attachments of {{ .RowFeature.Database }}'s repositories, as the request's caller.
+    let result = crate::rowfeatures::{{ .SnakeName }}(
+        &state.implementations.row_features,
+        ctx.principal.clone(),
+        args,
+    )
+    .await;
 {{- else }}
 {{- if and .Page .Page.Sort }}
     // The page's next names the sort it was read in (D60, amended).

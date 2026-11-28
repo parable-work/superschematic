@@ -98,7 +98,7 @@ sdk.clearToken();
 A user signs in with the user model's login (D50), and the login chooses
 how the session travels.
 {{- if .LoginNamespace}} This API's login is
-`sdk.{{toCamelCase .LoginNamespace}}.login`.
+`sdk.{{joinCamelCase .LoginNamespace}}.login`.
 {{- else}} This API has no login: its users sign in through
 another API of the same authDb, whose sessions it verifies.
 {{- end}}
@@ -108,7 +108,7 @@ is set (or passed as `auth.token`):
 
 ```typescript
 {{- if .LoginNamespace}}
-const { token } = await sdk.{{toCamelCase .LoginNamespace}}.login({ login: 'ada@example.com', password });
+const { token } = await sdk.{{joinCamelCase .LoginNamespace}}.login({ login: 'ada@example.com', password });
 sdk.setToken(token!);
 {{- else}}
 sdk.setToken(tokenFromLogin);
@@ -130,7 +130,7 @@ const sdk = new {{.SDKClassName}}({
   credentials: 'include',
 });
 {{- if .LoginNamespace}}
-await sdk.{{toCamelCase .LoginNamespace}}.login({ login: 'ada@example.com', password, session: SessionTransport.Cookie });
+await sdk.{{joinCamelCase .LoginNamespace}}.login({ login: 'ada@example.com', password, session: SessionTransport.Cookie });
 {{- end}}
 ```
 
@@ -148,7 +148,7 @@ request but `GET`, `HEAD` and `OPTIONS`, from another origin, with 403
 #### {{.ClassName}} (scoped)
 
 ```typescript
-const scoped = sdk.{{toCamelCase .Name}}('scope-id-here');
+const scoped = sdk.{{joinCamelCase .Name}}('scope-id-here');
 {{- range $i, $ep := .Endpoints}}
 {{- if eq $i 0}}
 
@@ -173,18 +173,18 @@ const result = await scoped.{{$ep.Name}}();
 {{- if eq $i 0}}
 // Example: {{$ep.MethodPath}}
 {{- if $ep.HasInput}}
-const result = await sdk.{{toCamelCase $nsName}}.{{$ep.MethodPath}}({
+const result = await sdk.{{joinCamelCase $nsName}}.{{$ep.MethodPath}}({
   // Input data
 });
 {{- else}}
-const result = await sdk.{{toCamelCase $nsName}}.{{$ep.MethodPath}}();
+const result = await sdk.{{joinCamelCase $nsName}}.{{$ep.MethodPath}}();
 {{- end}}
 {{- end}}
 {{- end}}
 {{- range .Members}}
 // {{.Name}}: {{behavior_member_phrase .Type .Use .Behavior}}
 {{- range .Endpoints}}
-//   sdk.{{toCamelCase $nsName}}.{{.MethodPath}}
+//   sdk.{{joinCamelCase $nsName}}.{{.MethodPath}}
 {{- end}}
 {{- end}}
 ```
@@ -199,7 +199,7 @@ const result = await sdk.{{toCamelCase $nsName}}.{{$ep.MethodPath}}();
 {{- range .Endpoints}}
 {{- if and .Page (not $paged) (not $ns.IsScopedNS) (not .PathParams) (not .ScalarArgs) (not .HasInput)}}
 {{- $paged = .Name}}
-{{- $pagedNamespace = toCamelCase $ns.Name}}
+{{- $pagedNamespace = joinCamelCase $ns.Name}}
 {{- end}}
 {{- end}}
 {{- end}}
@@ -249,7 +249,7 @@ for await (const item of sdk.{{$pagedNamespace}}.{{$paged}}All()) {
 {{- end}}
 {{- if and .Filter .FilterExample (not $filtered) (not $ns.IsScopedNS) (not .PathParams) (not .ScalarArgs) (not .HasInput)}}
 {{- $filtered = .Name}}
-{{- $filteredNamespace = toCamelCase $ns.Name}}
+{{- $filteredNamespace = joinCamelCase $ns.Name}}
 {{- $filterParam = .FilterParam}}
 {{- $filterType = .FilterType}}
 {{- $filterExample = .FilterExample}}

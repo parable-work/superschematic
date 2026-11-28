@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/parable-work/superschematic/internal/registry"
@@ -89,7 +90,7 @@ func (r *resolver) resolveImages() {
 // Ignoring the setting would deploy a workload without the program it
 // asked for.
 func (r *resolver) checkImages() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Image == nil || d.res.Platform == "" || d.res.HasImage() {
 			continue

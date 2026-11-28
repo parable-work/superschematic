@@ -3,6 +3,7 @@ package stack
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -71,7 +72,7 @@ func (r *resolver) databaseOf(svc *Service) (string, bool) {
 // edges, from itself (D52). Each finds the connector between the two
 // platforms.
 func (r *resolver) deriveEdges() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind == ir.DeployableSite {
 			r.deriveSiteEdges(d)
@@ -187,7 +188,7 @@ func (r *resolver) reachesAcrossProviders(e *edge) bool {
 // edgesFrom returns the edges from a deployable, sorted by ID.
 func (r *resolver) edgesFrom(name string) []*edge {
 	var out []*edge
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		if r.edges[id].res.From == name {
 			out = append(out, r.edges[id])
 		}
@@ -201,14 +202,14 @@ func (r *resolver) edgesFrom(name string) []*edge {
 // 5.1). A job's fields are its API's, and so are its edges (D52); it
 // serves no request, so it has no callers field.
 func (r *resolver) bindConfig() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind == ir.DeployableSite {
 			r.bindSite(d)
 			continue
 		}
 		if !d.res.Kind.RunsCode() {
-			for _, key := range sortedKeys(d.settings.env) {
+			for _, key := range slices.Sorted(maps.Keys(d.settings.env)) {
 				r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, which has no config", d.settings.envFrom[key], key, d.res.Kind, name)
 			}
 			continue
@@ -220,7 +221,7 @@ func (r *resolver) bindConfig() {
 				r.fail(CodeFieldCollision, "%s %s: edges %s and %s derive the same field %s", d.res.Kind, name, other.res.ID, e.res.ID, e.res.Field)
 			}
 			derived[e.res.Field] = e
-			for _, fieldName := range sortedKeys(d.fields) {
+			for _, fieldName := range slices.Sorted(maps.Keys(d.fields)) {
 				if f := d.fields[fieldName]; ir.DerivedFieldClaims(e.res.Field, f.name) {
 					r.fail(CodeFieldCollision, "%s %s: config field %s of %s collides with %s, the field edge %s derives", d.res.Kind, name, f.name, f.declaring, e.res.Field, e.res.ID)
 				}
@@ -246,7 +247,7 @@ func (r *resolver) bindConfig() {
 				refused[key] = true
 			}
 		}
-		for _, key := range sortedKeys(d.settings.env) {
+		for _, key := range slices.Sorted(maps.Keys(d.settings.env)) {
 			if _, ok := d.fields[key]; ok || refused[key] || identity[key] != "" {
 				continue
 			}
@@ -262,7 +263,7 @@ func (r *resolver) bindConfig() {
 			r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, which is not a field of %s", d.settings.envFrom[key], key, d.res.Kind, name, r.configTypes(d))
 		}
 		var bindings []*ir.Binding
-		for _, fieldName := range sortedKeys(d.fields) {
+		for _, fieldName := range slices.Sorted(maps.Keys(d.fields)) {
 			if b := r.bindField(d, d.fields[fieldName]); b != nil {
 				bindings = append(bindings, b)
 			}
@@ -440,7 +441,7 @@ func describe(v any) string {
 // them.
 func (r *resolver) secrets() []*ir.StackSecret {
 	byID := map[string]*ir.StackSecret{}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		for _, b := range d.res.Bindings {
 			if b.Source != ir.BindingSecret {
@@ -456,7 +457,7 @@ func (r *resolver) secrets() []*ir.StackSecret {
 		}
 	}
 	var out []*ir.StackSecret
-	for _, id := range sortedKeys(byID) {
+	for _, id := range slices.Sorted(maps.Keys(byID)) {
 		out = append(out, byID[id])
 	}
 	return out
@@ -470,7 +471,7 @@ func (r *resolver) connectEdges() {
 	values := map[string]any{}
 	callees := map[string]any{}
 	ran := map[string]bool{}
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		e := r.edges[id]
 		ctx := registry.ConnectorContext{
 			Environment: r.stackEnvironment(),
@@ -517,7 +518,7 @@ func (r *resolver) connectEdges() {
 		r.checkParameters(where, callee)
 		callees[id] = callee
 	}
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		for _, b := range r.edges[id].from.res.Bindings {
 			if b.Edge == id {
 				b.Value = values[id]

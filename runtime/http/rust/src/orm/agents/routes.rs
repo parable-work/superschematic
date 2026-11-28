@@ -169,10 +169,10 @@ async fn recorded(
             "target": agents.redact(body.get("target").unwrap_or(&Value::Null)),
             "usedAt": used_at,
         });
-        let mut client = agents.pool().get().await?;
+        let mut client = agents.store().client().await?;
         let tx = client.transaction().await?;
         {
-            let repositories = agents.sys_tx(&tx, None)?;
+            let repositories = agents.sys_tx(tx.db(), None)?;
             let runs = repositories.table(&agents.parts().runs)?;
             let current = runs
                 .find_one(

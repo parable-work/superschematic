@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -192,7 +193,7 @@ func (p *Prepared) Document(root, servicePath, file string) (json.RawMessage, []
 	if d == nil {
 		return nil, nil, fmt.Errorf("%s: %s holds no document of it, and a stack command given --prepared runs no module; run `superschematic stack prepare` again", key, p.Dir)
 	}
-	for _, rel := range sortedKeys(d.Sources) {
+	for _, rel := range slices.Sorted(maps.Keys(d.Sources)) {
 		sum, err := fileSum(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil || sum != d.Sources[rel] {
 			return nil, nil, fmt.Errorf("%s: %s changed since %s was prepared; run `superschematic stack prepare` again", key, rel, p.Dir)
@@ -436,7 +437,7 @@ func (p *Prepared) build(ctx context.Context, s *session, src *Sources, envs []*
 	}
 	// The contexts come first, as a deploy writes them before it builds
 	// a site or a bundle, whose output may lie in the repository.
-	for _, name := range sortedKeys(images) {
+	for _, name := range slices.Sorted(maps.Keys(images)) {
 		d := images[name]
 		what := string(d.Kind) + " " + name
 		dockerfile := src.Dockerfile(p.Stack, name)
@@ -460,7 +461,7 @@ func (p *Prepared) build(ctx context.Context, s *session, src *Sources, envs []*
 		}
 		p.Contexts[name] = &PreparedContext{Archive: rel, Digest: c.Digest, Dockerfile: c.Dockerfile, Extend: c.Extend, Files: c.Files, Size: c.Size}
 	}
-	for _, name := range sortedKeys(sites) {
+	for _, name := range slices.Sorted(maps.Keys(sites)) {
 		s.env = envOf(envs, name)
 		out, err := s.buildSite(ctx, src, sites[name])
 		if err != nil {
@@ -476,7 +477,7 @@ func (p *Prepared) build(ctx context.Context, s *session, src *Sources, envs []*
 		}
 		p.Sites[name] = a
 	}
-	for _, name := range sortedKeys(bundles) {
+	for _, name := range slices.Sorted(maps.Keys(bundles)) {
 		s.env = envOf(envs, name)
 		out, err := os.MkdirTemp("", "superschematic-bundle-")
 		if err != nil {

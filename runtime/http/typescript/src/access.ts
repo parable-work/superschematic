@@ -1,7 +1,8 @@
 import type { Authenticator, GrantReach, Principal, PrincipalKind } from './auth.js';
 import type { RequestContext } from './operation.js';
+import type { PlainRepository } from './orm.js';
 import { unauthorized } from './problem.js';
-import { sha256 } from './sha256.js';
+import { sha256Hex } from './sha256.js';
 import { idKey } from './uuid.js';
 
 /*
@@ -74,13 +75,7 @@ export interface AccessLog {
 type Values = Record<string, unknown>;
 
 /** A repository as this module runs it: the generated repositories' members it reads and writes through. */
-interface RepositoryShape {
-  readonly def?: { readonly name?: string; readonly key?: string; readonly access?: string };
-  findOne(filter: Values): Promise<Values | null>;
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-  createOne(input: Values): Promise<Values>;
-  updateOne(id: unknown, update: Values): Promise<Values>;
-}
+type RepositoryShape = Pick<PlainRepository, 'def' | 'findOne' | 'findMany' | 'createOne' | 'updateOne'>;
 
 /** An ORM as this module runs it: its repositories by member, and asSystem. */
 interface OrmShape {
@@ -121,7 +116,7 @@ function base64url(bytes: Uint8Array): string {
 
 /** The SHA-256 of a token's text, as the grant's tokenHash holds it: lowercase hex. */
 export function grantTokenHash(token: string): string {
-  return [...sha256(new TextEncoder().encode(token))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return sha256Hex(token);
 }
 
 /** What issueGrant takes: the grant's row, but its key, its token's hash and its stamps. */

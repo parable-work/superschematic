@@ -16,6 +16,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
@@ -521,6 +522,14 @@ type RustAPI struct {
 	// (D138): Implementations::new then takes Database's pool too, over
 	// which the router's handlers run each through the graph's facade.
 	Graphs bool
+
+	// RowFeatures is true when the API serves a table's references and
+	// files (#723): Implementations::new then takes Database's pool too,
+	// through whose repositories the router's handlers run each, and
+	// AttachmentsBucket, the bucket main.rs opened that holds the files,
+	// when its file operations sign URLs of one.
+	RowFeatures       bool
+	AttachmentsBucket *RustBucket
 
 	// Idempotency is true when the API has @idempotent operations (D140):
 	// Implementations::new then takes Database's pool too, over which it
@@ -1038,6 +1047,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			}
 			api.Graphs = true
 		}
+		if o.HasRowFeatureOperations() && !background {
+			if api.Database == nil || api.Database.Service != o.RowFeatureDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose row feature operations run on %s (#723), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.RowFeatureDatabase())
+			}
+			api.RowFeatures = true
+		}
 		if o.HasIdempotent() && !background {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: server %s serves %s, whose @idempotent operations keep their keys in its database (D140), and opens no pool on it", in.Stack, in.Server, o.SchemaName)
@@ -1103,6 +1118,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				s.Buckets = append(s.Buckets, h)
 			}
 			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
+			if b.Field == o.RowFeatureBucketField() {
+				api.AttachmentsBucket = h
+			}
+		}
+		if api.RowFeatures && o.RowFeatureBucket() != "" && api.AttachmentsBucket == nil {
+			return nil, fmt.Errorf("stack %s: %s %s serves %s, whose file operations sign the URLs of bucket %s (#723), and opens no bucket for it", in.Stack, s.Kind, in.Server, o.SchemaName, o.RowFeatureBucket())
 		}
 		for _, m := range o.Deps.MemoryStores {
 			if bare {
@@ -1233,18 +1254,11 @@ func (s *RustServer) planLoopback(taken rustNames) {
 	if s.Background() || s.App != nil {
 		return
 	}
-	serves := make([]string, len(s.APIs))
-	guarded := map[string]bool{}
-	for i, a := range s.APIs {
-		serves[i] = a.Service
-		guarded[a.Service] = a.ServiceAuthenticator != ""
-	}
-	if !slices.ContainsFunc(s.Clients, func(c *RustClient) bool { return guarded[c.Service] }) {
-		return
-	}
-	s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
-	for _, c := range s.Clients {
-		if guarded[c.Service] {
+	var sends []bool
+	s.Loopback, sends = planLoopback(s.APIs, func(a *RustAPI) (string, bool) { return a.Service, a.ServiceAuthenticator != "" },
+		s.Clients, func(c *RustClient) string { return c.Service }, taken.take)
+	for i, c := range s.Clients {
+		if sends[i] {
 			c.Loopback = s.Loopback.Var
 		}
 	}
@@ -1423,9 +1437,9 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 	return nil
 }
 
-// quoteToml is s as a TOML basic string.
+// quoteToml is s as a TOML basic string (codegen.QuoteTOML).
 func quoteToml(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+	return codegen.QuoteTOML(s)
 }
 
 // planRustDocker plans the Dockerfile, or says why there is none. The image
@@ -1965,11 +1979,14 @@ func (a *RustAPI) ImplementationsArgs() []string {
 	if a.ServiceAuthenticator != "" {
 		args = append(args, "Arc::new("+a.ServiceAuthenticator+")")
 	}
-	if a.Behaviors || a.Tables || a.Graphs || a.Idempotency {
+	if a.Behaviors || a.Tables || a.Graphs || a.RowFeatures || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {
 		args = append(args, a.Alias+"::tables::field_keys(&"+a.Config+")?")
+	}
+	if a.RowFeatures && a.AttachmentsBucket != nil {
+		args = append(args, "Arc::clone(&"+a.AttachmentsBucket.Var+")")
 	}
 	return args
 }
@@ -2025,9 +2042,9 @@ func WriteRust(s *RustServer, dir string) error {
 	return nil
 }
 
-// rustString is s as a Rust string literal.
+// rustString is s as a Rust string literal (rustutil.Quote).
 func rustString(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`
+	return rustutil.Quote(s)
 }
 
 // rustWidth is the width rustfmt lays a line out in.

@@ -63,7 +63,7 @@ Examples:
 		},
 	}
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the committed task file is not what would be written")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml)")
 	cmd.AddCommand(newTasksPlanCmd(a))
 	cmd.AddCommand(newTasksInputsCmd(a))
 	cmd.AddCommand(newTasksReachCmd(a))
@@ -83,23 +83,11 @@ type tasksService struct {
 
 // openTasksService loads the Tasks service at servicePath.
 func openTasksService(a *app, servicePath, namingPath, command string) (*tasksService, error) {
-	absService, err := filepath.Abs(servicePath)
-	if err != nil {
-		return nil, fmt.Errorf("resolving service path: %w", err)
-	}
-	if info, err := os.Stat(absService); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("service directory not found: %s", servicePath)
-	}
-	schemasRoot := filepath.Dir(filepath.Dir(absService))
-	names, err := resolveNaming(namingPath, schemasRoot)
+	svc, err := a.openService(servicePath, namingPath)
 	if err != nil {
 		return nil, err
 	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return nil, err
-	}
-	version, err := openSchemaVersion(filepath.Dir(absService), names, reg)
+	version, err := openSchemaVersion(filepath.Dir(svc.dir), svc.names, svc.reg)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +96,7 @@ func openTasksService(a *app, servicePath, namingPath, command string) (*tasksSe
 		version.close()
 		return nil, err
 	}
-	if opened.service, err = version.serviceAt(absService); err != nil {
+	if opened.service, err = version.serviceAt(svc.dir); err != nil {
 		return fail(err)
 	}
 	if opened.service.Config.Kind != ir.SchemaKindTasks {
@@ -119,7 +107,7 @@ func openTasksService(a *app, servicePath, namingPath, command string) (*tasksSe
 		return fail(err)
 	}
 	opened.schema = schema
-	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
+	outputs, err := registry.ParseOutputs(cfg.Outputs, svc.reg)
 	if err != nil {
 		return fail(err)
 	}
@@ -131,7 +119,7 @@ func openTasksService(a *app, servicePath, namingPath, command string) (*tasksSe
 			return fail(fmt.Errorf("%s: %s: %w", command, opened.service.Name, err))
 		}
 	}
-	if opened.gitRoot, err = tasksgen.GitRoot(absService); err != nil {
+	if opened.gitRoot, err = tasksgen.GitRoot(svc.dir); err != nil {
 		return fail(err)
 	}
 	return opened, nil
@@ -220,6 +208,7 @@ type tasksPlanFlags struct {
 	namingPath string
 	sandbox    bool
 	profile    bool
+	keys       bool
 }
 
 func newTasksPlanCmd(a *app) *cobra.Command {
@@ -259,6 +248,12 @@ be taken off, so the flag is for a process whose whole job is the plan,
 as a forge's plan step is. It holds a resolver that slips to its rules;
 it is no defence against a binary built to break them.
 
+--keys prints the keys alone and not the plan: a line for each task that
+has a key, as <task>=<key>, by task name. A task that is not hermetic
+has no key and no line. It is what a CI's step appends to the file its
+job's outputs are read from, so each task's job can look a pass up by
+its key.
+
 --profile writes what the plan cost to standard error: the time to read
 the commit, and for each resolver kind the inputs the tasks name, how
 many of those differ, the tracked files they resolve to and the time.
@@ -267,7 +262,8 @@ Tasks that name one unit share one resolution.
 Examples:
   superschematic tasks plan HEAD --file ci/tasks.json
   superschematic tasks plan "$MERGE_COMMIT" --base origin/main --file ci/tasks.json
-  superschematic tasks plan HEAD --file ci/tasks.json --sandbox --profile`,
+  superschematic tasks plan HEAD --file ci/tasks.json --sandbox --profile
+  superschematic tasks plan HEAD --file ci/tasks.json --keys >> "$GITHUB_OUTPUT"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTasksPlan(cmd, a, flags, args[0])
@@ -276,9 +272,10 @@ Examples:
 	cmd.Flags().StringVar(&flags.file, "file", "", "the task file's path from the repository root, as the Tasks service's outputs.tasks.install names it (required)")
 	cmd.Flags().StringVar(&flags.base, "base", "", "the commit the plan's commit lands on")
 	cmd.Flags().StringVar(&flags.repo, "repo", ".", "a directory of the repository")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: the defaults)")
+	addNamingFlag(cmd, &flags.namingPath, "(default: the defaults)")
 	cmd.Flags().BoolVar(&flags.sandbox, "sandbox", false, "hold the process to a resolver's rules while it resolves: no program, no socket, no file (Linux on amd64 or arm64)")
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "write what the plan cost, by resolver kind, to standard error")
+	cmd.Flags().BoolVar(&flags.keys, "keys", false, "print each keyed task as <task>=<key>, a line each, and not the plan")
 	return cmd
 }
 
@@ -356,12 +353,34 @@ func runTasksPlan(cmd *cobra.Command, a *app, flags *tasksPlanFlags, revision st
 	if flags.profile {
 		writePlanProfile(cmd.ErrOrStderr(), plan, in, read, time.Since(resolving), flags.sandbox)
 	}
+	if flags.keys {
+		return writePlanKeys(cmd.OutOrStdout(), plan)
+	}
 	data, err := plan.Encode()
 	if err != nil {
 		return err
 	}
 	_, err = cmd.OutOrStdout().Write(data)
 	return err
+}
+
+// writePlanKeys writes each keyed task of a plan as <task>=<key>, by
+// name. A task's name holds no `=` and no white space, and a key is hex,
+// so a line reads one way.
+func writePlanKeys(w io.Writer, plan *tasks.Plan) error {
+	names := make([]string, 0, len(plan.Tasks))
+	for name, task := range plan.Tasks {
+		if task.Key != nil {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, err := fmt.Fprintf(w, "%s=%s\n", name, *plan.Tasks[name].Key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writePlanProfile writes what a plan cost.
@@ -432,7 +451,7 @@ Example:
 			return runTasksInputs(cmd, a, flags, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml)")
 	return cmd
 }
 

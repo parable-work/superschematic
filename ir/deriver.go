@@ -3,6 +3,8 @@ package ir
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // Deriver is a deriver an API service declares with `@deriver` on a class
@@ -139,7 +141,7 @@ func (td *TypeDef) DerivedConfig() (*DerivedConfig, error) {
 			}
 		}
 		config := &DerivedConfig{Permission: raw.Permission}
-		for _, name := range sortedStringMapKeys(raw.Fields) {
+		for _, name := range slices.Sorted(maps.Keys(raw.Fields)) {
 			field := raw.Fields[name]
 			config.Fields = append(config.Fields, DerivedField{Name: name, From: field.From, Instruction: field.Instruction, Model: field.Model})
 		}

@@ -25,7 +25,7 @@
 package {{ toPackageName .SchemaName }}
 
 import (
-{{- if or .HasSearchWorkers $w.Files }}
+{{- if or .HasSearchWorkers .HasAudienceWorkers $w.Files }}
 	"context"
 {{- end }}
 {{- if or $w.Builds .RuntimeWorkers $w.Files }}
@@ -35,7 +35,7 @@ import (
 	"fmt"
 {{- end }}
 	"net/http"
-{{- if .HasSearchWorkers }}
+{{- if or .HasSearchWorkers .HasAudienceWorkers }}
 	"time"
 {{- end }}
 {{ if $w.Serves }}
@@ -485,6 +485,50 @@ func {{ .QueueFunc }}(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (worke
 		return worker.Queue{}, errors.New("{{ $.SchemaName }}: the worker {{ .Name }} needs Deps.Inbound and Deps.Agents, which Wire builds")
 	}
 	return deps.Inbound.RunQueue(deps.Agents.HandleRunRequest)
+}
+{{- else if eq .Runtime "audience" }}
+
+// {{ .QueueFunc }} is the queue of the worker {{ .Name }}, {{ .Queue }}, an @audience
+// declaration's (D156, #734): each message's rows, those that inherit
+// their audience from the parent it names, resolved again by
+// db.ResolveAudience after the parent's write. Postgres alone holds an
+// @audience queue (#734), so db is never the SQLite database's.
+func {{ .QueueFunc }}(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (worker.Queue, error) {
+	if db == nil {
+		return worker.Queue{}, errors.New("{{ $.SchemaName }}: the worker {{ .Name }} needs the ORM of {{ $.Deps.Database }}")
+	}
+	queue := db.{{ .Queue }}Queue()
+	return worker.Queue{
+		Name:  {{ printf "%q" .Queue }},
+		Lease: orm.{{ .Queue }}Lease,
+		Claim: func(ctx context.Context, n int, lease time.Duration) ([]worker.Message, error) {
+			claims, err := queue.Claim(ctx, n, lease)
+			if err != nil {
+				return nil, err
+			}
+			messages := make([]worker.Message, len(claims))
+			for i, claim := range claims {
+				message := claim.Message
+				messages[i] = worker.Message{
+					ID:      claim.ID,
+					Token:   claim.Token,
+					Attempt: claim.Attempt,
+					Handle: func(ctx context.Context) error {
+						_, err := db.ResolveAudience(ctx, message.ChildTable, message.ParentKey)
+						return err
+					},
+				}
+			}
+			return messages, nil
+		},
+		Extend:   queue.Extend,
+		Complete: queue.Complete,
+		Fail:     queue.Fail,
+		Release:  queue.Release,
+		Prune:    queue.Prune,
+		Slot:     queue.Slot,
+		NextDue:  queue.NextDue,
+	}, nil
 }
 {{- else }}
 

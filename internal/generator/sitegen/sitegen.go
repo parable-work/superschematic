@@ -265,11 +265,11 @@ func writeIfChanged(path string, content []byte) error {
 }
 
 var funcs = template.FuncMap{
-	"tsQuote":         func(s string) string { return "'" + tsutil.EscapeString(s) + "'" },
+	"tsQuote":         tsutil.Quote,
 	"configPath":      func() string { return ir.SiteConfigPath },
 	"tsVersion":       func() string { return TypeScriptVersion },
 	"configFile":      func() string { return strings.TrimSuffix(ConfigFile, ".ts") },
-	"jsonQuote":       func(s string) string { return fmt.Sprintf("%q", s) },
+	"jsonQuote":       func(s string) string { return `"` + tsutil.EscapeString(s) + `"` },
 	"defaultOutput":   func() string { return ir.DefaultSiteOutput },
 	"devScript":       func() string { return ir.DefaultSiteDevCommand },
 	"typecheckScript": func() string { return TypecheckScript },

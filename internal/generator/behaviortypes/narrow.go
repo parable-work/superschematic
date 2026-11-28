@@ -117,6 +117,7 @@ var coreNarrowers = map[string]narrower{
 	"Seats":        narrowSeats,
 	"Reconcile":    narrowReconcile,
 	"Schedules":    narrowSchedules,
+	"Recurrence":   narrowRecurrence,
 	"Pool":         narrowPool,
 	"Stock":        narrowStock,
 	"Calendar":     narrowCalendar,

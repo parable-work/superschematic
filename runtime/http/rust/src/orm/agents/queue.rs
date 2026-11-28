@@ -1,25 +1,27 @@
 //! The request queue as its worker claims it (D158, #622): the queue's
 //! claims, whose prune deletes the transcripts past their retention too,
 //! as the TypeScript worker's prune calls `agents.prune`, and as the
-//! notifier's queue prunes its deliveries.
+//! notifier's queue prunes its deliveries. It claims on Postgres or on a
+//! SQLite file, as [`Agents::worker_queue`] does (#618).
 
 use std::time::Duration;
 
 use async_trait::async_trait;
 
 use super::dispatcher::{AgentRunRequest, Agents};
-use crate::queue::{Claim, PostgresQueue, QueueError, Slot};
+use crate::orm::store::PartQueue;
+use crate::queue::{Claim, QueueError, Slot};
 use crate::worker::WorkerQueue;
 
 /// The request queue as a worker claims it ([`Agents::dispatch_queue`]).
 pub struct AgentsQueue {
-    queue: PostgresQueue<AgentRunRequest>,
+    queue: PartQueue<AgentRunRequest>,
     agents: Agents,
 }
 
 impl AgentsQueue {
     /// The queue's claims.
-    pub fn queue(&self) -> &PostgresQueue<AgentRunRequest> {
+    pub fn queue(&self) -> &PartQueue<AgentRunRequest> {
         &self.queue
     }
 }

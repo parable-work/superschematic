@@ -3,11 +3,13 @@ package crosstable
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/parable-work/superschematic/runtime/schema/go/fieldcrypt"
 	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 )
 
@@ -23,7 +25,9 @@ caller by the predicate the table's repository applies for it
 (Host.Conditions: its audience and its grants, D156, D180), so a row's
 audience and the caller's grants hold as they hold on any read; an
 occurrence is shown only when its row is read. A source a caller lacks the
-permission of (CalendarOptions.Permissions) is left out.
+permission of is left out: the schema's (@calendarSource's permission,
+#601, CalendarSource.Permission), or the one CalendarOptions.Permissions
+names for it, which wins.
 */
 
 // CalendarOccurrence is an occurrence's key, its wall due and its state,
@@ -73,7 +77,8 @@ type CalendarRead struct {
 type CalendarOptions struct {
 	// Permissions is the permission each source needs, by its name: a
 	// caller without it reads none of its entries. A source not named
-	// needs none beyond its table's audience and grants.
+	// needs the schema's (CalendarSource.Permission), or none beyond its
+	// table's audience and grants.
 	Permissions map[string]string
 }
 
@@ -123,13 +128,13 @@ func ReadCalendar(ctx context.Context, h Host, caller Caller, read CalendarRead,
 	as := h.As(ctx, caller.Principal)
 	out := Calendar{Entries: []CalendarEntry{}}
 	defs := h.Definitions().Calendar
-	for _, typeName := range sortedKeys(defs) {
+	for _, typeName := range slices.Sorted(maps.Keys(defs)) {
 		table := defs[typeName]
 		for _, source := range table.Sources {
 			if read.Sources != nil && !slices.Contains(read.Sources, source.Name) {
 				continue
 			}
-			if permission, ok := options.Permissions[source.Name]; ok && !caller.holds(permission) {
+			if permission, ok := source.permissionUnder(options); ok && !caller.holds(permission) {
 				continue
 			}
 			if read.Mine && (source.Owner == "" || caller.Principal.Anonymous()) {
@@ -233,6 +238,22 @@ func form(value any, timestamp bool) (string, bool) {
 	return fmt.Sprint(value), true
 }
 
+// titleOf is a row's title as its entry shows it: the column's text, or,
+// for a source titled by an Encrypted<T> field (#616), its envelope opened
+// under the host's keys, bound to the table type, the field and the row's
+// key as text, as the repositories seal it. An envelope that does not open
+// fails the read, as a repository's read of it does.
+func titleOf(h Host, typeName string, source CalendarSource, row, value string) (string, error) {
+	if !source.TitleSealed || value == "" {
+		return value, nil
+	}
+	var keys *fieldcrypt.Keyring
+	if unsealer, ok := h.(Unsealer); ok {
+		keys = unsealer.FieldKeys()
+	}
+	return keys.Open(fieldcrypt.Cell{Table: typeName, Field: source.TitleField, Row: row}, value)
+}
+
 // rowsOf reads a field source's rows in the window.
 func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, source CalendarSource, from, to time.Time, limit int, mine bool, caller Caller) ([]CalendarEntry, bool, error) {
 	if source.Field == "" {
@@ -277,7 +298,11 @@ func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, s
 		if !ok {
 			continue
 		}
-		entry := CalendarEntry{Source: source.Name, Kind: source.Kind, Color: source.Color, Type: typeName, Key: wireKey(table.UUID, text(row, "key")), Title: text(row, "title"), Start: start, AllDay: !source.Timestamp}
+		title, err := titleOf(h, typeName, source, text(row, "key"), text(row, "title"))
+		if err != nil {
+			return nil, false, err
+		}
+		entry := CalendarEntry{Source: source.Name, Kind: source.Kind, Color: source.Color, Type: typeName, Key: wireKey(table.UUID, text(row, "key")), Title: title, Start: start, AllDay: !source.Timestamp}
 		if finish, ok := form(row["finish"], source.Timestamp); ok {
 			entry.End = finish
 		}
@@ -339,7 +364,11 @@ func occurrencesOf(ctx context.Context, h Host, typeName string, table CalendarT
 			return nil, false, err
 		}
 		for _, parent := range parents {
-			titles[text(parent, "key")] = text(parent, "title")
+			title, err := titleOf(h, typeName, source, text(parent, "key"), text(parent, "title"))
+			if err != nil {
+				return nil, false, err
+			}
+			titles[text(parent, "key")] = title
 		}
 	}
 	var out []CalendarEntry

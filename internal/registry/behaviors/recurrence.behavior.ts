@@ -189,6 +189,8 @@ interface CompleteResult {
   changedAt?: Integer;
   /** When it reminded, in epoch milliseconds. */
   remindedAt?: Integer;
+  /** When it fell due while not done or skipped, in epoch milliseconds. */
+  fellDueAt?: Integer;
   /** When it was completed, in epoch milliseconds. */
   completedAt?: Integer;
   /** The row that completed it: its table and its key. */
@@ -238,6 +240,8 @@ interface SkipResult {
   changedAt?: Integer;
   /** When it reminded, in epoch milliseconds. */
   remindedAt?: Integer;
+  /** When it fell due while not done or skipped, in epoch milliseconds. */
+  fellDueAt?: Integer;
   /** When it was completed, in epoch milliseconds. */
   completedAt?: Integer;
   /** The row that completed it: its table and its key. */
@@ -287,6 +291,8 @@ interface MoveOneResult {
   changedAt?: Integer;
   /** When it reminded, in epoch milliseconds. */
   remindedAt?: Integer;
+  /** When it fell due while not done or skipped, in epoch milliseconds. */
+  fellDueAt?: Integer;
   /** When it was completed, in epoch milliseconds. */
   completedAt?: Integer;
   /** The row that completed it: its table and its key. */
@@ -340,6 +346,8 @@ interface ListOccurrencesResult {
     changedAt?: Integer;
     /** When it reminded, in epoch milliseconds. */
     remindedAt?: Integer;
+    /** When it fell due while not done or skipped, in epoch milliseconds. */
+    fellDueAt?: Integer;
     /** When it was completed, in epoch milliseconds. */
     completedAt?: Integer;
     /** The row that completed it: its table and its key. */
@@ -370,6 +378,17 @@ interface RecurrenceOpenedEvent {
 }
 
 interface RecurrenceRemindedEvent {
+  /** The occurrence's key: its nominal wall date-time, 2026-10-31T09:00. */
+  key: string;
+  /** The wall date-time it falls due at, after the adjustment. */
+  due: string;
+  /** When it falls due, in epoch milliseconds. */
+  dueAt: Integer;
+  /** When it is missed if not done, in epoch milliseconds. */
+  overdueAt: Integer;
+}
+
+interface RecurrenceDueEvent {
   /** The occurrence's key: its nominal wall date-time, 2026-10-31T09:00. */
   key: string;
   /** The wall date-time it falls due at, after the adjustment. */
@@ -427,10 +446,10 @@ enum RecurrenceVeto {
  * due and open times, its state (upcoming, open, done, missed, skipped), and
  * what and who completed it. An occurrence opens opensBefore its due, or,
  * with none, when the one before it falls due; it reminds remindBefore its
- * due and is missed overdueAfter it, each a deadline the API's behavior
- * worker fires. A rule change regenerates the occurrences that have not
- * opened and leaves the open ones as they are, and a missed occurrence never
- * blocks the next. The behaviors' core alone implements it, on a table; no
+ * due, falls due at its due and is missed overdueAfter it, each a deadline
+ * the API's behavior worker fires. A rule change regenerates the occurrences
+ * that have not opened and leaves the open ones as they are, and a missed
+ * occurrence never blocks the next. The behaviors' core alone implements it, on a table; no
  * engine type composes it.
  */
 @declaresBehavior({ armsDeadlines: true, hearsChanges: true, vetoes: RecurrenceVeto })
@@ -515,6 +534,14 @@ export abstract class Recurrence<C extends RecurrenceConfig> {
   abstract reminded(payload: RecurrenceRemindedEvent): void;
 
   /**
+   * An occurrence fell due while it was neither done nor skipped, which its
+   * due deadline fires at (#601). With no overdueAfter it is missed at the
+   * same time, and missed follows it.
+   * @event
+   */
+  abstract due(payload: RecurrenceDueEvent): void;
+
+  /**
    * An occurrence passed its overdue time open, which its overdue deadline
    * fires at, and is missed; it may still be completed late.
    * @event
@@ -569,6 +596,11 @@ export abstract class Recurrence<C extends RecurrenceConfig> {
      * When its remind deadline fired, in epoch milliseconds; absent before.
      */
     remindedAt: Temporal.DateTime;
+    /**
+     * When its due deadline fired while it was neither done nor skipped, in
+     * epoch milliseconds; absent before (#601).
+     */
+    fellDueAt: Temporal.DateTime;
     /** When it was completed, in epoch milliseconds; absent unless done. */
     completedAt: Temporal.DateTime;
     /**

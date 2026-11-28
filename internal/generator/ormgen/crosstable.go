@@ -77,12 +77,17 @@ func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel, sqlite bool) 
 			def := calendarTableDef{Table: t.Quoted, Live: sourceLive(t)}
 			def.Key, def.KeyType, def.UUID = keyOf(t)
 			for i, source := range td.CalendarSources {
-				entry := calendarSourceDef{Name: ir.CalendarSourceName(td, i), Kind: source.Kind, Color: source.Color}
+				entry := calendarSourceDef{Name: ir.CalendarSourceName(td, i), Kind: source.Kind, Color: source.Color, Permission: source.Permission}
 				title, err := column(name, source.Title)
 				if err != nil {
 					return nil, err
 				}
 				entry.Title = title.Quoted
+				// A title of an Encrypted<T> field is its envelope, which the
+				// read opens under the database's keys (#616).
+				if title.Def != nil && title.Def.EncryptedAtRest {
+					entry.TitleSealed, entry.TitleField = true, source.Title
+				}
 				if source.Field != "" {
 					field, err := column(name, source.Field)
 					if err != nil {
@@ -189,6 +194,9 @@ type calendarSourceDef struct {
 	Timestamp   bool                    `json:"timestamp,omitempty"`
 	Owner       string                  `json:"owner,omitempty"`
 	OwnerUUID   bool                    `json:"ownerUuid,omitempty"`
+	Permission  string                  `json:"permission,omitempty"`
+	TitleSealed bool                    `json:"titleSealed,omitempty"`
+	TitleField  string                  `json:"titleField,omitempty"`
 	Occurrences *calendarOccurrencesDef `json:"occurrences,omitempty"`
 }
 

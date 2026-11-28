@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
@@ -41,15 +40,6 @@ type resolvedImports struct {
 	unionValidators map[string]string
 }
 
-// DependencyServiceName extracts the service name from a schema import
-// package (e.g. "@schemas/web-db" -> "web-db").
-func DependencyServiceName(pkg string) string {
-	if idx := strings.LastIndex(pkg, "/"); idx >= 0 {
-		return pkg[idx+1:]
-	}
-	return pkg
-}
-
 // resolveImports classifies every named import in the schema against its
 // dependency schema. DB dependencies stay named-only; other
 // kinds expand to the full catalog. Imported definitions become `pub type`
@@ -64,7 +54,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	usedAliases := map[string]struct{}{}
 	aliasByDep := map[string]string{}
 	crateByDep := map[string]string{}
-	localSymbols := localSchemaSymbols(schema)
+	localSymbols := codegen.LocalSchemaSymbols(schema)
 	seenSymbols := map[string]struct{}{}
 
 	imports := append([]ir.Import{}, schema.Imports...)
@@ -73,7 +63,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	})
 
 	for _, imp := range imports {
-		depName := DependencyServiceName(imp.Package)
+		depName := codegen.DependencyServiceName(imp.Package)
 		depSchema, ok := opts.Dependencies[depName]
 		if !ok || depSchema == nil {
 			return nil, fmt.Errorf("rustgen: dependency schema %q (package %q) not loaded", depName, imp.Package)
@@ -90,7 +80,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			aliasByDep[depName] = alias
 		}
 
-		symbols := importSymbolsForDependency(imp, depSchema)
+		symbols := codegen.ImportSymbols(imp, depSchema)
 		sort.Strings(symbols)
 
 		usedDep := false
@@ -180,46 +170,6 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	})
 
 	return result, nil
-}
-
-func localSchemaSymbols(schema *ir.Schema) map[string]struct{} {
-	symbols := make(map[string]struct{}, len(schema.Enums)+len(schema.Types)+len(schema.Unions))
-	for name := range schema.Enums {
-		symbols[name] = struct{}{}
-	}
-	for name := range schema.Types {
-		symbols[name] = struct{}{}
-	}
-	for name := range schema.Unions {
-		symbols[name] = struct{}{}
-	}
-	return symbols
-}
-
-// importSymbolsForDependency returns symbols to alias from a dependency.
-// DB schemas stay named-only; other kinds expand the catalog.
-func importSymbolsForDependency(imp ir.Import, depSchema *ir.Schema) []string {
-	if depSchema.Kind == ir.SchemaKindDB {
-		return append([]string{}, imp.Types...)
-	}
-	symbolSet := map[string]struct{}{}
-	for _, symbol := range imp.Types {
-		symbolSet[symbol] = struct{}{}
-	}
-	for symbol := range depSchema.Enums {
-		symbolSet[symbol] = struct{}{}
-	}
-	for symbol := range depSchema.Unions {
-		symbolSet[symbol] = struct{}{}
-	}
-	for symbol := range depSchema.Types {
-		symbolSet[symbol] = struct{}{}
-	}
-	symbols := make([]string, 0, len(symbolSet))
-	for symbol := range symbolSet {
-		symbols = append(symbols, symbol)
-	}
-	return symbols
 }
 
 // importedEnumInfo converts a dependency-owned ir.EnumDef into the codegen

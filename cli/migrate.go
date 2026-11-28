@@ -215,7 +215,7 @@ Examples:
 	cmd.Flags().StringSliceVar(&flags.failOn, "fail-on", nil, "exit non-zero when the plan has a hazard of these classes that --allow does not name (comma-separated; all for every class)")
 	cmd.Flags().StringArrayVar(&flags.allow, "allow", nil, "a hazard id --fail-on lets pass (repeatable)")
 	cmd.Flags().BoolVar(&flags.printModel, "print-model", false, "print the new version's model, or with --from-database the file's, as canonical JSON and plan nothing")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml; with --documents, the one found walking up from the first document)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml; with --documents, the one found walking up from the first document)")
 	cmd.Flags().BoolVar(&flags.documents, "documents", false, "take the new version as the arguments: one DB service's schema documents as format --to=json writes them, or - for stdin")
 	cmd.Flags().StringVar(&flags.service, "service", "", "with --documents, the DB service development mode's General documents lower into (default: the name they share)")
 	cmd.Flags().StringVar(&flags.request, "request", "", "answer the plan request in this file, or - for stdin, with one line of JSON on stdout")
@@ -294,30 +294,18 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 	if err != nil {
 		return err
 	}
-	absService, err := filepath.Abs(servicePath)
-	if err != nil {
-		return fmt.Errorf("resolving service path: %w", err)
-	}
-	if info, err := os.Stat(absService); err != nil || !info.IsDir() {
-		return fmt.Errorf("service directory not found: %s", servicePath)
-	}
 
 	// The new version resolves its naming file and registry as build does.
-	schemasRoot := filepath.Dir(filepath.Dir(absService))
-	names, err := resolveNaming(flags.namingPath, schemasRoot)
+	svc, err := a.openService(servicePath, flags.namingPath)
 	if err != nil {
 		return err
 	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return err
-	}
-	current, err := openSchemaVersion(filepath.Dir(absService), names, reg)
+	current, err := openSchemaVersion(filepath.Dir(svc.dir), svc.names, svc.reg)
 	if err != nil {
 		return err
 	}
 	defer current.close()
-	service, err := current.serviceAt(absService)
+	service, err := current.serviceAt(svc.dir)
 	if err != nil {
 		return err
 	}

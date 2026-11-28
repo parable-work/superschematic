@@ -3,6 +3,7 @@ import { envelopeResponse, requestIdOf } from '../envelope.js';
 import { honoPath, mountManualOperation, type RouterRuntimeOptions } from '../hono.js';
 import type { OperationAuth, OperationSpec, RequestContext } from '../operation.js';
 import { HttpProblem, badRequest, internal, problemResponse } from '../problem.js';
+import { readCapped } from '../read-capped.js';
 import { identityAuthenticator, identityPrincipalOf } from './authenticator.js';
 import { hasNonIntegerLexeme } from './config.js';
 import { corsAnswer, requestHost, type CorsAnswer } from './crossorigin.js';
@@ -206,21 +207,9 @@ const INT64_BOUND = 2 ** 63;
 
 /** Reads the request's body, at most MAX_BODY_BYTES of it. */
 async function readBody(request: Request): Promise<string> {
-  if (!request.body) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel();
-      throw bodyRefusal('http: request body too large');
-    }
-    chunks.push(value);
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks));
+  const bytes = await readCapped(request.body, MAX_BODY_BYTES);
+  if (!bytes) throw bodyRefusal('http: request body too large');
+  return new TextDecoder().decode(bytes);
 }
 
 /**

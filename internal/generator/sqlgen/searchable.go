@@ -39,12 +39,39 @@ const searchSuffix = "_search"
 
 // SearchQueue is the queue a @searchable declaration names: its quoted
 // table, its message's columns in ir.SearchIndexingFields' order, quoted,
-// and the clause that ends an enqueue on it in each dialect.
+// and the clause that ends an enqueue on it in each dialect. An @audience
+// declaration's queue is one of the same shape, its columns in
+// ir.AudienceResolveFields' order (#734).
 type SearchQueue struct {
 	Table          string
 	Columns        []string
 	Conflict       string
 	SQLiteConflict string
+}
+
+// messageQueueOf is the queue class named name of schema, whose message
+// holds fields, in their order.
+func messageQueueOf(schema *ir.Schema, name string, fields []string) (SearchQueue, error) {
+	td := schema.Types[name]
+	if td == nil || td.Queue == nil {
+		return SearchQueue{}, fmt.Errorf("sqlgen: %s is no queue of %s", name, schema.Name)
+	}
+	var columns []string
+	for _, field := range fields {
+		var fd *ir.FieldDef
+		for _, f := range td.Fields {
+			if f != nil && f.Name == field {
+				fd = f
+			}
+		}
+		if fd == nil {
+			return SearchQueue{}, fmt.Errorf("sqlgen: queue %s has no field %s", name, field)
+		}
+		columns = append(columns, sqlutil.QuoteIdentifier(sqlutil.ColumnName(fd)))
+	}
+	table := sqlutil.QuoteIdentifier(QueueTableName(td))
+	spec := sqlutil.QueueSpecOf(td, table, columns, true)
+	return SearchQueue{Table: table, Columns: columns, Conflict: sqlutil.PostgresQueueStatements(spec).Conflict, SQLiteConflict: sqlutil.SQLiteQueueStatements(spec).Conflict}, nil
 }
 
 // SearchTrigger is the trigger of one @searchable table.
@@ -130,26 +157,7 @@ func buildSearchables(schema *ir.Schema, tableTypes []*ir.TypeDef, tables []Tabl
 		indexColumns[field] = c
 	}
 	queueOf := func(name string) (SearchQueue, error) {
-		td := schema.Types[name]
-		if td == nil || td.Queue == nil {
-			return SearchQueue{}, fmt.Errorf("sqlgen: %s is no queue of %s", name, schema.Name)
-		}
-		var columns []string
-		for _, field := range ir.SearchIndexingFields {
-			var fd *ir.FieldDef
-			for _, f := range td.Fields {
-				if f != nil && f.Name == field {
-					fd = f
-				}
-			}
-			if fd == nil {
-				return SearchQueue{}, fmt.Errorf("sqlgen: queue %s has no field %s", name, field)
-			}
-			columns = append(columns, sqlutil.QuoteIdentifier(sqlutil.ColumnName(fd)))
-		}
-		table := sqlutil.QuoteIdentifier(QueueTableName(td))
-		spec := sqlutil.QueueSpecOf(td, table, columns, true)
-		return SearchQueue{Table: table, Columns: columns, Conflict: sqlutil.PostgresQueueStatements(spec).Conflict, SQLiteConflict: sqlutil.SQLiteQueueStatements(spec).Conflict}, nil
+		return messageQueueOf(schema, name, ir.SearchIndexingFields)
 	}
 	tooLong := func(td *ir.TypeDef, name string) error {
 		if len(name) > sqlutil.PostgresIdentifierLimit {
@@ -284,7 +292,7 @@ func (q SearchQueue) enqueue(origin, key, indent string) string {
 	if conflict != "" && !strings.HasPrefix(conflict, " ") && !strings.HasPrefix(conflict, "\n") {
 		conflict = " " + conflict
 	}
-	return fmt.Sprintf("%sINSERT INTO %s (%s)\n%sVALUES (%s, %s::text)%s;\n", indent, q.Table, strings.Join(q.Columns, ", "), indent, stringLiteral(origin), key, conflict)
+	return fmt.Sprintf("%sINSERT INTO %s (%s)\n%sVALUES (%s, %s::text)%s;\n", indent, q.Table, strings.Join(q.Columns, ", "), indent, sqlutil.QuoteLiteral(origin), key, conflict)
 }
 
 // Trigger is the row trigger that keeps the table's index rows.
@@ -298,7 +306,7 @@ func (t SearchTrigger) Trigger() Trigger {
 func (t SearchTrigger) FunctionSQL() string {
 	var b strings.Builder
 	where := func(row string) string {
-		return fmt.Sprintf("%s = %s AND %s = %s.%s::text", t.IndexTable, stringLiteral(t.Origin), t.IndexKey, row, t.Key)
+		return fmt.Sprintf("%s = %s AND %s = %s.%s::text", t.IndexTable, sqlutil.QuoteLiteral(t.Origin), t.IndexKey, row, t.Key)
 	}
 	fmt.Fprintf(&b, "BEGIN\n  -- The search index row of a row of %s (D155): deleted with the row,\n  -- its access copied in the writer's transaction, and the row enqueued\n  -- for its text to be indexed again when that changed.\n", t.Origin)
 	fmt.Fprintf(&b, "  IF TG_OP = 'DELETE' THEN\n    DELETE FROM %s WHERE %s;\n    RETURN NULL;\n  END IF;\n", t.Index, where("OLD"))

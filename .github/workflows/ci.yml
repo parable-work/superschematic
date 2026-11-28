@@ -236,7 +236,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # Builds the superscalar ffi archive from source, with this toolchain
@@ -574,7 +574,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # Builds superscalar's static archive when the checkout above was
@@ -601,6 +601,13 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go run ./internal/tools/schemafiletypes -check
+
+      - name: Behavior config types drift (packages/schema's config schema types match the behaviors' declarations)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          go run ./internal/tools/behaviorconfigtypes -check
 
       - name: Cache the pulumi-gcp, pulumi-cloudflare and pulumi-tls files the extensions and the core pin
         # pulumi-gcp's schema.json is about 90 MB; the tool reads each file
@@ -796,7 +803,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The superscalar dependency, the version-graph archive and
@@ -909,7 +916,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The wasm32 target builds superscalar's browser and workerd builds
@@ -1093,7 +1100,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
         # The superscalar Python package is built from the checkout by
@@ -1121,9 +1128,11 @@ jobs:
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
 
-      - name: pytest
+      - name: pytest (also on Python 3.9, the floor its pyproject.toml declares)
         working-directory: runtime/schema/python
-        run: uv run pytest -q
+        run: |
+          uv run pytest -q
+          uv run --python 3.9 --isolated pytest -q
 
       - name: Version-graph package (fmt / clippy / the binding's unit tests / every vector and the engine's tests that need no database, also on Python 3.9)
         working-directory: runtime/versiongraph/python
@@ -1321,7 +1330,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Check out the superscalar sources
         # The behaviors read scalars through superscalar's core by path
@@ -1448,7 +1457,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Check out the superscalar sources
         run: scripts/superscalar-dep.sh --checkout
@@ -1518,7 +1527,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'scripts/lib/archive.sh', 'tools.env') }}
 
       - name: Start Postgres
         # The adapter's tests, the stores' and the transcript replay run on
@@ -1555,9 +1564,10 @@ jobs:
         # 115, 158, 77, 88, 58, 161 and 82 for the hand-written
         # core-workflow-principals, core-freezes-and-sign-offs,
         # core-retries-waits, core-periods-and-presence, core-seats,
-        # core-reconcile, core-schedules and core-pool (D104), whose events
-        # each replay reads back from the event queues after every command,
-        # and core-pool's picks commands without a row.
+        # core-reconcile, core-schedules and core-pool (D104), and 88 for
+        # core-recurrence (#601), whose events each replay reads back from
+        # the event queues after every command, and core-pool's picks
+        # commands without a row.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"

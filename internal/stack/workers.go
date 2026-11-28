@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -39,7 +40,7 @@ func Workers(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.defaultWorkers()
 	r.resolveCalls()
 	var workers []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableWorker {
 			continue
@@ -59,7 +60,7 @@ func (r *resolver) defaultWorkers() {
 	if r.byWorker == nil {
 		r.byWorker = map[string]string{}
 	}
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		svc := r.services[name]
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
@@ -207,7 +208,7 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 // of it may run at once, so a range of them is refused, and its idle time
 // is the settings', ir.DefaultWorkerIdleSeconds unless they say.
 func (r *resolver) runWorkers() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableWorker || d.worker == nil {
 			continue
@@ -312,14 +313,14 @@ func (r *resolver) runWorkers() {
 // deadline queue, its change queue, whose trigger the behaviors' core
 // wakes for, and its event queue.
 func (r *resolver) wakeWorkers() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		w := r.deployables[name]
 		run := w.res.Worker
 		if w.res.Kind != ir.DeployableWorker || (!run.Drains() && !w.platform.WakesWorkers) || run.Instances == 0 || run.Database == "" {
 			continue
 		}
 		queues := run.AllQueues()
-		for _, id := range sortedKeys(r.edges) {
+		for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 			e := r.edges[id]
 			if e.res.Kind != ir.EdgeSQL || e.res.Service.Name != run.Database || e.from == w {
 				continue
@@ -358,7 +359,7 @@ var behaviorQueueWhat = map[string]string{
 // the queue and what it holds.
 func (r *resolver) checkBehaviorQueues() {
 	drained := map[string]bool{}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		run := d.res.Worker
 		if d.res.Kind != ir.DeployableWorker || run == nil || run.Instances == 0 || run.Database == "" {
@@ -368,7 +369,7 @@ func (r *resolver) checkBehaviorQueues() {
 			drained[run.Database+"/"+queue] = true
 		}
 	}
-	for _, db := range sortedKeys(r.members) {
+	for _, db := range slices.Sorted(maps.Keys(r.members)) {
 		svc := r.services[db]
 		if svc == nil || svc.Kind != ir.SchemaKindDB || len(svc.BehaviorQueues) == 0 {
 			continue
@@ -376,7 +377,7 @@ func (r *resolver) checkBehaviorQueues() {
 		if host, ok := r.byService[db]; !ok || r.deployables[host] == nil {
 			continue
 		}
-		for _, queue := range sortedKeys(svc.BehaviorQueues) {
+		for _, queue := range slices.Sorted(maps.Keys(svc.BehaviorQueues)) {
 			if drained[db+"/"+queue] {
 				continue
 			}

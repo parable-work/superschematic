@@ -346,6 +346,9 @@ export { ormOf, POSTGRES_ORM_RUNTIME } from './orm-postgres.js';
 // applies as a repository does, and the refusal of a write a party's or an
 // agent run's grants do not reach.
 export { AccessRefusedError, audienceConditions, type AudienceDefinition } from './orm.js';
+// An audience resolved through a queue (#734): what a worker of an
+// @audience queue runs for each message, after the parent's write.
+export { AUDIENCE_RESOLVE_BATCH, resolveAudience, type AudienceResolving, type ResolveAudienceOptions } from './audience-resolve.js';
 // References and attachments on any row (D154): orm.references and
 // orm.attachments, the definitions a DB's ./orm entry gives them, and the
 // Comments attachment block of a file.

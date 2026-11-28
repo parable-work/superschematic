@@ -5,6 +5,8 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::civil;
+
 const NANOS_PER_SECOND: i128 = 1_000_000_000;
 const SECONDS_PER_DAY: i64 = 86_400;
 
@@ -27,47 +29,15 @@ fn from_unix_nanos(nanos: i128) -> Option<SystemTime> {
     }
 }
 
-/// The civil date of a day count since 1970-01-01, after Howard Hinnant's
-/// `civil_from_days`.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (
-        year,
-        u32::try_from(month).unwrap_or(1),
-        u32::try_from(day).unwrap_or(1),
-    )
-}
-
-/// The day count since 1970-01-01 of a civil date, after Howard Hinnant's
-/// `days_from_civil`.
-fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let yoe = year.rem_euclid(400);
-    let month = i64::from(month);
-    let mp = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
 /// The date and time of `t` in UTC, and its nanoseconds.
-fn parts(t: SystemTime) -> ((i64, u32, u32), (i64, i64, i64), i128) {
+fn parts(t: SystemTime) -> ((i64, i64, i64), (i64, i64, i64), i128) {
     let nanos = unix_nanos(t);
     let seconds = i64::try_from(nanos.div_euclid(NANOS_PER_SECOND)).unwrap_or(0);
     let fraction = nanos.rem_euclid(NANOS_PER_SECOND);
     let days = seconds.div_euclid(SECONDS_PER_DAY);
     let of_day = seconds.rem_euclid(SECONDS_PER_DAY);
     (
-        civil_from_days(days),
+        civil::from_days(days),
         (of_day / 3600, of_day % 3600 / 60, of_day % 60),
         fraction,
     )
@@ -117,8 +87,7 @@ pub fn parse_timestamp(text: &str) -> Option<SystemTime> {
             .flatten()
     };
     let year = number(0..4)?;
-    let month = u32::try_from(number(5..7)?).ok()?;
-    let day = u32::try_from(number(8..10)?).ok()?;
+    let (month, day) = (number(5..7)?, number(8..10)?);
     let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
     if !(1..=12).contains(&month)
         || !(1..=31).contains(&day)
@@ -160,7 +129,7 @@ pub fn parse_timestamp(text: &str) -> Option<SystemTime> {
         }
     };
     let seconds =
-        days_from_civil(year, month, day) * SECONDS_PER_DAY + hour * 3600 + minute * 60 + second
+        civil::to_days(year, month, day) * SECONDS_PER_DAY + hour * 3600 + minute * 60 + second
             - offset_seconds;
     from_unix_nanos(i128::from(seconds) * NANOS_PER_SECOND + fraction)
 }

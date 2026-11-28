@@ -3,8 +3,8 @@ package pygen
 import (
 	"fmt"
 	"sort"
-	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -24,15 +24,6 @@ type resolvedImports struct {
 	enumNames map[string]bool
 }
 
-// DependencyServiceName extracts the service name from a schema import
-// package (e.g. "@schemas/web-db" -> "web-db").
-func DependencyServiceName(pkg string) string {
-	if idx := strings.LastIndex(pkg, "/"); idx >= 0 {
-		return pkg[idx+1:]
-	}
-	return pkg
-}
-
 // resolveImports classifies every named import in the schema against its
 // dependency schema.
 func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
@@ -47,18 +38,18 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	})
 
 	moduleToTypeSet := map[string]map[string]struct{}{}
-	localSymbols := localSchemaSymbols(schema)
+	localSymbols := codegen.LocalSchemaSymbols(schema)
 	seenSymbols := map[string]struct{}{}
 
 	for _, imp := range imports {
-		depName := DependencyServiceName(imp.Package)
+		depName := codegen.DependencyServiceName(imp.Package)
 		depSchema, ok := opts.Dependencies[depName]
 		if !ok || depSchema == nil {
 			return nil, fmt.Errorf("pygen: dependency schema %q (package %q) not loaded", depName, imp.Package)
 		}
 
 		moduleName := opts.Naming.PythonTypesModule(moduleStem(depName))
-		symbols := importSymbolsForDependency(imp, depSchema)
+		symbols := codegen.ImportSymbols(imp, depSchema)
 		sort.Strings(symbols)
 
 		for _, symbol := range symbols {
@@ -124,44 +115,4 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	}
 
 	return result, nil
-}
-
-// importSymbolsForDependency returns symbols to bind from a dependency.
-// DB schemas stay named-only; other kinds expand the catalog.
-func importSymbolsForDependency(imp ir.Import, depSchema *ir.Schema) []string {
-	if depSchema.Kind == ir.SchemaKindDB {
-		return append([]string{}, imp.Types...)
-	}
-	symbolSet := map[string]struct{}{}
-	for _, symbol := range imp.Types {
-		symbolSet[symbol] = struct{}{}
-	}
-	for symbol := range depSchema.Enums {
-		symbolSet[symbol] = struct{}{}
-	}
-	for symbol := range depSchema.Unions {
-		symbolSet[symbol] = struct{}{}
-	}
-	for symbol := range depSchema.Types {
-		symbolSet[symbol] = struct{}{}
-	}
-	symbols := make([]string, 0, len(symbolSet))
-	for symbol := range symbolSet {
-		symbols = append(symbols, symbol)
-	}
-	return symbols
-}
-
-func localSchemaSymbols(schema *ir.Schema) map[string]struct{} {
-	symbols := make(map[string]struct{}, len(schema.Enums)+len(schema.Types)+len(schema.Unions))
-	for name := range schema.Enums {
-		symbols[name] = struct{}{}
-	}
-	for name := range schema.Types {
-		symbols[name] = struct{}{}
-	}
-	for name := range schema.Unions {
-		symbols[name] = struct{}{}
-	}
-	return symbols
 }

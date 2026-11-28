@@ -9,10 +9,10 @@ import (
 )
 
 // TestVersionedOnSQLite: a @versioned table loads in a DB service that
-// lists sqlite with the TypeScript or the Go types, whose repositories
-// serve its rows and version there, its history kept by row triggers
-// (D189, #618), and is refused with the Rust types, whose repositories
-// read a history with Postgres's statements alone.
+// lists sqlite with the TypeScript, the Go or the Rust types, whose
+// repositories serve its rows and version there, its history kept by row
+// triggers (D189, #618), and is refused with the Python types, whose
+// repositories read a history with Postgres's statements alone.
 func TestVersionedOnSQLite(t *testing.T) {
 	const schema = `
 import { Identity } from "superscalar";
@@ -29,8 +29,9 @@ export abstract class Page {
 	}{
 		{"TypeScript's types alone", `{"typescript": {"enabled": true}}`, ""},
 		{"Go's types too", `{"typescript": {"enabled": true}, "go": {"enabled": true}}`, ""},
-		{"Rust's types beside Go's", `{"go": {"enabled": true}, "rust": {"enabled": true}}`, "@versioned on Page: pages-db lists the sqlite dialect and enables the Rust types"},
-		{"Rust's types", `{"rust": {"enabled": true}}`, "@versioned on Page: pages-db lists the sqlite dialect and enables the Rust types"},
+		{"Rust's types beside Go's", `{"go": {"enabled": true}, "rust": {"enabled": true}}`, ""},
+		{"Rust's types", `{"rust": {"enabled": true}}`, ""},
+		{"Python's types beside Rust's", `{"rust": {"enabled": true}, "python": {"enabled": true}}`, "@versioned on Page: pages-db lists the sqlite dialect and enables the Python types"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := writeService(t, map[string]string{

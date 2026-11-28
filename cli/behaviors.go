@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
@@ -77,20 +78,13 @@ Examples:
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the directory's copies are not what would be written")
 	cmd.Flags().StringVar(&flags.extension, "extension", "", "only the behaviors this extension registered (its Name())")
 	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors whose registration names this npm package (of the core's, @superschematic/rules for those only a table composes, @superschematic/engine for the rest)")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; behaviors has no service directory to find superschematic.toml from)")
+	addNamingFlag(cmd, &flags.namingPath, "(default: built-in names; behaviors has no service directory to find superschematic.toml from)")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd
 }
 
 func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
-	names := naming.Default()
-	if flags.namingPath != "" {
-		var err error
-		if names, err = resolveNaming(flags.namingPath, ""); err != nil {
-			return err
-		}
-	}
-	reg, err := a.resolveRegistry(names)
+	reg, err := a.flagRegistry(flags.namingPath)
 	if err != nil {
 		return err
 	}
@@ -126,7 +120,7 @@ func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
 	if err := os.MkdirAll(flags.out, 0o755); err != nil {
 		return err
 	}
-	for _, name := range sortedKeys(want) {
+	for _, name := range slices.Sorted(maps.Keys(want)) {
 		if bytes.Equal(have[name], want[name]) {
 			continue
 		}
@@ -147,7 +141,7 @@ func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
 
 func checkBehaviorFiles(cmd *cobra.Command, flags *behaviorsFlags, want, have map[string][]byte) error {
 	var problems []string
-	for _, name := range sortedKeys(want) {
+	for _, name := range slices.Sorted(maps.Keys(want)) {
 		existing, ok := have[name]
 		switch {
 		case !ok:
@@ -156,7 +150,7 @@ func checkBehaviorFiles(cmd *cobra.Command, flags *behaviorsFlags, want, have ma
 			problems = append(problems, name+" differs from the registered declaration")
 		}
 	}
-	for _, name := range sortedKeys(have) {
+	for _, name := range slices.Sorted(maps.Keys(have)) {
 		if _, ok := want[name]; !ok {
 			problems = append(problems, name+" is no registered behavior's declaration")
 		}
@@ -241,13 +235,4 @@ func extensionClause(extension string) string {
 		return ""
 	}
 	return " for extension " + extension
-}
-
-func sortedKeys(m map[string][]byte) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

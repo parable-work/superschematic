@@ -581,7 +581,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	audienceTriggers, audienceCascades, err := buildAudience(tableTypes, tables)
+	audienceTriggers, audienceCascades, err := buildAudience(schema, tableTypes, tables)
 	if err != nil {
 		return nil, err
 	}
@@ -830,8 +830,7 @@ func convertTypeToTable(
 			if column.Type != "JSONB" {
 				return table, fmt.Errorf("field %s.%s uses platform default %q on non-JSONB column %s", typeDef.Name, field.Name, field.PlatformDefault, column.Type)
 			}
-			escaped := strings.ReplaceAll(def.CanonicalJSON, "'", "''")
-			column.DefaultValue = "'" + escaped + "'::jsonb"
+			column.DefaultValue = sqlutil.QuoteLiteral(def.CanonicalJSON) + "::jsonb"
 		}
 
 		// A required date or time takes the time of the insert only where
@@ -1067,7 +1066,7 @@ func buildHistoryTable(table Table, typeDef *ir.TypeDef, actorSetting string) (H
 		literals := make([]string, 0, len(kept.Exclude))
 		for _, column := range kept.Exclude {
 			history.ExcludedColumns = append(history.ExcludedColumns, column)
-			literals = append(literals, "'"+strings.ReplaceAll(column, "'", "''")+"'")
+			literals = append(literals, sqlutil.QuoteLiteral(column))
 		}
 		history.ExcludeArray = "ARRAY[" + strings.Join(literals, ", ") + "]"
 	}

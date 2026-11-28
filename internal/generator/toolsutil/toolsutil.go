@@ -9,6 +9,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -387,22 +388,16 @@ type ToolScalarArg struct {
 // Tool arguments are one flat object, so query values appear in the same
 // JSON Schema as path and body values.
 type ToolQueryArg struct {
-	Name              string
-	TSName            string
-	Type              string
-	Required          bool
-	IsArray           bool
-	IsMap             bool
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
-	Reference         *apigen.Reference
-	Search            bool
-	Sort              *apigen.SortParam
+	Name     string
+	TSName   string
+	Type     string
+	Required bool
+	IsArray  bool
+	IsMap    bool
+	ir.ValueRules
+	Reference *apigen.Reference
+	Search    bool
+	Sort      *apigen.SortParam
 }
 
 // ParamKeyFn chooses the JSON object key for a parameter.
@@ -475,11 +470,8 @@ func BuildParametersSchema(
 		prop := FieldToJSONSchemaProperty(apigen.Param{
 			// Optional query values are omitted by the SDK; JSON null is a body contract.
 			Name: arg.Name, Type: arg.Type, Required: true, IsArray: arg.IsArray, IsMap: arg.IsMap,
-			ValidateMin: arg.ValidateMin, ValidateMax: arg.ValidateMax,
-			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
-			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
-			ValidatePattern: arg.ValidatePattern,
-			Reference:       arg.Reference, Search: arg.Search, Sort: arg.Sort,
+			ValueRules: arg.ValueRules,
+			Reference:  arg.Reference, Search: arg.Search, Sort: arg.Sort,
 		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
@@ -662,8 +654,7 @@ func FieldToJSONSchemaProperty(
 	}
 	if depth := field.ArrayDepth(); depth > 0 {
 		itemField := field
-		itemField.ValidateListMin = nil
-		itemField.ValidateListMax = nil
+		itemField.ValueRules = field.Element()
 		itemField.IsArray = false
 		itemField.IsArrayOfArrays = false
 		applyFieldValidation(&value, itemField)
@@ -1069,12 +1060,8 @@ func containsRequired(required []string, name string) bool {
 	return false
 }
 
-// EscapeJSON escapes a string for safe JSON embedding in templates.
+// EscapeJSON escapes s for a JSON string, as tsutil.EscapeString does for
+// a double-quoted TypeScript string, which is a JSON string too.
 func EscapeJSON(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	s = strings.ReplaceAll(s, "\t", "\\t")
-	return s
+	return tsutil.EscapeString(s)
 }

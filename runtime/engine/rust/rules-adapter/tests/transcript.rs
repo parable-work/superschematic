@@ -26,7 +26,9 @@
 //! fires, retries and endOn, and the event each fire emits) and
 //! `core-pool.json` (D104: Pool's members out and back, their rechecks and
 //! the event each emits, and its pick, a command without a row over a read
-//! across the table, Budget's meters read through Capacity), whose
+//! across the table, Budget's meters read through Capacity) and
+//! `core-recurrence.json` (#601: Recurrence's occurrences, its deadlines'
+//! events, and its plan's reads of a holiday table and a relation's row), whose
 //! hand-written transcripts hold each command's row version too
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
 //! `transcript` module states) replayed through this adapter on rusqlite
@@ -91,7 +93,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 39] = [
+const TRANSCRIPTS: [(&str, usize); 40] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -111,6 +113,7 @@ const TRANSCRIPTS: [(&str, usize); 39] = [
     ("core-reconcile", RECONCILE_FLOOR),
     ("core-schedules", SCHEDULES_FLOOR),
     ("core-pool", POOL_FLOOR),
+    ("core-recurrence", RECURRENCE_FLOOR),
     ("core-rollups", ROLLUPS_FLOOR),
     ("core-dependencies", DEPENDENCIES_FLOOR),
     ("core-numbering", NUMBERING_FLOOR),
@@ -253,6 +256,16 @@ const RECONCILE_FLOOR: usize = 58;
 /// among them heard and ending the row's schedules), and 1 raw write; the
 /// events each command wrote held to its table's event queue.
 const SCHEDULES_FLOOR: usize = 161;
+
+/// core-recurrence's floor: 88 steps of the scenarios written by hand
+/// (#601), 29 checks, 11 of them refused, and 59 commands, each holding its
+/// row's version and its occurrences as its sub-rows: creates of a holiday,
+/// a contract and filings, updates of a contract's date and a filing's
+/// relation, Recurrence's operations, three of them repeats answered
+/// unchanged, and the deadlines the runner ran, each emitting the events of
+/// the occurrences it moved on (opened, reminded, due, missed), its plan
+/// reading the holiday table and the relation's row.
+const RECURRENCE_FLOOR: usize = 88;
 
 /// core-pool's floor, as the core's milestone states it: 82 steps of the
 /// scenarios written by hand (D104), 17 checks, 7 of them refused, and 65

@@ -38,6 +38,12 @@ type CalendarSourceDef struct {
 	// Owner is the field that holds a row's owner, which a read's scope
 	// "mine" keeps to the caller; empty for a source no such read takes.
 	Owner string `json:"owner,omitempty" yaml:"owner,omitempty"`
+
+	// Permission is the permission a caller needs to read any entry of
+	// the source (#601), beside its table's audience and grants; empty for
+	// none. A runtime's calendar options name one per source as well, and
+	// the option's wins.
+	Permission string `json:"permission,omitempty" yaml:"permission,omitempty"`
 }
 
 // CalendarSourceName is the name of td's i-th calendar source (D152): its

@@ -2,6 +2,7 @@ package topcoat
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -328,7 +329,7 @@ func classify(schemas schemaSet, ops []declared, forms pageForms) (roots []*reso
 	}
 	// A page submits through a form, which update, delete, action and
 	// create pages need; one without is left out.
-	for _, key := range sortedKeys(nodes) {
+	for _, key := range slices.Sorted(maps.Keys(nodes)) {
 		node := nodes[key]
 		keep := func(c *classified) *classified {
 			if c == nil {
@@ -350,7 +351,7 @@ func classify(schemas schemaSet, ops []declared, forms pageForms) (roots []*reso
 		node.actions = actions
 	}
 	leaveCollisions(nodes, leave)
-	for _, key := range sortedKeys(nodes) {
+	for _, key := range slices.Sorted(maps.Keys(nodes)) {
 		node := nodes[key]
 		if node.parent == nil {
 			roots = append(roots, node)
@@ -433,7 +434,7 @@ func (n *resourceNode) routes() []pageRoute {
 // or lie under its items, keep their routes.
 func leaveCollisions(nodes map[string]*resourceNode, leave func(d declared, reason string)) {
 	taken := map[string]string{}
-	for _, key := range sortedKeys(nodes) {
+	for _, key := range slices.Sorted(maps.Keys(nodes)) {
 		node := nodes[key]
 		routes := node.routes()
 		reason := ""

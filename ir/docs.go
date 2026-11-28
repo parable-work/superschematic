@@ -2,7 +2,9 @@ package ir
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -378,7 +380,7 @@ func (s *Schema) validateDocs() []error {
 			}
 		}
 	}
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		if td := s.Types[name]; td != nil {
 			fields(td.Name, td.Fields)
 			if td.TraitConfig != nil {
@@ -386,7 +388,7 @@ func (s *Schema) validateDocs() []error {
 			}
 		}
 	}
-	for _, name := range sortedStringMapKeys(s.Inputs) {
+	for _, name := range slices.Sorted(maps.Keys(s.Inputs)) {
 		if td := s.Inputs[name]; td != nil {
 			fields(td.Name, td.Fields)
 		}

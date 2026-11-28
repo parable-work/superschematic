@@ -20,7 +20,7 @@ http = "1"
 serde = { version = "1.0.228", features = ["derive"] }
 {{- else if .HasBehaviors }}
 serde = "{{ rulesSerdeVersion }}"
-{{- else if .HasGraphOperations }}
+{{- else if or .HasGraphOperations .HasRowFeatureOperations }}
 serde = "1.0.228"
 {{- end }}
 serde_json = "1.0.149"

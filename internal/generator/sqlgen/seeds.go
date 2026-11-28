@@ -87,7 +87,7 @@ func (s RoleSeed) permissionsArray() string {
 	}
 	literals := make([]string, len(s.Permissions))
 	for i, p := range s.Permissions {
-		literals[i] = stringLiteral(p)
+		literals[i] = sqlutil.QuoteLiteral(p)
 	}
 	return "ARRAY[" + strings.Join(literals, ", ") + "]::" + s.PermissionsType
 }
@@ -96,7 +96,7 @@ func (s RoleSeed) permissionsArray() string {
 // JSON array, as a string literal.
 func (s RoleSeed) permissionsJSON() string {
 	data, _ := json.Marshal(append([]string{}, s.Permissions...))
-	return stringLiteral(string(data))
+	return sqlutil.QuoteLiteral(string(data))
 }
 
 // InsertSQL inserts the role on Postgres when the table has none of its
@@ -109,20 +109,20 @@ func (s RoleSeed) InsertSQL() string {
 // Postgres.
 func (s RoleSeed) UpdateSQL() string {
 	return "UPDATE " + s.QuotedTable + " SET " + s.PermissionsColumn + " = " + s.permissionsArray() +
-		" WHERE " + s.NameColumn + " = " + stringLiteral(s.Name)
+		" WHERE " + s.NameColumn + " = " + sqlutil.QuoteLiteral(s.Name)
 }
 
 // SQLiteInsertSQL is InsertSQL on SQLite, its identifiers quoted by quote.
 func (s RoleSeed) SQLiteInsertSQL(quote func(string) string) string {
-	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
+	unquote := func(c string) string { return quote(sqlutil.Unquote(c)) }
 	return s.insertSQL(unquote, quote(s.Table), s.permissionsJSON(), "excluded", "json_array_length(%s) = 0")
 }
 
 // SQLiteUpdateSQL is UpdateSQL on SQLite.
 func (s RoleSeed) SQLiteUpdateSQL(quote func(string) string) string {
-	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
+	unquote := func(c string) string { return quote(sqlutil.Unquote(c)) }
 	return "UPDATE " + quote(s.Table) + " SET " + unquote(s.PermissionsColumn) + " = " + s.permissionsJSON() +
-		" WHERE " + unquote(s.NameColumn) + " = " + stringLiteral(s.Name)
+		" WHERE " + unquote(s.NameColumn) + " = " + sqlutil.QuoteLiteral(s.Name)
 }
 
 // insertSQL renders the insert: quote quotes a column, table is quoted,
@@ -131,7 +131,7 @@ func (s RoleSeed) SQLiteUpdateSQL(quote func(string) string) string {
 // of the existing row's column.
 func (s RoleSeed) insertSQL(quote func(string) string, table, permissions, excluded, empty string) string {
 	name, perms := quote(s.NameColumn), quote(s.PermissionsColumn)
-	insert := "INSERT INTO " + table + " (" + name + ", " + perms + ") VALUES (" + stringLiteral(s.Name) + ", " + permissions + ")\nON CONFLICT (" + name + ") DO "
+	insert := "INSERT INTO " + table + " (" + name + ", " + perms + ") VALUES (" + sqlutil.QuoteLiteral(s.Name) + ", " + permissions + ")\nON CONFLICT (" + name + ") DO "
 	if len(s.Permissions) == 0 {
 		return insert + "NOTHING"
 	}

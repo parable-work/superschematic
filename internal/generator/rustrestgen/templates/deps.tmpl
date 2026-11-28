@@ -171,7 +171,7 @@ pub struct Handlers {
 
 impl Implementations {
     /// The API's `Implementations`: the handlers the implementation's
-    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
+    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
 {{- if .Identity }}
     ///
     /// `authenticator` is the identity runtime's (D50), which the
@@ -200,6 +200,10 @@ impl Implementations {
     ///
     /// `db` is the pool of {{ .GraphDatabase }}, on which the graph operations run
     /// (D138): the pool `Deps.db` holds.
+{{- else if .HasRowFeatureOperations }}
+    ///
+    /// `db` is {{ .RowFeatureDatabase }}, through whose repositories the row feature
+    /// operations run (#723): what `Deps.db` holds.
 {{- end }}
 {{- if .HasIdempotent }}
     ///
@@ -211,6 +215,12 @@ impl Implementations {
     /// `field_keys` are the keys of the `Encrypted<T>` fields of {{ .TableDatabase }}
     /// (D85), which the table operations' repositories seal and open with:
     /// `tables::field_keys` reads them from the API's config.
+{{- end }}
+{{- if .RowFeatureBucket }}
+    ///
+    /// `attachments` is the bucket that holds the files of the row feature
+    /// operations, {{ .RowFeatureBucket }}, whose URLs a file's upload and download sign
+    /// (#723): what `Deps.{{ .RowFeatureBucketField }}` holds.
 {{- end }}
 {{ .NewSignature }}
 {{- if not $handlers }}
@@ -228,18 +238,21 @@ impl Implementations {
 {{- end }}
 {{- if .HasIdempotent }}
             idempotency_store: Arc::new({{ .IdempotencyStoreType }}::new(
-                db{{ if or .HasBehaviorOperations .HasTableOperations .HasGraphOperations }}.clone(){{ end }},
+                db{{ if or .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }},
                 &crate::IDEMPOTENCY_TABLE,
             )),
 {{- end }}
 {{- if .HasBehaviorOperations }}
-            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations }}.clone(){{ end }}),
+            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }}),
 {{- end }}
 {{- if .HasTableOperations }}
-            tables: crate::tables::tables(db{{ if .HasGraphOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
+            tables: crate::tables::tables(db{{ if or .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
 {{- end }}
 {{- if .HasGraphOperations }}
-            graphs: crate::graphs::Graphs::new(db),
+            graphs: crate::graphs::Graphs::new(db{{ if .HasRowFeatureOperations }}.clone(){{ end }}),
+{{- end }}
+{{- if .HasRowFeatureOperations }}
+            row_features: crate::rowfeatures::RowFeatures::new(db{{ if .RowFeatureBucket }}, attachments{{ end }}),
 {{- end }}
         }
     }

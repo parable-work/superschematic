@@ -538,7 +538,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	uuidType := ""
 	for _, s := range output.Scalars {
 		if s.Name == "Identity.UUID" {
-			uuidType = "T." + s.Symbol
+			uuidType = "T." + s.Symbol()
 		}
 	}
 	keyTypes := map[string]string{}
@@ -1026,7 +1026,7 @@ func fieldType(info *TypeInfo, name string) string {
 func knownTypeNames(output *ModuleOutput) map[string]bool {
 	known := map[string]bool{}
 	for _, s := range output.Scalars {
-		known[s.Symbol] = true
+		known[s.Symbol()] = true
 	}
 	for _, e := range output.Enums {
 		known[e.Name] = true

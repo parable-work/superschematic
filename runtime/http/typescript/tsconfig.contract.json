@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "comment": "Holds src/rules-contract.testing.ts, the behaviors' core's contract as rules.ts's Core* types type it, to those types; src/rules-contract.test.ts runs it and holds runtime/http/testdata/rules_contract.json, which the Rust core writes, to the same values.",
+  "include": ["src/rules-contract.testing.ts"],
+  "exclude": []
+}

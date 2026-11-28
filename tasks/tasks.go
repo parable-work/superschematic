@@ -29,7 +29,7 @@ const (
 // KeyVersion is the version of the input key's definition. A change to
 // what a key covers, or to how it is encoded, raises it, and no key of one
 // version equals a key of another.
-const KeyVersion = 1
+const KeyVersion = 2
 
 // FileName is the task file's name in its install directory.
 const FileName = "tasks.json"
@@ -240,7 +240,7 @@ type Plan struct {
 	Version int `json:"version"`
 
 	// KeyVersion names the key definition and the repository's object
-	// format, as `1:sha1`. Keys of two key versions never compare equal.
+	// format, as `2:sha1`. Keys of two key versions never compare equal.
 	KeyVersion string `json:"keyVersion"`
 
 	// Commit is the commit the plan is for. Base is the commit it lands

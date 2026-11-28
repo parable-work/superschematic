@@ -362,6 +362,9 @@ pub fn preview_object_of(object_key: &str) -> String {
 /// The status a references or attachments refusal answers with.
 pub const ROW_FEATURE_STATUS: u16 = 422;
 
+/// The handlers of a generated router's row feature operations (#723).
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod routes;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod shared;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

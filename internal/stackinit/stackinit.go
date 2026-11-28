@@ -8,10 +8,10 @@ package stackinit
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -205,7 +205,7 @@ func ExposeFor(apis map[string]*ir.Schema, siteCalls map[string][]string) ([]str
 	for name, schema := range apis {
 		reasons[name] = Expose(schema)
 	}
-	for _, site := range sortedKeys(siteCalls) {
+	for _, site := range slices.Sorted(maps.Keys(siteCalls)) {
 		for _, api := range siteCalls[site] {
 			if r, ok := reasons[api]; ok && !r.Exposed {
 				reasons[api] = Exposure{Exposed: true, Reason: "site " + site + " calls it"}
@@ -213,7 +213,7 @@ func ExposeFor(apis map[string]*ir.Schema, siteCalls map[string][]string) ([]str
 		}
 	}
 	var exposed []string
-	for _, name := range sortedKeys(reasons) {
+	for _, name := range slices.Sorted(maps.Keys(reasons)) {
 		if reasons[name].Exposed {
 			exposed = append(exposed, name)
 		}
@@ -233,7 +233,7 @@ func CheckExpose(expose []string, deploy []ir.ServiceRef, siteCalls map[string][
 			return fmt.Errorf("expose names %s, which is no API or Site service of the tree", name)
 		}
 	}
-	for _, site := range sortedKeys(siteCalls) {
+	for _, site := range slices.Sorted(maps.Keys(siteCalls)) {
 		for _, api := range siteCalls[site] {
 			if kinds[api] == ir.SchemaKindAPI && !slices.Contains(expose, api) {
 				return fmt.Errorf("site %s calls %s, so %s must be exposed (D55)", site, api, api)
@@ -287,13 +287,4 @@ func (p *Plan) Handles() []string {
 		}
 	}
 	return out
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

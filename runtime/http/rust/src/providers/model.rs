@@ -108,8 +108,8 @@ pub struct ModelCompletion {
     pub stop: ModelStop,
     pub usage: ModelUsage,
     /// The provider's own record of the turn, as JSON, which no one but the
-    /// provider reads: a Claude provider's content blocks, its thinking
-    /// with their signatures among them. The dispatcher keeps it with the
+    /// provider reads: the content blocks a model API returned, its signed
+    /// reasoning blocks among them. The dispatcher keeps it with the
     /// completion, unredacted while the run lives, and passes it back,
     /// unchanged, on that assistant message in every later turn (D158); a
     /// reader of the transcript, and the transcript a run leaves, hold it

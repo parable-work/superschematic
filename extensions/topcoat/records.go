@@ -2,6 +2,8 @@ package topcoat
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -154,7 +156,7 @@ func (b *recordBuilder) sortedPages() []pageRecord {
 		byName[page.Name] = page
 	}
 	out := make([]pageRecord, 0, len(byName))
-	for _, name := range sortedKeys(byName) {
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
 		out = append(out, *byName[name])
 	}
 	return out
@@ -163,7 +165,7 @@ func (b *recordBuilder) sortedPages() []pageRecord {
 // sorted is every record added, by name.
 func (b *recordBuilder) sorted() []record {
 	out := make([]record, 0, len(b.records))
-	for _, name := range sortedKeys(b.records) {
+	for _, name := range slices.Sorted(maps.Keys(b.records)) {
 		out = append(out, *b.records[name])
 	}
 	return out
