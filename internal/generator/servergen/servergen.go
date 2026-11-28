@@ -544,6 +544,9 @@ type API struct {
 	// AttachmentsOf its Deps.
 	RowFeatures bool
 	Attachments bool
+	// AccessGrants is true when the API lists the active grants, which
+	// are read through the ORM of its database (#735).
+	AccessGrants bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -940,6 +943,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Tables = o.HasTableEndpoints()
 			apis[i].Graphs = o.HasGraphEndpoints()
 			apis[i].RowFeatures = o.HasRowFeatureEndpoints()
+			apis[i].AccessGrants = o.HasAccessGrantEndpoints()
 			apis[i].Attachments = o.RowFeatureBucket() != ""
 			if a.CORS {
 				apis[i].CORS = true

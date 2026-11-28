@@ -276,6 +276,18 @@ func accessScript(t *testing.T, f accessFixture) []accessCall {
 	record("the active grants after the expiring one ended", len(active), err)
 	err = RevokeGrant(ctx, db, expiring.Id.String(), now)
 	record("revoke the expiring grant", nil, err)
+	// A grant's target as the active grants' route reads its owner (#735):
+	// the row's members, as the system reads them, and none for a key no
+	// row has.
+	target, err := GrantTarget(user(carol), db, "Folder", private.String())
+	owner, _ := json.Marshal(target["owner"])
+	ada62, _ := json.Marshal(accessID(t, ada))
+	if string(owner) != string(ada62) {
+		t.Errorf("the grant's target folder names the owner %s, want %s", owner, ada62)
+	}
+	record("a grant's target names its owner, read as the system", string(owner) == string(ada62), err)
+	missing, err := GrantTarget(ctx, db, "Folder", party.String())
+	record("a grant's target that is no row", missing == nil, err)
 	_, err = f.authority.AuthenticateGrant(ctx, expires, now)
 	record("the revoked grant on the next call", nil, err)
 	_, err = f.authority.AuthenticateGrant(ctx, "no such token", now)

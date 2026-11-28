@@ -39,6 +39,10 @@ export type SchemaFile = Document | TypeDef | EnumFile | UnionFile | ScalarFile 
 export interface AccessGrantsDef {
 }
 
+export interface AccessGrantsOperationsConfig {
+  permission?: string;
+}
+
 export interface AccessLogDef {
 }
 
@@ -626,6 +630,7 @@ export interface OperationPage {
 }
 
 export interface OperationSet {
+  accessGrantsOperations?: AccessGrantsOperationsConfig;
   auth?: boolean;
   behaviorOperations?: BehaviorOperationsConfig;
   comment?: string;
@@ -646,6 +651,7 @@ export interface OperationSet {
 }
 
 export interface OperationSetFile {
+  accessGrantsOperations?: AccessGrantsOperationsConfig;
   auth?: boolean;
   behaviorOperations?: BehaviorOperationsConfig;
   comment?: string;

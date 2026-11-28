@@ -15,6 +15,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::{Duration, SystemTime};
 
 use runtime::access::sqlite::{access_log_of, active_grants, authenticate_grant, issue_grant, revoke_grant, GrantAuthenticator};
+use runtime::access::routes::{AccessGrantsOperation, AccessGrantsQuery};
 use runtime::access::{ActiveGrantsFilter, EndsWhen, IssueGrant, Logged};
 use runtime::orm::routes::{TableOperation, TableRequest};
 use runtime::orm::sqlite::{rusqlite, Database, Repositories};
@@ -375,4 +376,80 @@ fn per_record_access_on_sqlite() {
     assert_eq!(reveals[0]["targetId"], Value::from(contract_a.clone()));
     assert_eq!(reveals[0]["field"], "terms");
     case("a reveal opens the value for a holder of its permission and writes an access-log row");
+
+    // The active grants list for an administrator, the target owner and
+    // the holder, and are refused to anyone else (#735): the route the
+    // generated router serves, run over the file's tables.
+    let route = AccessGrantsOperation::new("access.admin", &[("Folder", "owner"), ("Document", "createdBy"), ("Request", "createdBy")]);
+    let folder = file.create(&system, "Folder", json!({"name": "Shared out", "owner": owner_id})).unwrap();
+    let folder_id = id(&folder);
+    let (holder_a, holder_b) = (uuid(0xe1), uuid(0xe2));
+    let grant = |holder: &str, target_type: &str, target_id: &str, ends_at: Option<SystemTime>| {
+        id(&file
+            .tx(&system, |r| {
+                issue_grant(
+                    r,
+                    &IssueGrant {
+                        holder: holder.to_owned(),
+                        holder_kind: PrincipalKind::Party,
+                        role: "tenant".to_owned(),
+                        target_type: target_type.to_owned(),
+                        target_id: target_id.to_owned(),
+                        starts_at: None,
+                        ends_at,
+                        ends_when: None,
+                    },
+                )
+            })
+            .unwrap()
+            .grant)
+    };
+    let on_folder_a = grant(&holder_a, "Folder", &folder_id, None);
+    let on_folder_b = grant(&holder_b, "Folder", &folder_id, None);
+    let on_contract_a = grant(&holder_a, "Contract", &contract_a, None);
+    let ended = grant(&holder_a, "Folder", &folder_id, None);
+    file.database.write(|connection| revoke_grant(connection, definition, &ended, SystemTime::now())).unwrap();
+    let expired = grant(&holder_a, "Folder", &folder_id, Some(SystemTime::now() - Duration::from_secs(60)));
+    let query = |holder: Option<&str>, target_type: Option<&str>, target_id: Option<&str>| AccessGrantsQuery::new(holder.as_ref(), target_type.as_ref(), target_id.as_ref()).unwrap();
+    let listed = |principal: Principal, query: AccessGrantsQuery| -> Result<Vec<String>, u16> {
+        match ready(tables.active_grants_route(route, Some(principal), query)) {
+            Ok(Value::Array(grants)) => {
+                assert!(grants.iter().all(|grant| grant.get("tokenHash").is_none() && grant.get("revokedAt").is_none()), "{grants:?}");
+                let mut ids: Vec<String> = grants.iter().map(|grant| grant["id"].as_str().unwrap().to_owned()).collect();
+                ids.sort();
+                Ok(ids)
+            }
+            Ok(other) => panic!("{other}"),
+            Err(err) => Err(err.status.as_u16()),
+        }
+    };
+    let sorted = |mut ids: Vec<String>| -> Result<Vec<String>, u16> {
+        ids.sort();
+        Ok(ids)
+    };
+    let administrator = || Principal::new(admin_id.clone(), ["access.admin"]);
+    let folder_owner = || Principal::new(owner_id.clone(), Vec::<String>::new());
+    let holder_of_a = || Principal::new(holder_a.clone(), Vec::<String>::new()).of_kind(PrincipalKind::Party);
+    let someone = || Principal::new(other_id.clone(), Vec::<String>::new());
+    // The administrator: every active grant the query keeps.
+    assert_eq!(listed(administrator(), query(None, Some("Folder"), Some(&folder_id))), sorted(vec![on_folder_a.clone(), on_folder_b.clone()]));
+    assert_eq!(listed(administrator(), query(Some(&holder_a), None, None)), sorted(vec![on_folder_a.clone(), on_contract_a.clone()]));
+    let every = listed(administrator(), query(None, None, None)).unwrap();
+    assert!([&on_folder_a, &on_folder_b, &on_contract_a].iter().all(|id| every.contains(id)), "{every:?}");
+    assert!(!every.contains(&ended) && !every.contains(&expired), "{every:?}");
+    // The target's owner: the grants on the row it owns, and no other.
+    assert_eq!(listed(folder_owner(), query(None, Some("Folder"), Some(&folder_id))), sorted(vec![on_folder_a.clone(), on_folder_b.clone()]));
+    assert_eq!(listed(folder_owner(), query(Some(&holder_b), Some("Folder"), Some(&folder_id))), sorted(vec![on_folder_b.clone()]));
+    assert_eq!(listed(folder_owner(), query(None, Some("Contract"), Some(&contract_a))), Err(403));
+    assert_eq!(listed(folder_owner(), query(None, None, None)), Err(403));
+    // The holder: its own grants, and no other's.
+    assert_eq!(listed(holder_of_a(), query(Some(&holder_a), None, None)), sorted(vec![on_folder_a.clone(), on_contract_a.clone()]));
+    assert_eq!(listed(holder_of_a(), query(Some(&holder_a), Some("Contract"), None)), sorted(vec![on_contract_a.clone()]));
+    assert_eq!(listed(holder_of_a(), query(Some(&holder_b), None, None)), Err(403));
+    assert_eq!(listed(holder_of_a(), query(None, Some("Folder"), Some(&folder_id))), Err(403));
+    // Anyone else is refused, and a request with no caller is 401.
+    assert_eq!(listed(someone(), query(None, Some("Folder"), Some(&folder_id))), Err(403));
+    assert_eq!(listed(someone(), query(Some(&holder_a), None, None)), Err(403));
+    assert_eq!(ready(tables.active_grants_route(route, None, query(None, None, None))).unwrap_err().status.as_u16(), 401);
+    case("the active grants list for an administrator, the target owner and the holder, and are refused to anyone else");
 }

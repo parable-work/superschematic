@@ -685,6 +685,15 @@ async fn handle_{{ .SnakeName }}(
         args,
     )
     .await;
+{{- else if .AccessGrants }}
+    // The active grants of {{ .AccessGrants.Database }} (#735): the grants the request's caller
+    // may see, read through the database's repositories.
+    let result = crate::accessgrants::{{ .SnakeName }}(
+        &state.implementations.access_grants,
+        ctx.principal.clone(),
+        args,
+    )
+    .await;
 {{- else }}
 {{- if and .Page .Page.Sort }}
     // The page's next names the sort it was read in (D60, amended).

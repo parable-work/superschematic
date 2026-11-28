@@ -382,6 +382,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// The inbound path's triage (#746, D157), on a class with no members
 	// (core_triage_operations.go), which takes the same clause.
 	specs = append(specs, triageOperationsDecorator())
+	// The active grants (#735), on a class with no members
+	// (core_access_grants_operations.go), which takes the same clause.
+	specs = append(specs, accessGrantsOperationsDecorator())
 	flag(TargetOperationSet, "auth", []string{pkgAPI}, func(n Node) { n.OperationSet.Auth = true })
 	flag(TargetOperationSet, "publicRoute", []string{pkgAPI}, func(n Node) { n.OperationSet.Public = true })
 	specs = append(specs, DecoratorSpec{

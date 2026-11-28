@@ -311,6 +311,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkGraphOperations(schema, in, r)
 	checkRowFeatureOperations(schema, in, r)
 	checkTriageOperations(schema, in, r)
+	checkAccessGrantsOperations(schema, in, r)
 	checkWritableBy(schema, in, r)
 	checkProjections(schema, r)
 	checkArraysOfArrays(schema, r)

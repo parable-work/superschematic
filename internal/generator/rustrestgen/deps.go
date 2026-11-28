@@ -436,7 +436,7 @@ func (o *APIOutput) DepsExports() string {
 // table operations, graph operations and, on a database whose rows keep
 // to a caller, behavior operations read through (D106, D138, D181).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasFileProcessing() || o.BehaviorsHeld() || o.HasWiring())
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasAccessGrantOperations() || o.HasFileProcessing() || o.BehaviorsHeld() || o.HasWiring())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
@@ -465,7 +465,7 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // the repositories (BehaviorsHeld, D181), or that builds its database's
 // runtime parts (HasWiring); empty for any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasRowFeatureOperations() && !o.HasFileProcessing() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld() && !o.HasWiring()) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasRowFeatureOperations() && !o.HasAccessGrantOperations() && !o.HasFileProcessing() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld() && !o.HasWiring()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -527,6 +527,10 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		return err
 	}
 	if err := o.checkRowFeatureDeps(); err != nil {
+		o.Deps = nil
+		return err
+	}
+	if err := o.checkAccessGrantsDeps(); err != nil {
 		o.Deps = nil
 		return err
 	}
@@ -673,7 +677,7 @@ func (o *APIOutput) NewSignature() string {
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
 	}
-	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasIdempotent() {
+	if o.HasBehaviorOperations() || o.HasTableOperations() || o.HasGraphOperations() || o.HasRowFeatureOperations() || o.HasAccessGrantOperations() || o.HasIdempotent() {
 		params = append(params, "db: "+o.DatabaseType())
 	}
 	if o.TableFieldKeys() {

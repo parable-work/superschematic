@@ -142,6 +142,10 @@ type Config struct {
 	// DB is the ORM of {{ .Deps.Database }}, the API's database: the references
 	// and files run through its References() and Attachments() (#723).
 	DB orm.DatabaseInterface
+{{- else if .HasAccessGrantEndpoints }}
+	// DB is the ORM of {{ .Deps.Database }}, the API's database: the active grants
+	// are read through its ActiveGrants (#735).
+	DB orm.DatabaseInterface
 {{- end }}
 {{- if .RowFeatureBucket }}
 
@@ -297,6 +301,10 @@ func (c *Config) Validate() error {
 {{- else if .HasRowFeatureEndpoints }}
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required: the references and files of {{ .SchemaName }} run through it (#723)")
+	}
+{{- else if .HasAccessGrantEndpoints }}
+	if c.DB == nil {
+		return fmt.Errorf("Config.DB is required: the active grants of {{ .SchemaName }} are read through it (#735)")
 	}
 {{- else if .IsPublic }}
 	if c.DB == nil {
@@ -601,6 +609,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 {{- else if .ServedTable }}create{{ .HandlerName }}(cfg.DB)
 {{- else if .GraphRoutes }}create{{ .HandlerName }}(&{{ .GraphRoutes }}{db: cfg.DB, graph: cfg.Graphs.{{ .GraphMember }}})
 {{- else if .RowFeatureOperation }}create{{ .HandlerName }}(&{{ .RowFeatureRoutes }}{rowFeatureRoutes{db: cfg.DB{{ if .RowFeatureTakesBucket }}, bucket: cfg.Attachments{{ end }}}})
+{{- else if .AccessGrantsOperation }}create{{ .HandlerName }}(&accessGrantRoutes{db: cfg.DB})
 {{- else }}create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }})
 {{- end }}
 {{- end }}
@@ -800,12 +809,19 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 // files of {{ .Database }}, through the method of rowfeatures.go that serves it:
 // no implementation method serves it.
 {{- end }}
+{{- with .AccessGrantsOperation }}
+//
+// It lists the active grants of {{ .Database }} the caller may see (#735), through the
+// method of accessgrants.go that serves it: no implementation method serves it.
+{{- end }}
 {{- if or .BehaviorOperation .ServedTable }}
 func create{{ .HandlerName }}(db orm.DatabaseInterface) gohttp.HandlerFunc {
 {{- else if .GraphRoutes }}
 func create{{ .HandlerName }}(impl *{{ .GraphRoutes }}) gohttp.HandlerFunc {
 {{- else if .RowFeatureOperation }}
 func create{{ .HandlerName }}(impl *{{ .RowFeatureRoutes }}) gohttp.HandlerFunc {
+{{- else if .AccessGrantsOperation }}
+func create{{ .HandlerName }}(impl *accessGrantRoutes) gohttp.HandlerFunc {
 {{- else }}
 func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) gohttp.HandlerFunc {
 {{- end }}

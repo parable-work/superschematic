@@ -36,6 +36,8 @@ func applyGraphOperations(args []any, set *ir.OperationSet) error {
 		return fmt.Errorf("@graphOperations contradicts @rowFeatureOperations on the same class: a class takes one of them")
 	case set.TriageOperations != nil:
 		return fmt.Errorf("@graphOperations contradicts @triageOperations on the same class: a class takes one of them")
+	case set.AccessGrantsOperations != nil:
+		return fmt.Errorf("@graphOperations contradicts @accessGrantsOperations on the same class: a class takes one of them")
 	case set.UserSessions != nil:
 		return fmt.Errorf("@graphOperations contradicts @userSessions on the same class: a class takes one of them")
 	case set.UserAdministration != nil:

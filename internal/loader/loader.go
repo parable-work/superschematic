@@ -19,6 +19,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/access"
+	"github.com/parable-work/superschematic/internal/loader/accessgrantsops"
 	"github.com/parable-work/superschematic/internal/loader/agents"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
@@ -497,6 +498,9 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 		if set.IsTriageOperations() {
 			why = "whose inbound path's triage its @triageOperations set serves"
 		}
+		if set.IsAccessGrantsOperations() {
+			why = "whose active grants its @accessGrantsOperations set lists"
+		}
 	}
 	if schema.HasTableOperations() {
 		why = "whose tables its @tableOperation operations read and write"
@@ -782,6 +786,21 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 		refused = append(refused, err)
 	} else {
 		added, err := triageops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// The active grants join their @accessGrantsOperations set the same
+	// way (#735), with the type they list.
+	if err := verify.CheckAccessGrantsOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
+		added, err := accessgrantsops.Expand(schema, vin.Database, reg)
 		if err != nil {
 			return nil, err
 		}
