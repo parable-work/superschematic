@@ -10049,16 +10049,16 @@
               "code": "invalid_schema",
               "status": 422,
               "class": "SchemaDocumentError",
-              "message": "type Filing: behavior Recurrence config: opensBefore \"-P1D\" is negative: a lead time is a span",
+              "message": "type Filing: behavior Recurrence config: /opensBefore: must match pattern \"^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$\"",
               "details": {
                 "issues": [
                   {
                     "use": "Recurrence",
                     "index": 0,
                     "behavior": "Recurrence",
-                    "kind": "rule",
-                    "path": "/config",
-                    "message": "type Filing: behavior Recurrence config: opensBefore \"-P1D\" is negative: a lead time is a span"
+                    "kind": "schema",
+                    "path": "/config/opensBefore",
+                    "message": "must match pattern \"^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$\""
                   }
                 ]
               }
@@ -10137,16 +10137,16 @@
               "code": "invalid_schema",
               "status": 422,
               "class": "SchemaDocumentError",
-              "message": "type Filing: behavior Recurrence config: remindBefore \"soon\" is no ISO 8601 duration (P90D, -P60D, P1M)",
+              "message": "type Filing: behavior Recurrence config: /remindBefore: must match pattern \"^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$\"",
               "details": {
                 "issues": [
                   {
                     "use": "Recurrence",
                     "index": 0,
                     "behavior": "Recurrence",
-                    "kind": "rule",
-                    "path": "/config",
-                    "message": "type Filing: behavior Recurrence config: remindBefore \"soon\" is no ISO 8601 duration (P90D, -P60D, P1M)"
+                    "kind": "schema",
+                    "path": "/config/remindBefore",
+                    "message": "must match pattern \"^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$\""
                   }
                 ]
               }
