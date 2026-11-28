@@ -13,8 +13,9 @@ export abstract class Smoke {}
 // This machine: stack dev runs Postgres with pgvector in a container,
 // smoke-api, its worker and its job as processes, and the site behind the
 // proxy that serves smoke-api under /api/smoke-api. scripts/smoke.sh Dev
-// runs it and checks it.
-@environment({ target: "local" })
+// runs it and checks it. Every environment sends SMS through the stub
+// relay, which reaches no phone (D159).
+@environment({ target: "local", settings: [{ of: SmokeApi, env: { SMS: "stub-relay" } }] })
 export abstract class Dev {}
 
 // Google Cloud: Cloud SQL with pgvector, smoke-api on Cloud Run behind the
@@ -23,7 +24,11 @@ export abstract class Dev {}
 // resolve offline: scripts/smoke.sh writes a maintainer's own from
 // SMOKE_GCP_PROJECT and SMOKE_GCP_REGION for a deploy and puts these back
 // after.
-@environment({ target: "gcp", gcp: { project: "superschematic-smoke", region: "us-central1" } })
+@environment({
+  target: "gcp",
+  gcp: { project: "superschematic-smoke", region: "us-central1" },
+  settings: [{ of: SmokeApi, env: { SMS: "stub-relay" } }],
+})
 export abstract class Gcp {}
 
 // Cloudflare: smoke-api, its worker and its job are Workers, the worker
@@ -39,6 +44,9 @@ export abstract class Gcp {}
     workersSubdomain: "smoke-subdomain",
     secretsStoreId: "fedcba9876543210fedcba9876543210",
   },
-  settings: [{ of: SmokeDb, hyperdrive: "00000000000000000000000000000000" }],
+  settings: [
+    { of: SmokeDb, hyperdrive: "00000000000000000000000000000000" },
+    { of: SmokeApi, env: { SMS: "stub-relay" } },
+  ],
 })
 export abstract class Cloudflare {}
