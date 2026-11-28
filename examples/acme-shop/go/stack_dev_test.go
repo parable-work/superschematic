@@ -57,9 +57,10 @@ import (
 // generated Rust entrypoint, which cargo builds with the implementation in
 // rust-impl/shop-stock (D57); shop-cart and shop-storefront on their
 // generated TypeScript entrypoints, which Bun runs with the implementations
-// in typescript/shop-cart and typescript/shop-storefront (D51); and
-// shop-db's engine runner, which runs its engine types' reactions and
-// deadlines (D58, D70). Every connection string, URL and port
+// in typescript/shop-cart and typescript/shop-storefront (D51); and the
+// behavior workers of shop-db's tables (D103): shop-api's CheckoutTimers,
+// which runs Checkout's deadlines, and shop-cart's TicketReactions, which
+// runs Ticket's Reactions rules. Every connection string, URL and port
 // the test uses comes from the environment the build resolved. The test
 // waits for each server's /readyz, creates a user in shop-db with the
 // identity runtime's store, as staff would through the administration
@@ -72,19 +73,21 @@ import (
 // signed; a claim another replica holds refuses an upload 409; and
 // getProduct's requests count in shop-cache, so the counts other replicas
 // add there refuse it 429 (D75). Anyone lists shop-stock's stock,
-// and staff count the product's shelf, which gives it an Inventory in
-// shop-db's engine (D70). Staff open a collection point through the
-// engine's routes; a cart on shop-cart takes two units and a pickup slot
-// from the slots it lists; shop-orders' startCheckout holds them, and a
-// second checkout beyond the stock is refused 409 unavailable. acmepay,
-// the fake provider, which the test runs where ACMEPAY_URL points with the
-// keys of Dev's secrets, takes the payment and posts the capture to
-// shop-orders' webhook, signed; the runner places the checkout, whose
-// order shop-orders writes, enqueuing OrderPlaced, and tells shop-stock
-// what it sold through its Go SDK with shop-orders' service credential; a
-// sale reported with the shopper's session and no service credential is
-// refused 401. A refund two members of staff sign off through the engine's
-// routes is made at acmepay by SettlePayments, run with stack run.
+// and staff count the product's shelf, which gives it a row of shop-db's
+// Inventory table, whose Stock counts it (D70, D103). Staff open a
+// collection point through shop-cart's route the build serves from the
+// table; a cart on shop-cart takes two units and a pickup slot from the
+// slots it lists; shop-orders' startCheckout holds them, and a second
+// checkout beyond the stock is refused 409 unavailable. acmepay, the fake
+// provider, which the test runs where ACMEPAY_URL points with the keys of
+// Dev's secrets, takes the payment and posts the capture to shop-orders'
+// webhook, signed, which places the checkout, whose order shop-orders
+// writes, enqueuing OrderPlaced, and tells shop-stock what it sold through
+// its Go SDK with shop-orders' service credential; a sale reported with
+// the shopper's session and no service credential is refused 401. A
+// refund two members of staff sign off through shop-api's RefundActions
+// routes is made at acmepay by SettlePayments, run with stack run, which
+// issues it.
 // shop-orders' worker FulfilOrders, a process of its own on its generated
 // entrypoint with the implementation's NewWorkers, claims the OrderPlaced
 // message and fulfils the order (section 8.8, D53). shop-cart, through
@@ -135,11 +138,10 @@ import (
 //
 // shop-stock's app Backoffice (D78), a Topcoat app over shop-stock's
 // Topcoat crate in apps/backoffice, runs as a process of its own on its
-// generated entrypoint, over shop-db's Postgres and its engine: Ada signs
-// in through its sign-in page and receives stock through the engine
-// console's Inventory page, which shop-stock then counts. The app serves
-// its pages alone: neither shop-stock's JSON API nor the engine's routes
-// answer on its address. Its build needs
+// generated entrypoint, over shop-db's Postgres: Ada signs in through its
+// sign-in page and books a delivery in on the product's stock page, which
+// shop-stock then counts. The app serves its pages alone: shop-stock's
+// JSON API does not answer on its address. Its build needs
 // the Topcoat extension, which the core binary refuses to build without,
 // so the test runs superschematic-topcoat.
 //
@@ -256,8 +258,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// Valkey container.
 	checkTheMemoryStore(ctx, t, env, products, token, n)
 
-	// shop-stock, on its Rust server (D57), over shop-db's Inventory, which
-	// the engine keeps (D70): anyone reads the stock, which holds none of
+	// shop-stock, on its Rust server (D57), over shop-db's Inventory table,
+	// whose Stock counts it (D70, D103): anyone reads the stock, which holds
+	// none of
 	// the new product, and is refused counting it; staff, who hold
 	// stock.write, count three on the shelf, low at two, and anyone sees
 	// it.
@@ -288,19 +291,24 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	// A collection point, which staff who hold calendar.manage open through
-	// shop-db's engine routes, which shop-orders' server mounts.
-	engineRoutes := env.servers["shop-orders"] + "/engine/shop-db/namespaces/shop-db/schemas"
-	counter := mustUUID(t, fmt.Sprintf("00000000-0000-4000-9000-%012d", n%1_000_000_000_000)).String()
-	if status, body := call(t, http.MethodPost, engineRoutes+"/CollectionPoint/instances", token,
-		fmt.Sprintf(`{"id": %q, "data": {"name": "Front counter"}}`, counter)); status != http.StatusCreated {
+	// shop-cart's route the build serves from the CollectionPoint table
+	// (D106); staff who hold refunds.approve alone are refused, below.
+	carts := env.servers["shop-cart"]
+	status, body := call(t, http.MethodPost, carts+"/api/collection-points", token, `{"name": "Front counter"}`)
+	var point struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &point) != nil || point.Data.ID == "" {
 		t.Fatalf("open a collection point: %d %s", status, body)
 	}
+	counter := point.Data.ID
 
-	// shop-cart, on Bun over the engine: staff, as a shopper would, open a
-	// cart, put two green teas in it, and choose the first pickup slot the
-	// counter has two days on.
-	carts := env.servers["shop-cart"]
-	status, body := call(t, http.MethodPost, carts+"/api/carts", token, "")
+	// shop-cart, on Bun over shop-db's tables: staff, as a shopper would,
+	// open a cart, put two green teas in it, and choose the first pickup
+	// slot the counter has two days on.
+	status, body = call(t, http.MethodPost, carts+"/api/carts", token, "")
 	var opened struct {
 		Data struct {
 			ID string `json:"id"`
@@ -367,9 +375,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 
 	// A support ticket (D74): shop-cart opens it in new, and its deriver
 	// TriageTickets, a Bun process of its own, fills in its category,
-	// priority and summary from shop-db's engine. The keyword rules are sure
-	// of this one, so Provenance accepts each field with no reviewer and the
-	// runner's Reactions rules assign the ticket.
+	// priority and summary from shop-db's Ticket table (D146). The keyword
+	// rules are sure of this one, so Provenance accepts each field with no
+	// reviewer and shop-cart's TicketReactions runs the rules that assign it.
 	status, body = call(t, http.MethodPost, carts+"/api/tickets", token,
 		`{"subject": "Charged twice for my order", "body": "My card was charged twice at checkout. Please refund one of them."}`)
 	var ticket struct {
@@ -403,8 +411,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// acmepay, the fake provider, at the address shop-orders' ACMEPAY_URL
 	// defaults to, with the environment's keys: staff pay on its page with
 	// a test token, it posts the capture to shop-orders' webhook, signed,
-	// and the runner's Reactions rule places the checkout, whose order
-	// shop-orders writes and FulfilOrders fulfils.
+	// which places the checkout, whose order shop-orders writes and
+	// FulfilOrders fulfils.
 	payment, err := orders.CheckoutsNamespace.PayCheckout(ctx, checkoutID)
 	if err != nil {
 		t.Fatalf("PayCheckout: %v", err)
@@ -457,21 +465,30 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	// A refund of one tea, which two members of staff who hold
-	// refunds.approve sign off through the engine's routes; SettlePayments,
-	// run with stack run, makes it at acmepay, and the runner issues it.
+	// refunds.approve sign off through shop-api's RefundActions routes;
+	// SettlePayments, run with stack run, makes it at acmepay and issues it.
 	refund, err := orders.CheckoutsNamespace.RequestRefund(ctx, checkoutID, orderstypes.RequestRefundInput{AmountCents: 450, Reason: "one arrived crushed"})
 	if err != nil || refund.Status != "requested" {
 		t.Fatalf("RequestRefund = %+v, %v", refund, err)
 	}
-	refundRoute := engineRoutes + "/Refund/instances/" + refund.Id.String()
 	for _, name := range []string{"Barbara Liskov", "Katherine Johnson"} {
-		approver := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], name, "refunds.approve")
-		if status, body := call(t, http.MethodPost, refundRoute+"/operations/signOff", approver, `{"state": "approved"}`); status != http.StatusOK {
-			t.Fatalf("%s's sign-off: %d %s", name, status, body)
+		approverToken := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], name, "refunds.approve")
+		approver, err := apisdk.New(apisdk.SDKConfig{BaseURL: env.servers["shop-api"], Auth: &apisdk.AuthConfig{Token: approverToken}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := approver.RefundNamespace.Approvals.SignOff(ctx, refund.Id.String(), apitypes.RefundApprovalsSignOffInput{State: apitypes.RefundApprovalsGate_Approved}); err != nil {
+			t.Fatalf("%s's sign-off: %v", name, err)
+		}
+		if name == "Barbara Liskov" {
+			// Holding refunds.approve alone, she opens no counter.
+			if status, body := call(t, http.MethodPost, carts+"/api/collection-points", approverToken, `{"name": "Back counter"}`); status != http.StatusForbidden {
+				t.Fatalf("%s opened a collection point: %d %s", name, status, body)
+			}
 		}
 		if name == "Katherine Johnson" {
-			if status, body := call(t, http.MethodPost, refundRoute+"/operations/transition", approver, `{"to": "approved"}`); status != http.StatusOK {
-				t.Fatalf("approve the refund: %d %s", status, body)
+			if _, err := approver.RefundNamespace.Status.Transition(ctx, refund.Id.String(), apitypes.RefundStatusTransitionInput{To: apitypes.RefundStatusState_Approved}); err != nil {
+				t.Fatalf("approve the refund: %v", err)
 			}
 		}
 	}
@@ -1188,9 +1205,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	// shop-stock's Backoffice (D78), on its generated entrypoint over
-	// shop-db's Postgres and engine: Ada signs in through its sign-in page,
-	// then receives a delivery of the product through the engine console's
-	// Inventory page, which shop-stock counts.
+	// shop-db's Postgres: Ada signs in through its sign-in page, then books
+	// a delivery of the product in on its stock page, which shop-stock
+	// counts.
 	receiveThroughTheBackoffice(ctx, t, env.apps[backoffice], anyone, ada, product.Id)
 
 	// Ctrl-C stops the servers, then removes the containers and their data:
@@ -1214,8 +1231,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	otherRoot := otherOutputRoot(t, outputRoot)
 	again := startStackDev(t, binary, shopStack, "--out", otherRoot, "--build-sites")
 	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-cart", "shop-storefront")
-	if status := get(t, againEnv.apps[backoffice]+"/stock/engine"); status != http.StatusUnauthorized {
-		t.Fatalf("the Backoffice built in %s answered GET /stock/engine %d, want 401", otherRoot, status)
+	if status := get(t, againEnv.apps[backoffice]+"/stock/stock"); status != http.StatusOK {
+		t.Fatalf("the Backoffice built in %s answered GET /stock/stock %d, want 200", otherRoot, status)
 	}
 	for mirror, implementation := range map[string]string{
 		filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"):      filepath.Join("..", "rust-impl", "shop-stock", "src", "lib.rs"),
@@ -1786,17 +1803,17 @@ func hotReloadVersion(t *testing.T, site string) string {
 
 // receiveThroughTheBackoffice receives a delivery of the product in
 // shop-stock's Backoffice at app (D78), as a member of staff would in a
-// browser: signed out, the product's Inventory page in the engine console
-// asks for a caller, and neither shop-stock's JSON API nor the engine's
-// routes are on the app's address; user signs in through the app's
-// sign-in page, which
-// sets the session cookie and goes on to the page; the page shows the
-// Stock panel, whose receiveStock form takes five, 303 back to the page,
-// which lists the delivery; and shop-stock, through stock, counts five
-// more on hand.
+// browser: signed out, the product's stock page offers no form to book a
+// delivery in, and its form's post is refused, and shop-stock's JSON API
+// is not on the app's address; user signs in through the app's sign-in
+// page, which sets the session cookie and goes on to the page; the page
+// shows the form, which books five in, 303 back to the page; and
+// shop-stock, through stock, counts five more on hand, a movement of the
+// Inventory's Stock.
 func receiveThroughTheBackoffice(ctx context.Context, t *testing.T, app string, stock *stocksdk.ShopStockSDK, user stackUser, product apitypes.IdentityUUID) {
 	t.Helper()
-	page := "/stock/engine/Inventory/" + product.String()
+	page := "/stock/stock/" + product.String()
+	receive := page + "/receipts"
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	send := func(method, path, cookie string, form url.Values) (int, http.Header, string) {
 		t.Helper()
@@ -1828,17 +1845,19 @@ func receiveThroughTheBackoffice(ctx context.Context, t *testing.T, app string, 
 		return response.StatusCode, response.Header, string(answer)
 	}
 
-	if status, _, body := send(http.MethodGet, page, "", nil); status != http.StatusUnauthorized {
-		t.Fatalf("the Backoffice's %s, signed out: %d %s", page, status, body)
-	}
-	for _, path := range []string{"/api/stock", "/engine/namespaces/shop-db/schemas/Inventory/instances"} {
-		if status, _, body := send(http.MethodGet, path, "", nil); status != http.StatusNotFound {
-			t.Fatalf("the Backoffice answered GET %s %d, want 404: it serves its pages alone %s", path, status, body)
-		}
+	form := `action="` + receive + `"`
+	if status, _, body := send(http.MethodGet, page, "", nil); status != http.StatusOK || strings.Contains(body, form) {
+		t.Fatalf("the Backoffice's %s, signed out: %d %s; want the stock with no form to book a delivery in", page, status, body)
 	}
 	before, err := stock.StockNamespace.GetStock(ctx, product.String())
 	if err != nil {
 		t.Fatalf("GetStock: %v", err)
+	}
+	if status, _, body := send(http.MethodPost, receive, "", url.Values{"quantity": {"5"}, "reason": {"signed out"}}); status != http.StatusUnauthorized {
+		t.Fatalf("the Backoffice booked a delivery in, signed out: %d %s", status, body)
+	}
+	if status, _, body := send(http.MethodGet, "/api/stock", "", nil); status != http.StatusNotFound {
+		t.Fatalf("the Backoffice answered GET /api/stock %d, want 404: it serves its pages alone %s", status, body)
 	}
 	status, header, body := send(http.MethodPost, "/stock/sign-in", "", url.Values{"login": {user.login}, "password": {user.password}, "next": {page}})
 	if status != http.StatusSeeOther || header.Get("Location") != page {
@@ -1855,8 +1874,7 @@ func receiveThroughTheBackoffice(ctx context.Context, t *testing.T, app string, 
 	}
 
 	status, _, body = send(http.MethodGet, page, cookie, nil)
-	receive := page + "/operations/receiveStock"
-	if status != http.StatusOK || !strings.Contains(body, `data-behavior="Stock"`) || !strings.Contains(body, `action="`+receive+`"`) {
+	if status != http.StatusOK || !strings.Contains(body, form) {
 		t.Fatalf("the Backoffice's %s: %d %s", page, status, body)
 	}
 	reason := fmt.Sprintf("Delivery through the Backoffice %d", time.Now().UnixNano())
@@ -1864,7 +1882,7 @@ func receiveThroughTheBackoffice(ctx context.Context, t *testing.T, app string, 
 	if status != http.StatusSeeOther || header.Get("Location") != page {
 		t.Fatalf("receive stock through the Backoffice: %d to %q %s", status, header.Get("Location"), body)
 	}
-	if status, _, body = send(http.MethodGet, page, cookie, nil); status != http.StatusOK || !strings.Contains(body, reason) {
+	if status, _, body = send(http.MethodGet, page, cookie, nil); status != http.StatusOK {
 		t.Fatalf("the Backoffice's %s after the delivery: %d %s", page, status, body)
 	}
 	after, err := stock.StockNamespace.GetStock(ctx, product.String())
@@ -2030,7 +2048,7 @@ func startAcmepay(t *testing.T) *acmepayRun {
 }
 
 // waitForCheckout waits until the checkout is placed and its order
-// written, as the runner's Reactions rule places it after the capture,
+// written, as shop-orders' webhook places it after the capture,
 // and returns it, or fails the test after within.
 func waitForCheckout(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrdersSDK, id string, within time.Duration) orderstypes.CheckoutView {
 	t.Helper()

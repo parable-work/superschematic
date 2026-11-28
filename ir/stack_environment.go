@@ -141,10 +141,6 @@ type ResolvedDeployable struct {
 	// every other kind (D53).
 	Worker *ResolvedWorker `json:"worker,omitempty"`
 
-	// Runner is the engine database an engine's runner runs over, and the
-	// API whose language it is written in; nil for every other kind (D58).
-	Runner *ResolvedRunner `json:"runner,omitempty"`
-
 	// Deriver is what a deriver fills and how many of it run; nil for
 	// every other kind (D74).
 	Deriver *ResolvedDeriver `json:"deriver,omitempty"`
@@ -406,34 +402,18 @@ type ResolvedWake struct {
 	ResourceName any    `json:"resourceName,omitempty"`
 }
 
-// ResolvedRunner is what an engine's runner runs over (D58): the engine
-// database, a DB service whose types compose behaviors, and the API, the
-// first by name that connects to it, whose language the runner is written
-// in, with the engine archive that API's servers link.
-type ResolvedRunner struct {
-	// Database is the DB service; API is the API service.
-	Database string `json:"database"`
-	API      string `json:"api"`
-
-	// Instances is how many instances the environment runs: one, which
-	// runs while it holds the runner's lock, or zero when its settings
-	// turn the runner off.
-	Instances int `json:"instances"`
-}
-
-// ResolvedDeriver is a deriver's run in one environment (D74, D146): the
-// member of its API's Derivers that answers its fields, the engine types
-// or the tables whose Derived fields it fills, and whether it runs.
+// ResolvedDeriver is a deriver's run in one environment (D146): the member
+// of its API's Derivers that answers its fields, the tables whose Derived
+// fields it fills, and whether it runs.
 type ResolvedDeriver struct {
 	// API is the API service that declares the deriver; Name is its
 	// `@deriver` class's name.
 	API  string `json:"api"`
 	Name string `json:"name"`
 
-	// Database is the database its API connects to, and Schemas the types
-	// of it whose Derived fields it fills, engine types or tables, as the
-	// decorator names them, or every type that composes Derived when it
-	// names none.
+	// Database is the database its API connects to, and Schemas the tables
+	// of it whose Derived fields it fills, as the decorator names them, or
+	// every table that implements Derived when it names none.
 	Database string   `json:"database"`
 	Schemas  []string `json:"schemas,omitempty"`
 

@@ -21,11 +21,13 @@ import (
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
-// The app fixture (D78): desk-db, the engine database; desk-app-api, a
-// Rust API over it whose users are the user model's and whose operations
-// have a service clause, declaring the app Backoffice; and desk-app-stack,
-// which deploys it on stacktest's fake target and exposes the app.
+// The app fixture (D78), at appRoot: desk-db, a database with the user
+// model's tables; desk-app-api, a Rust API over it whose users are the
+// user model's and whose operations have a service clause, declaring the
+// app Backoffice; and desk-app-stack, which deploys it on stacktest's fake
+// target and exposes the app.
 const (
+	appRoot  = "testdata/apps"
 	appStack = "desk-app-stack"
 	appAPI   = "desk-app-api"
 	appName  = "desk-app-api-backoffice"
@@ -44,7 +46,7 @@ func loadAppFixture(t *testing.T) fixture {
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
 	for _, name := range appOrder {
-		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(engineRoot, name), loader.WithRegistry(reg))
+		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(appRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
 		}
@@ -56,9 +58,8 @@ func loadAppFixture(t *testing.T) fixture {
 // TestAppEntrypointGolden: the API's crate declares BackofficeParts in
 // apps.rs; the stack's build writes the app's entrypoint beside the
 // server's, which builds desk-app-api's Deps, identity service, service
-// authenticator and Implementations as the server does, opens desk-db's
-// engine and deploys its document, waits for it to open, and calls the
-// app crate's serve with the parts; it scaffolds the missing app crate at
+// authenticator and Implementations as the server does and calls the app
+// crate's serve with the parts; it scaffolds the missing app crate at
 // apps/backoffice, whose serve answers 501, and mirrors it into the output root
 // (D78). Regenerate with:
 //
@@ -69,7 +70,7 @@ func TestAppEntrypointGolden(t *testing.T) {
 	f.build(t, repoRoot, rustFakePaths(repoRoot), appOrder...)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	files := map[string]string{}
-	for _, file := range []string{servergen.RustManifestFile, servergen.RustMainFile, servergen.RustEngineFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
+	for _, file := range []string{servergen.RustManifestFile, servergen.RustMainFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 		files[filepath.Join("server", appStack, appName, filepath.FromSlash(file))] = filepath.Join(servergen.ServerDir(out, appStack, appName), filepath.FromSlash(file))
 	}
 	for _, file := range []string{"Cargo.toml", "src/lib.rs", "src/apps.rs"} {
@@ -198,7 +199,7 @@ func TestAppEntrypointCompiles(t *testing.T) {
 	target := rustTargetDir(t)
 	cargoCommand(t, cargo, out, target, "clippy", "--locked", "--workspace", "--quiet", "--", "-D", "warnings")
 	if rustfmt, err := exec.LookPath("rustfmt"); err == nil {
-		for _, file := range []string{servergen.RustMainFile, servergen.RustEngineFile} {
+		for _, file := range []string{servergen.RustMainFile} {
 			source := filepath.Join(servergen.ServerDir(out, appStack, appName), filepath.FromSlash(file))
 			if diff, err := exec.Command(rustfmt, "--edition", "2021", "--check", source).CombinedOutput(); err != nil {
 				t.Errorf("rustfmt lays out %s otherwise: %v\n%s", source, err, diff)

@@ -58,7 +58,7 @@ func TestSeatsFixturesLoad(t *testing.T) {
 		"Sandbox": {"status:Workflow", "observed:Reconcile"},
 	} {
 		td := db.Types[name]
-		if td == nil || td.IsEngineType() || !td.Optimistic {
+		if td == nil || len(td.TypeBehaviors()) > 0 || !td.Optimistic {
 			t.Fatalf("%s = %s", name, marshal(t, td))
 		}
 		if got := usesOf(td); !slices.Equal(got, want) {
@@ -282,7 +282,7 @@ func TestSeatsFromTheDataForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, implemented := range map[string]int{"Problem": 2, "Sandbox": 0} {
-		if got := schema.Types[name]; got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != implemented || got.IsEngineType() {
+		if got := schema.Types[name]; got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != implemented || len(got.TypeBehaviors()) > 0 {
 			t.Errorf("%s = %s", name, marshal(t, got))
 		}
 	}

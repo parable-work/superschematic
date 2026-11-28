@@ -31,8 +31,8 @@ func TestTimersFixturesExpand(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket := db.Types["Ticket"]
-	if !ticket.Optimistic || len(ticket.ImplementsBehaviors()) != 1 || len(ticket.FieldBehaviors()) != 1 || ticket.IsEngineType() {
-		t.Errorf("Ticket = optimistic %v, implements %v, fields %v, engine %v", ticket.Optimistic, ticket.ImplementsBehaviors(), ticket.FieldBehaviors(), ticket.IsEngineType())
+	if !ticket.Optimistic || len(ticket.ImplementsBehaviors()) != 1 || len(ticket.FieldBehaviors()) != 1 || len(ticket.TypeBehaviors()) > 0 {
+		t.Errorf("Ticket = optimistic %v, implements %v, fields %v, @behavior %v", ticket.Optimistic, ticket.ImplementsBehaviors(), ticket.FieldBehaviors(), len(ticket.TypeBehaviors()) > 0)
 	}
 	sub := db.Types["TicketTimersDeadlines"]
 	if sub == nil || sub.Origin != ir.OriginBehavior || sub.Role != ir.RoleDBTable ||

@@ -26,10 +26,14 @@ function summaryOf(engine: Engine, schema: string, behavior: string): string {
 
 const codes = (guidance: ToolGuidance) => guidance.errors.map((error) => `${error.description.split(':')[0]}.${error.code}`);
 
-/** fixtureType reads one type's file of fixture-workqueue-json as a schema of its own. */
+/**
+ * fixtureType reads one type's file of fixture-workqueue-json as a schema of
+ * its own: the engine's copy (runtime/engine/testdata/documents), since the
+ * loader refuses Queue and Links, which D103 folded into schema features.
+ */
 function fixtureType(name: string, file: string): Record<string, unknown> {
   const type = JSON.parse(
-    readFileSync(new URL(`../../../../internal/loader/testdata/services/fixture-workqueue-json/src/${file}.schema.json`, import.meta.url), 'utf8')
+    readFileSync(new URL(`../../../engine/testdata/documents/fixture-workqueue-json/${file}.schema.json`, import.meta.url), 'utf8')
   ) as { name: string };
   return { kind: 'General', name, types: { [type.name]: type } };
 }

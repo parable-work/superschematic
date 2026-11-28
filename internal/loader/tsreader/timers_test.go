@@ -39,8 +39,8 @@ export abstract class Visit implements Timers<Visit, typeof reminders> {
 	if !reflect.DeepEqual(ticket.Behaviors, want) {
 		t.Fatalf("Ticket's behaviors = %s, want %s", mustJSON(t, ticket.Behaviors), mustJSON(t, want))
 	}
-	if ticket.RawHeritage != nil || len(ticket.Implements) != 0 || ticket.IsEngineType() || ticket.Role != ir.RoleDBTable {
-		t.Errorf("Ticket = heritage %+v, traits %+v, engine %v, role %s", ticket.RawHeritage, ticket.Implements, ticket.IsEngineType(), ticket.Role)
+	if ticket.RawHeritage != nil || len(ticket.Implements) != 0 || len(ticket.TypeBehaviors()) > 0 || ticket.Role != ir.RoleDBTable {
+		t.Errorf("Ticket = heritage %+v, traits %+v, @behavior %v, role %s", ticket.RawHeritage, ticket.Implements, len(ticket.TypeBehaviors()) > 0, ticket.Role)
 	}
 	visit := schema.Types["Visit"]
 	if want := canonicalConfig(t, `{"deadlines": {"remind": {"start": {"field": "visitAt"}, "afterMs": -60000}}}`); len(visit.Behaviors) != 1 || string(visit.Behaviors[0].Config) != string(want) {

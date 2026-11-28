@@ -37,8 +37,15 @@
 //!   names as its scope, copied into the index row.
 //!
 //! Embeddings re-rank through a model provider that embeds (D159,
-//! `ModelProvider::embed`): [`search_embeddings_of`]. Postgres alone: the
-//! loader refuses `@searchable` on SQLite for every language.
+//! `ModelProvider::embed`): `search_embeddings_of`, on Postgres alone.
+//!
+//! On a SQLite file ([`sqlite`], D186, #615) the index is the same table,
+//! its audience a JSON array (D182), and its words an FTS5 table beside it
+//! that the index table's triggers keep: a search matches each word as a
+//! quoted FTS5 phrase and ranks by bm25 with the weights Postgres gives
+//! the title, the body, the conversation and the files, as the TypeScript
+//! `searchOnSQLite` and the Go `crosstable` do. Embeddings are refused
+//! there.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -110,6 +117,10 @@ pub struct SearchableDefinition {
     pub comments: Option<SearchComments>,
     #[serde(default)]
     pub files: Option<SearchFiles>,
+    /// The FTS5 table the index's words are in, on SQLite (D186); none on
+    /// Postgres, whose `document` weighs them.
+    #[serde(default)]
+    pub fts: Option<String>,
 }
 
 /// A search.
@@ -268,7 +279,7 @@ pub fn search_words(q: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 fn whole(value: Option<i64>, fallback: i64, min: i64, max: i64, what: &str) -> Result<i64, Error> {
     match value {
         None => Ok(fallback),
@@ -300,9 +311,9 @@ fn unit(vector: &[f64]) -> Result<Vec<f64>, Error> {
     })
 }
 
-/// A snippet's parts, from `ts_headline`'s text with the marks around each
-/// match.
-#[cfg(feature = "postgres")]
+/// A snippet's parts, from `ts_headline`'s or FTS5's `snippet` text with
+/// the marks around each match.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 fn snippet_parts(text: &str) -> Vec<SnippetPart> {
     let mut parts = Vec::new();
     let mut rest = text;
@@ -339,7 +350,7 @@ fn snippet_parts(text: &str) -> Vec<SnippetPart> {
 
 /// An index row's text: its marks made spaces, at most
 /// [`MAX_INDEXED_TEXT`] characters, none when it is blank.
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 fn clean(text: Option<&str>) -> Option<String> {
     let text = text?;
     let out: String = text
@@ -350,7 +361,7 @@ fn clean(text: Option<&str>) -> Option<String> {
     (!out.trim().is_empty()).then_some(out)
 }
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 fn hex_sha256(text: &str) -> String {
     ring::digest::digest(&ring::digest::SHA256, text.as_bytes())
         .as_ref()
@@ -421,6 +432,121 @@ pub fn search_tool_request(args: &Map<String, Value>) -> Result<SearchRequest, E
     })
 }
 
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use shared::*;
+
+/// Search across tables on a SQLite file (D186, #615).
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod shared {
+    use http::request::Parts;
+    use serde_json::Value;
+
+    use super::{SearchRequest, SearchableDefinition};
+    use crate::orm::Definition;
+    use crate::ApiError;
+
+    /// The `@searchable` tables of `definition`, by type name, in the
+    /// definition's order.
+    pub fn search_sources_of(definition: &Definition) -> Vec<(&str, &SearchableDefinition)> {
+        definition
+            .tables
+            .iter()
+            .filter_map(|t| t.searchable.as_ref().map(|s| (t.name.as_str(), s)))
+            .collect()
+    }
+
+    pub(super) fn text_of(value: &Value) -> String {
+        match value {
+            Value::String(text) => text.clone(),
+            Value::Null => String::new(),
+            other => other.to_string(),
+        }
+    }
+
+    /// A qualified column's own name.
+    pub(super) fn quoted_of(column: &str) -> &str {
+        column.rsplit('.').next().unwrap_or(column)
+    }
+
+    fn decode(text: &str) -> String {
+        let bytes = text.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'+' => out.push(b' '),
+                b'%' if i + 2 < bytes.len() => {
+                    match text
+                        .get(i + 1..i + 3)
+                        .and_then(|h| u8::from_str_radix(h, 16).ok())
+                    {
+                        Some(byte) => {
+                            out.push(byte);
+                            i += 2;
+                        }
+                        None => out.push(b'%'),
+                    }
+                }
+                other => out.push(other),
+            }
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    /// The search a request of the route asks for:
+    /// `?q&tables&scope&limit&offset`, a list comma-separated or
+    /// repeated; a 400 for a number it cannot read.
+    pub(super) fn request_of(parts: &Parts) -> Result<SearchRequest, ApiError> {
+        let pairs: Vec<(String, String)> = parts
+            .uri
+            .query()
+            .unwrap_or_default()
+            .split('&')
+            .filter(|pair| !pair.is_empty())
+            .map(|pair| {
+                let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+                (decode(name), decode(value))
+            })
+            .collect();
+        let list = |name: &str| -> Vec<String> {
+            pairs
+                .iter()
+                .filter(|(n, _)| n == name)
+                .flat_map(|(_, v)| v.split(',').map(str::to_owned).collect::<Vec<_>>())
+                .filter(|v| !v.is_empty())
+                .collect()
+        };
+        let number = |name: &str| -> Result<Option<i64>, ApiError> {
+            let Some((_, value)) = pairs.iter().find(|(n, _)| n == name) else {
+                return Ok(None);
+            };
+            value.parse::<i64>().map(Some).map_err(|_| {
+                ApiError::bad_request(format!(
+                    "search_tables: {name} is a whole number, not {value}"
+                ))
+            })
+        };
+        let tables = list("tables");
+        let scope = list("scope");
+        Ok(SearchRequest {
+            q: pairs
+                .iter()
+                .find(|(n, _)| n == "q")
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default(),
+            tables: (!tables.is_empty()).then_some(tables),
+            scope: (!scope.is_empty()).then_some(scope),
+            limit: number("limit")?,
+            offset: number("offset")?,
+            vector: None,
+        })
+    }
+}
+
 #[cfg(feature = "postgres")]
 pub use pg::*;
 
@@ -440,20 +566,13 @@ mod pg {
     use super::super::{
         audience_conditions, AccessCaller, Audience, Bound, Definition, Error, Marks,
     };
+    use super::shared::{quoted_of, request_of, text_of};
     use super::*;
     use crate::auth::{Authenticator, Principal};
     use crate::providers::{ModelEmbedRequest, ModelProvider};
     use crate::response::error_response;
     use crate::uuid62::{parse_uuid, uuid_to_base62};
     use crate::ApiError;
-
-    fn text_of(value: &Value) -> String {
-        match value {
-            Value::String(text) => text.clone(),
-            Value::Null => String::new(),
-            other => other.to_string(),
-        }
-    }
 
     fn bound(value: Value) -> Bound {
         Bound {
@@ -466,16 +585,6 @@ mod pg {
     fn param(args: &mut Vec<Bound>, value: Value) -> String {
         args.push(bound(value));
         format!("${}", args.len())
-    }
-
-    /// The `@searchable` tables of `definition`, by type name, in the
-    /// definition's order.
-    pub fn search_sources_of(definition: &Definition) -> Vec<(&str, &SearchableDefinition)> {
-        definition
-            .tables
-            .iter()
-            .filter_map(|t| t.searchable.as_ref().map(|s| (t.name.as_str(), s)))
-            .collect()
     }
 
     /// Searches every `@searchable` table as `principal` (D155): the rows
@@ -740,10 +849,6 @@ mod pg {
             more,
             reranked,
         })
-    }
-
-    fn quoted_of(column: &str) -> &str {
-        column.rsplit('.').next().unwrap_or(column)
     }
 
     /// Builds the index row of the row a `@searchable` declaration's queue
@@ -1096,32 +1201,6 @@ mod pg {
         }
     }
 
-    fn decode(text: &str) -> String {
-        let bytes = text.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'+' => out.push(b' '),
-                b'%' if i + 2 < bytes.len() => {
-                    match text
-                        .get(i + 1..i + 3)
-                        .and_then(|h| u8::from_str_radix(h, 16).ok())
-                    {
-                        Some(byte) => {
-                            out.push(byte);
-                            i += 2;
-                        }
-                        None => out.push(b'%'),
-                    }
-                }
-                other => out.push(other),
-            }
-            i += 1;
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    }
-
     async fn answer(routes: &SearchRoutes, request: Request) -> Result<Response, ApiError> {
         let (parts, _) = request.into_parts();
         if parts.method != Method::GET {
@@ -1130,49 +1209,7 @@ mod pg {
         let Some(principal) = routes.authenticator.authenticate(&parts).await? else {
             return Err(ApiError::unauthorized("Authentication required"));
         };
-        let pairs: Vec<(String, String)> = parts
-            .uri
-            .query()
-            .unwrap_or_default()
-            .split('&')
-            .filter(|pair| !pair.is_empty())
-            .map(|pair| {
-                let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-                (decode(name), decode(value))
-            })
-            .collect();
-        let list = |name: &str| -> Vec<String> {
-            pairs
-                .iter()
-                .filter(|(n, _)| n == name)
-                .flat_map(|(_, v)| v.split(',').map(str::to_owned).collect::<Vec<_>>())
-                .filter(|v| !v.is_empty())
-                .collect()
-        };
-        let number = |name: &str| -> Result<Option<i64>, ApiError> {
-            let Some((_, value)) = pairs.iter().find(|(n, _)| n == name) else {
-                return Ok(None);
-            };
-            value.parse::<i64>().map(Some).map_err(|_| {
-                ApiError::bad_request(format!(
-                    "search_tables: {name} is a whole number, not {value}"
-                ))
-            })
-        };
-        let tables = list("tables");
-        let scope = list("scope");
-        let request = SearchRequest {
-            q: pairs
-                .iter()
-                .find(|(n, _)| n == "q")
-                .map(|(_, v)| v.clone())
-                .unwrap_or_default(),
-            tables: (!tables.is_empty()).then_some(tables),
-            scope: (!scope.is_empty()).then_some(scope),
-            limit: number("limit")?,
-            offset: number("offset")?,
-            vector: None,
-        };
+        let request = request_of(&parts)?;
         let definition = routes.tables.definition()?;
         let client = routes.tables.pool().get().await.map_err(|err| {
             ApiError::service_unavailable(format!("the database is unreachable: {err}"))

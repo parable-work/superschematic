@@ -237,8 +237,7 @@ func computeToolchainFingerprint() string {
 // InputHasher computes per-service input hashes. The expensive shared parts
 // (toolchain digest, per-service tree digests) are computed once at
 // construction; Recompute re-reads only the per-service volatile inputs (the
-// authoring-import depfile and the files it lists), which is what changes
-// during a build.
+// depfiles and the files they list), which is what changes during a build.
 type InputHasher struct {
 	base           string
 	repoRoot       string
@@ -251,6 +250,12 @@ type InputHasher struct {
 	// services are the discovered services by name, whose configs the
 	// digest of a schema reference follows (references.go).
 	services map[string]buildplan.Service
+
+	// cacheRoot is the cache HashAll reads a service's depfiles from when
+	// dist holds no build of it (depfiles.go), "" for none.
+	cacheRoot string
+	// cachedDepfiles are the depfiles read from the cache, by service.
+	cachedDepfiles map[string]map[string][]byte
 }
 
 // NewInputHasher digests the shared inputs for the given services. names is
@@ -284,7 +289,22 @@ func NewInputHasher(services []buildplan.Service, repoRoot string, names naming.
 		serviceDirs[service.Name] = service.Dir
 		byName[service.Name] = service
 	}
-	return &InputHasher{base: base, repoRoot: repoRoot, serviceDigests: serviceDigests, serviceDirs: serviceDirs, services: byName}
+	return &InputHasher{base: base, repoRoot: repoRoot, serviceDigests: serviceDigests, serviceDirs: serviceDirs, services: byName, cachedDepfiles: map[string]map[string][]byte{}}
+}
+
+// WithCache lets HashAll read the depfiles of a service that dist holds no
+// build of from the newest entry under cacheRoot built from the same
+// sources (depfiles.go), so a fresh checkout or a removed dist restores a
+// service whose key covers files a depfile lists. "" reads dist alone.
+func (ih *InputHasher) WithCache(cacheRoot string) *InputHasher {
+	ih.cacheRoot = cacheRoot
+	return ih
+}
+
+// Tree is the digest of a service's own directory, which a cache entry
+// records beside the depfiles its build wrote (StoreEntry).
+func (ih *InputHasher) Tree(name string) string {
+	return ih.serviceDigests[name]
 }
 
 // HashAll computes hashes for services that TopologicalSort ordered: each
@@ -298,7 +318,7 @@ func NewInputHasher(services []buildplan.Service, repoRoot string, names naming.
 func (ih *InputHasher) HashAll(services []buildplan.Service) map[string]string {
 	ih.surfaces = make(map[string]string, len(services))
 	for _, service := range services {
-		ih.surfaces[service.Name] = ih.surface(service)
+		ih.surfaces[service.Name] = ih.surface(service, true)
 	}
 	hashes := make(map[string]string, len(services))
 	for _, service := range services {
@@ -310,15 +330,17 @@ func (ih *InputHasher) HashAll(services []buildplan.Service) map[string]string {
 // Recompute hashes one service again after HashAll. Called after a build
 // so the freshly written authoring-import and schema-reference depfiles are
 // part of the stored key (see authoring.go for why storing under the
-// pre-build hash would be unsound).
+// pre-build hash would be unsound). It reads them from dist alone, where
+// the build wrote them.
 func (ih *InputHasher) Recompute(service buildplan.Service) string {
-	return ih.withCalls(service, ih.surface(service))
+	return ih.withCalls(service, ih.surface(service, false))
 }
 
 // surface hashes a service's own inputs, the surfaces of its build
 // dependencies (its authDb and declared dependencies) and the services its
-// schema's decorator arguments reference.
-func (ih *InputHasher) surface(service buildplan.Service) string {
+// schema's decorator arguments reference. fromCache lets it read the
+// depfiles of a service dist holds no build of from the cache.
+func (ih *InputHasher) surface(service buildplan.Service, fromCache bool) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(ih.base))
 	_, _ = h.Write([]byte("|service:" + ih.serviceDigests[service.Name]))
@@ -340,7 +362,8 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 		}
 		_, _ = fmt.Fprintf(h, "|authdb:%s:%s", service.Config.AuthDB, authHash)
 	}
-	for _, rel := range ReadAuthoringImports(ih.repoRoot, service.Name) {
+	files := ih.depfiles(service.Name, fromCache)
+	for _, rel := range parseAuthoringImports(files["authoring-imports"]) {
 		_, _ = fmt.Fprintf(h, "|authoring:%s:%s", rel, fileHashOrMissing(filepath.Join(ih.repoRoot, filepath.FromSlash(rel))))
 	}
 	var deps []string
@@ -357,7 +380,7 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 	}
 	// The services the schema's decorator arguments name, from the depfile
 	// its last build wrote (references.go).
-	ih.writeReferences(h, service.Name)
+	ih.writeReferences(h, parseSchemaReferences(files["schema-references"]))
 	// A stack resolves each local environment for the checkout it builds
 	// in, whose containers and ports environment.json then names (D30,
 	// amended), so a stack's entry is its checkout's alone.
@@ -367,7 +390,7 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 		// whole services root, which the apps of every stack choose
 		// (D78), so its entry is the other stacks' too.
 		if _, ok := service.Config.Outputs["ci"]; ok {
-			ih.writeOtherStacks(h, service.Name)
+			ih.writeOtherStacks(h, service.Name, fromCache)
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -376,7 +399,7 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 // writeOtherStacks adds to a hash the sources of every stack but name and
 // of the services each one's schema references, the services it deploys
 // among them, with all they reach through their configs.
-func (ih *InputHasher) writeOtherStacks(h io.Writer, name string) {
+func (ih *InputHasher) writeOtherStacks(h io.Writer, name string, fromCache bool) {
 	var stacks []string
 	for other, service := range ih.services {
 		if other != name && service.Config != nil && service.Config.Kind == ir.SchemaKindStack {
@@ -386,7 +409,7 @@ func (ih *InputHasher) writeOtherStacks(h io.Writer, name string) {
 	sort.Strings(stacks)
 	for _, other := range stacks {
 		_, _ = fmt.Fprintf(h, "|stack:%s:%s", other, ih.serviceDigests[other])
-		for _, ref := range ReadSchemaReferences(ih.repoRoot, other).References {
+		for _, ref := range parseSchemaReferences(ih.depfiles(other, fromCache)["schema-references"]).References {
 			_, _ = fmt.Fprintf(h, "|stack-ref:%s:%s:%s", other, ref, ih.sourcesDigest(ref))
 		}
 	}
@@ -485,6 +508,11 @@ type manifest struct {
 	InputHash string           `json:"input_hash"`
 	Outputs   []manifestOutput `json:"outputs"`
 	Created   int64            `json:"created"`
+	// Tree is the digest of the service's own directory its build read,
+	// and Depfiles the depfiles it kept (depfiles.go). An entry with no
+	// tree keeps none.
+	Tree     string   `json:"tree,omitempty"`
+	Depfiles []string `json:"depfiles,omitempty"`
 }
 
 type manifestOutput struct {
@@ -494,7 +522,11 @@ type manifestOutput struct {
 }
 
 // StoreEntry atomically stores existing output dirs under the cache key.
-func StoreEntry(cacheRoot, kind, name, inputHash, repoRoot string, outputRels []string) error {
+// tree is the digest of the service's own directory (InputHasher.Tree):
+// the entry records it, with the depfiles the build left under the schemas
+// root's dist, so a build whose dist holds none finds them (depfiles.go).
+// "" keeps no depfiles.
+func StoreEntry(cacheRoot, kind, name, inputHash, repoRoot string, outputRels []string, tree string) error {
 	final := entryDir(cacheRoot, kind, name, inputHash)
 	if FindEntry(cacheRoot, kind, name, inputHash) != "" {
 		return nil
@@ -520,12 +552,22 @@ func StoreEntry(cacheRoot, kind, name, inputHash, repoRoot string, outputRels []
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
+	var kept []string
+	if tree != "" {
+		var err error
+		if kept, err = stageDepfiles(staging, repoRoot, name); err != nil {
+			_ = os.RemoveAll(staging)
+			return err
+		}
+	}
 	data, err := json.MarshalIndent(manifest{
 		Kind:      kind,
 		Name:      name,
 		InputHash: inputHash,
 		Outputs:   outputs,
 		Created:   time.Now().Unix(),
+		Tree:      tree,
+		Depfiles:  kept,
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -552,7 +594,8 @@ func shortHash(inputHash string) string {
 	return inputHash[:16]
 }
 
-// RestoreEntry restores a cache entry into repoRoot.
+// RestoreEntry restores a cache entry into repoRoot, with the depfiles it
+// kept.
 func RestoreEntry(entry, repoRoot string) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(entry, "manifest.json"))
 	if err != nil {
@@ -576,6 +619,9 @@ func RestoreEntry(entry, repoRoot string) ([]string, error) {
 			return nil, fmt.Errorf("cache entry %s is damaged: %s restored %d files, expected %d", filepath.Base(entry), out.Rel, count, out.Files)
 		}
 		restored = append(restored, out.Rel)
+	}
+	if err := restoreDepfiles(entry, repoRoot, m); err != nil {
+		return nil, err
 	}
 	return restored, nil
 }

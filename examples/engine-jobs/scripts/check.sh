@@ -1,44 +1,30 @@
 #!/usr/bin/env bash
-# Build the engine, the work-queue package and development mode's handler
-# from this checkout, link them into the example, type-check the example and
-# run its end-to-end tests on Node.js and on Bun.
+# Build development mode's handler from this checkout, link it into the
+# example, type-check the example and run its end-to-end test on Node.js
+# and on Bun.
 #
 #   examples/engine-jobs/scripts/check.sh
 #
-# Needs the superscalar checkout scripts/superscalar-dep.sh stands up (make
-# setup runs it), bun, Node.js 24, and cargo, which builds the engine's
-# Node-API addon (scripts/engine-napi.sh) when the engine's native/ holds
-# none: the Rust engine (D58), which @superschematic/engine loads. An addon
-# already there is used as it is, the test addon CI builds included. cargo
-# and the wasm32-unknown-unknown target build development mode's handler
-# (runtime/rules-handler/typescript), the behaviors' core for WebAssembly.
-# Installs the runtimes' pinned dependencies from the npm registry (bun
-# install --frozen-lockfile).
+# Needs bun, Node.js 24, and cargo with the wasm32-unknown-unknown target,
+# which build development mode's handler (runtime/rules-handler/typescript),
+# the behaviors' core for WebAssembly. Installs the handler's pinned
+# dependencies from the npm registry (bun install --frozen-lockfile).
 #
-# The test test/jobs.test.ts serves the example on a free port with
-# @hono/node-server, under each runtime, on a clock it moves, and drives it
-# over HTTP with the example's worker. test/jobs.dev.test.ts serves the
-# schemas of schemas/dev on development mode (D117), the handler over a
-# SQLite database in memory on a clock it moves, and drives its routes the
-# same way, a claim being a read and Lease's acquire (D104) and a batch's
-# jobs stamped by Blueprint on the core (D149). The CI typescript job runs
-# this script after the work-queue package's own tests.
+# test/jobs.dev.test.ts serves the schemas of schemas/dev on development
+# mode (D117), the handler over a SQLite database in memory on a clock it
+# moves, and drives its routes with each caller's bearer token, a claim
+# being a read and Lease's acquire (D104) and a batch's jobs stamped by
+# Blueprint on the core (D149). The CI typescript job runs this script.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(cd "$EXAMPLE_DIR/../.." && pwd)"
 
-echo "==> build the HTTP runtime, the engine, the work-queue package and development mode's handler"
-for runtime in http engine engine-workqueue rules-handler; do
-  (cd "$REPO_ROOT/runtime/$runtime/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
-done
-if ! compgen -G "$REPO_ROOT/runtime/engine/typescript/native/superschematic-engine.*.node" >/dev/null; then
-  echo "==> build the engine's addon"
-  "$REPO_ROOT/scripts/engine-napi.sh" >/dev/null
-fi
+echo "==> build development mode's handler"
+(cd "$REPO_ROOT/runtime/rules-handler/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 
-echo "==> link them into the example"
+echo "==> link it into the example"
 "$SCRIPT_DIR/link.sh"
 
 cd "$EXAMPLE_DIR"

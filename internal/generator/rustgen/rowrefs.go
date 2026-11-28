@@ -13,8 +13,9 @@ import (
 // D185): the sub-tables a @references or an @attachments table keeps, the
 // tables a reference may point at, and the conversations whose ref blocks
 // are references too, each keyed by its type's name. They are members of
-// the Postgres definition (orm::Definition's references and attachments),
-// which the runtime's orm::rowfeatures reads; the TypeScript document of
+// the definition in each dialect (orm::Definition's references and
+// attachments, on SQLite too since #611), which the runtime's
+// orm::rowfeatures reads; the TypeScript document of
 // tsgen/rowrefs.go holds the same tables and columns, with a repository
 // member a Rust repository has no need of, since it opens a table's
 // repository by its type.

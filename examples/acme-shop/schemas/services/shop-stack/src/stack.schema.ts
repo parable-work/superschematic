@@ -7,17 +7,19 @@ import { ShopWeb } from "@acme/shop-web";
 import { environment, stack } from "@superschematic/stack";
 
 // The shop as it runs: shop-api and shop-orders, each on a Go server of its
-// own, and shop-db, the authDb of both, on a database, whose engine types
-// (D70) every server, job and worker on it opens, and whose engine runner
-// joins as a deployable of its own, in shop-api's Go; shop-stock, on a
-// Rust server over shop-db too, which shop-orders' server tells what a
-// checkout sold; shop-cart, a shopper's cart and the pickup slots, and
-// shop-storefront, each on a TypeScript server that Bun runs; and shop-web,
-// the static site whose browser code calls shop-api. shop-stock's app
-// Backoffice (D78), the Topcoat app staff receive stock in, runs beside its
-// server, a deployable of its own over shop-db. Shoppers and staff call
-// every API, so all five are exposed, and staff open the Backoffice, so it
-// is too; a site always is.
+// own, and shop-db, the authDb of both, on a database, whose tables'
+// behaviors (D70, D103) every server, job and worker on it runs through the
+// repositories, and whose behavior workers join as deployables of their
+// own: shop-api's CheckoutTimers, in Go, which expires held checkouts, and
+// shop-cart's TicketReactions, on Bun, which assigns triaged tickets;
+// shop-stock, on a Rust server over shop-db too, which shop-orders' server
+// tells what a checkout sold; shop-cart, a shopper's cart and the pickup
+// slots, and shop-storefront, each on a TypeScript server that Bun runs;
+// and shop-web, the static site whose browser code calls shop-api.
+// shop-stock's app Backoffice (D78), the Topcoat app staff receive stock
+// in, runs beside its server, a deployable of its own over shop-db.
+// Shoppers and staff call every API, so all five are exposed, and staff
+// open the Backoffice, so it is too; a site always is.
 @stack({
   deploy: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront, ShopWeb],
   expose: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront, { of: ShopStock, app: "Backoffice" }]

@@ -375,8 +375,8 @@ impl<'a> Plan<'a> {
     }
 
     /// The caller's access to `table`'s rows alone, of a read: what a read
-    /// across tables holds each table's rows to (D188).
-    #[cfg(feature = "postgres")]
+    /// across tables holds each table's rows to (D188, #615).
+    #[cfg(any(feature = "postgres", feature = "sqlite"))]
     pub(crate) fn read_conditions(
         &self,
         table: &Table,

@@ -36,13 +36,10 @@
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 {{- if .PostgresDatabases }}
-import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, queueWakesSettled } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { connectPostgres, queueWakesSettled } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 {{- end }}
 {{- if .SQLiteDatabases }}
 import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
-{{- end }}
-{{- if .Engines }}
-import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
 {{- end }}
 import { runWorkers, workerConcurrency, workerDrain } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
@@ -63,9 +60,6 @@ import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
-{{- range .Engines }}
-import { engineDocument as {{ .Document }} } from '{{ .DocumentModule }}';
-{{- end }}
 
 /** How long a stopping worker lets its running handlers finish. */
 const GRACE_MS = {{ .Worker.GraceSeconds }} * 1000;
@@ -76,10 +70,9 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, worker: {{ tsQuote .N
  * Builds the worker from the environment and claims and handles the
  * messages of each of its queues until signal aborts, when SIGTERM or
  * SIGINT arrives, then stops within the grace. Each pool it opens goes in
- * pools, which main ends, and so does its telemetry, which main flushes.{{ if .Engines }}
- * Each engine it opens goes in engines, which main closes.{{ end }}
+ * pools, which main ends, and so does its telemetry, which main flushes.
  */
-async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .Engines }}, engines: { close(): void }[]{{ end }}): Promise<void> {
+async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
 {{- template "ts-background-connections" . }}
 
 {{- if .Worker.Behavior.Emits }}
@@ -128,10 +121,6 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
 {{- if .SQLiteDatabases }}
 
 {{ template "ts-open-sqlite" . }}
-{{- end }}
-{{- if .Engines }}
-
-{{ template "ts-engine" . }}
 {{- end }}
 {{- template "ts-clients" . }}
 

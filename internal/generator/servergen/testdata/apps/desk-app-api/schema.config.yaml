@@ -1,0 +1,12 @@
+# A public Rust API over desk-db with an app (D78): its users are the user
+# model's and its operations have a service clause, and it declares
+# Backoffice, an app: the project's own program over the API's Deps, run
+# as a deployable of its own.
+name: desk-app-api
+kind: API
+public: true
+authDb: desk-db
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }

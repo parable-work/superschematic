@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -18,83 +17,6 @@ import (
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
 )
-
-// stockroomExtension registers a behavior and a kind whose pipeline is two
-// generators: shelfList renders behaviors; labels does not unless
-// labelsRenders is set, and labelsDisabled switches it off. ran records
-// which generators ran.
-type stockroomExtension struct {
-	ran            *[]string
-	labelsRenders  bool
-	labelsDisabled bool
-}
-
-func (stockroomExtension) Name() string { return "stockroom" }
-
-func (e stockroomExtension) Register(r *registry.Registry) error {
-	record := func(name string) func(registry.GenerateContext) error {
-		return func(registry.GenerateContext) error {
-			*e.ran = append(*e.ran, name)
-			return nil
-		}
-	}
-	return errors.Join(
-		r.RegisterKind(registry.KindSpec{Name: "Stockroom", Extension: "stockroom", StructRole: ir.RoleEmbeddedStruct, Pipeline: []string{"shelfList", "labels"}}),
-		r.RegisterGenerator(registry.GeneratorSpec{Name: "shelfList", Extension: "stockroom", RendersBehaviors: true, Generate: record("shelfList")}),
-		r.RegisterGenerator(registry.GeneratorSpec{
-			Name: "labels", Extension: "stockroom", RendersBehaviors: e.labelsRenders, Generate: record("labels"),
-			Enabled: func(registry.GenerateContext) (bool, string) { return !e.labelsDisabled, "labels" },
-		}),
-		r.RegisterBehavior(registry.BehaviorSpec{Extension: "stockroom", Declaration: json.RawMessage(`{"name":"stockroom.Counted"}`)}),
-	)
-}
-
-func stockroomService(behaviors ...ir.BehaviorRef) (*ir.Schema, *schemaconfig.SchemaConfig) {
-	schema := ir.NewSchema("stock", ir.SchemaKind("Stockroom"))
-	schema.Types["Plain"] = &ir.TypeDef{Name: "Plain", Role: ir.RoleEmbeddedStruct}
-	schema.Types["Shelf"] = &ir.TypeDef{Name: "Shelf", Role: ir.RoleEmbeddedStruct, Behaviors: behaviors}
-	return schema, &schemaconfig.SchemaConfig{Name: "stock", Kind: ir.SchemaKind("Stockroom")}
-}
-
-// Run refuses a schema with behaviors before any generator runs when an
-// enabled generator does not render them, and names it; a generator that
-// declares RendersBehaviors runs, and a disabled one is not asked.
-func TestRunRefusesBehaviorsAGeneratorDoesNotRender(t *testing.T) {
-	counted := ir.BehaviorRef{Name: "stockroom.Counted"}
-
-	var ran []string
-	reg := extensionRegistry(t, stockroomExtension{ran: &ran})
-	schema, cfg := stockroomService(counted)
-	_, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: reg})
-	if want := "generator: labels does not render behaviors yet: type Shelf composes behavior stockroom.Counted"; err == nil || err.Error() != want {
-		t.Fatalf("Run: err = %v, want %q", err, want)
-	}
-	if len(ran) != 0 {
-		t.Fatalf("generators ran before the refusal: %v", ran)
-	}
-
-	// The same pipeline on a schema without behaviors runs both.
-	plain, plainCfg := stockroomService()
-	if _, err := Run(plain, plainCfg, Options{OutputRoot: t.TempDir(), Registry: reg}); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(ran, ",") != "shelfList,labels" {
-		t.Fatalf("ran = %v", ran)
-	}
-
-	for _, ext := range []stockroomExtension{{labelsRenders: true}, {labelsDisabled: true}} {
-		ran = nil
-		ext.ran = &ran
-		reg := extensionRegistry(t, ext)
-		schema, cfg := stockroomService(counted)
-		if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: reg}); err != nil {
-			t.Fatalf("%+v: Run: %v", ext, err)
-		}
-		if ran[0] != "shelfList" {
-			t.Fatalf("%+v: ran = %v", ext, ran)
-		}
-	}
-}
 
 // acmeLedger is the extension the behavior types fixture assumes: it
 // declares acme.Rating, and a kind whose pipeline is the types generator
@@ -111,10 +33,10 @@ func (acmeLedger) Register(r *registry.Registry) error {
 	)
 }
 
-// The types generator renders behaviors (D58): a pipeline of it alone
-// builds a schema whose types compose them, and each language writes its
-// <T>Behaviors beside the own-field types, the extension's behavior
-// under its exact name.
+// The types generator renders behaviors a type composes with @behavior
+// (D16): a pipeline of it alone builds a schema whose types compose them,
+// and each language writes its <T>Behaviors beside the own-field types,
+// the extension's behavior under its exact name.
 func TestTypesGeneratorRendersBehaviors(t *testing.T) {
 	reg := extensionRegistry(t, acmeLedger{})
 	schema := behaviortypestest.Schema(t, reg)
@@ -160,11 +82,11 @@ func TestTypesGeneratorRendersBehaviors(t *testing.T) {
 	}
 }
 
-// Every core generator of the DB and General pipelines renders behaviors
-// (D58): a DB schema's type that composes one is an engine type, which sql
-// and orm leave out and enginedoc writes the document of, and a General
-// schema's types write <T>Behaviors. An API's own type that composes one
-// is refused before any generator runs: behaviors compose on DB types.
+// A General schema's type that composes a behavior with @behavior builds,
+// and its types write <T>Behaviors (D16). A DB schema's is refused before
+// any generator runs, since a DB type is a table, which implements a
+// behavior or carries it on a field (D103), and so is an API's own type:
+// behaviors compose on DB tables.
 func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 	enabled := map[string]any{"enabled": true}
 	goTypes := map[string]any{LangGo: enabled}
@@ -173,10 +95,11 @@ func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 		outputs map[string]any
 		want    string
 	}{
-		{ir.SchemaKindDB, map[string]any{"types": goTypes}, ""},
 		{ir.SchemaKindGeneral, map[string]any{"types": goTypes}, ""},
+		{ir.SchemaKindDB, map[string]any{"types": goTypes},
+			"generator: type Item of items composes behavior Comments with @behavior, which a DB type does not take: a DB type is a table, which implements a behavior or carries it on a field (D103)"},
 		{ir.SchemaKindAPI, map[string]any{"types": goTypes, "api": enabled},
-			"generator: type Item of API items composes behavior Comments, but behaviors compose on DB types: a DB type that composes one is an engine type, whose instances the engine keeps, and an API reaches it through its DB service (D58)"},
+			"generator: type Item of API items composes behavior Comments, but behaviors compose on DB tables, by implements and field types, and an API serves their operations through @behaviorOperations (D103)"},
 	} {
 		t.Run(string(tc.kind), func(t *testing.T) {
 			schema := ir.NewSchema("items", tc.kind)
@@ -188,7 +111,7 @@ func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 				Fields: []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
 			cfg := &schemaconfig.SchemaConfig{Name: "items", Kind: tc.kind, Outputs: tc.outputs}
 			root := t.TempDir()
-			result, err := Run(schema, cfg, Options{OutputRoot: root, Registry: CoreRegistry(naming.Default())})
+			_, err := Run(schema, cfg, Options{OutputRoot: root, Registry: CoreRegistry(naming.Default())})
 			if tc.want != "" {
 				if err == nil || err.Error() != tc.want {
 					t.Fatalf("Run: err = %v, want %q", err, tc.want)
@@ -202,135 +125,8 @@ func TestCoreGeneratorsOnATypeThatComposesBehaviors(t *testing.T) {
 			if _, err := os.Stat(behaviorsGo); err != nil {
 				t.Errorf("the types write no behaviors.go: %v", err)
 			}
-			engineDocument := EngineDocumentPath(root, "items")
-			_, statErr := os.Stat(engineDocument)
-			if tc.kind == ir.SchemaKindDB {
-				if statErr != nil || result.Outputs["engine"] != engineDocument {
-					t.Errorf("the DB build wrote no engine document: %v (outputs %v)", statErr, result.Outputs)
-				}
-				// Item is the schema's only type and an engine type: no
-				// table, no repository.
-				if !slices.Contains(result.Skipped, "sql") || !slices.Contains(result.Skipped, "orm") {
-					t.Errorf("Skipped = %v, want sql and orm", result.Skipped)
-				}
-			} else if statErr == nil {
-				t.Errorf("a %s build wrote an engine document", tc.kind)
-			}
 		})
 	}
-}
-
-// engineDB is a DB service whose Ticket composes Workflow, an engine type,
-// beside a table, for the API refusals.
-func engineDB() *ir.Schema {
-	db := ir.NewSchema("desk-db", ir.SchemaKindDB)
-	db.Types["Ticket"] = &ir.TypeDef{Name: "Ticket", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Workflow"}},
-		Fields: []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
-	db.Types["Agent"] = &ir.TypeDef{Name: "Agent", Role: ir.RoleDBTable,
-		Fields: []*ir.FieldDef{{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
-	return db
-}
-
-// The API generators do not serve an engine type yet (D58): an API that
-// imports one, or projects one with @source, is refused before any
-// generator runs, naming the first generator that does not render
-// behaviors. A table of the same DB is no engine type.
-func TestAPIGeneratorsRefuseAnImportedEngineType(t *testing.T) {
-	enabled := map[string]any{"enabled": true}
-	goTypes := map[string]any{LangGo: enabled}
-	deps := map[string]*ir.Schema{"desk-db": engineDB()}
-	load := func(name string) (*ir.Schema, error) {
-		if dep := deps[name]; dep != nil {
-			return dep, nil
-		}
-		return nil, errors.New("no such service")
-	}
-	api := func(use func(*ir.Schema)) *ir.Schema {
-		schema := ir.NewSchema("desk-api", ir.SchemaKindAPI)
-		use(schema)
-		return schema
-	}
-	importType := func(name string) func(*ir.Schema) {
-		return func(s *ir.Schema) { s.Imports = []ir.Import{{Package: "@schemas/desk-db", Types: []string{name}}} }
-	}
-	project := func(s *ir.Schema) {
-		s.Types["TicketView"] = &ir.TypeDef{Name: "TicketView", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "desk-db.Ticket"},
-			Fields: []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
-	}
-	for _, tc := range []struct {
-		name    string
-		schema  *ir.Schema
-		outputs map[string]any
-		want    string
-	}{
-		{"import", api(importType("Ticket")), map[string]any{"types": goTypes, "api": enabled},
-			"generator: api does not render engine types yet: desk-api imports desk-db.Ticket, which composes behavior Workflow (D58)"},
-		{"sdk alone", api(importType("Ticket")), map[string]any{"types": goTypes, "sdk": goTypes},
-			"generator: sdks does not render engine types yet: desk-api imports desk-db.Ticket, which composes behavior Workflow (D58)"},
-		{"source", api(project), map[string]any{"types": goTypes, "api": enabled},
-			"generator: api does not render engine types yet: type TicketView of desk-api projects desk-db.Ticket, which composes behavior Workflow (D58)"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := &schemaconfig.SchemaConfig{Name: "desk-api", Kind: ir.SchemaKindAPI, Outputs: tc.outputs,
-				Dependencies: []schemaconfig.ServiceDependency{{Name: "desk-db", Kind: ir.SchemaKindDB}}}
-			_, err := Run(tc.schema, cfg, Options{OutputRoot: t.TempDir(), Registry: CoreRegistry(naming.Default()), LoadDependency: load})
-			if err == nil || err.Error() != tc.want {
-				t.Fatalf("Run: err = %v, want %q", err, tc.want)
-			}
-		})
-	}
-
-	// A table of the same DB is no engine type: the refusal lets the API
-	// pipeline's generators run on an API that imports one.
-	cfg := &schemaconfig.SchemaConfig{Name: "desk-api", Kind: ir.SchemaKindAPI, Outputs: map[string]any{"types": goTypes},
-		Dependencies: []schemaconfig.ServiceDependency{{Name: "desk-db", Kind: ir.SchemaKindDB}}}
-	if err := refuseImportedEngineTypesOf(t, api(importType("Agent")), cfg, load); err != nil {
-		t.Fatalf("an imported table: %v", err)
-	}
-}
-
-// The server generator refuses a server that serves an API which uses an
-// engine type, naming the stack, the server and the API (D58).
-func TestServerGeneratorRefusesAnAPIThatUsesAnEngineType(t *testing.T) {
-	deps := map[string]*ir.Schema{"desk-db": engineDB()}
-	load := func(name string) (*ir.Schema, error) {
-		if dep := deps[name]; dep != nil {
-			return dep, nil
-		}
-		return nil, errors.New("no such service")
-	}
-	reg := CoreRegistry(naming.Default())
-	cfg := &schemaconfig.SchemaConfig{Name: "desk-api", Kind: ir.SchemaKindAPI,
-		Dependencies: []schemaconfig.ServiceDependency{{Name: "desk-db", Kind: ir.SchemaKindDB}}}
-	for name, want := range map[string]string{
-		"Ticket": "generator: server does not render engine types yet: stack desk: server web serves desk-api, and desk-api imports desk-db.Ticket, which composes behavior Workflow (D58)",
-		"Agent":  "",
-	} {
-		api := ir.NewSchema("desk-api", ir.SchemaKindAPI)
-		api.Imports = []ir.Import{{Package: "@schemas/desk-db", Types: []string{name}}}
-		served, _ := newRun(api, cfg, &registry.Outputs{}, Options{OutputRoot: t.TempDir(), Registry: reg, LoadDependency: load}, reg)
-		err := served.refuseServedEngineTypes("desk", "web")
-		got := ""
-		if err != nil {
-			got = err.Error()
-		}
-		if got != want {
-			t.Errorf("%s: err = %v, want %q", name, err, want)
-		}
-	}
-}
-
-// refuseImportedEngineTypesOf runs the refusal alone, as runPipeline does
-// with the API pipeline's generators enabled.
-func refuseImportedEngineTypesOf(t *testing.T, schema *ir.Schema, cfg *schemaconfig.SchemaConfig, load func(string) (*ir.Schema, error)) error {
-	t.Helper()
-	reg := CoreRegistry(naming.Default())
-	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, _ := newRun(schema, cfg, outputs, Options{OutputRoot: t.TempDir(), Registry: reg, LoadDependency: load}, reg)
-	return r.refuseImportedEngineTypes(reg.Pipeline(string(ir.SchemaKindAPI)))
 }
 
 // fieldBehaviorsDB is the DB service whose Order's status is a Workflow and
@@ -345,20 +141,15 @@ func fieldBehaviorsDB(t *testing.T) *ir.Schema {
 	return schema
 }
 
-// A table whose fields are behaviors stays a table (D103): no engine type,
-// so no engine document and nothing for refuseEngineTypes. sql, types and
+// A table whose fields are behaviors stays a table (D103). sql, types and
 // the Go ORM render what its behaviors add
 // (GeneratorSpec.RendersFieldBehaviors), so the DB pipeline runs: the ORM
 // writes rules.go and each repository's operations. The API generators
 // and the SDKs render it too, and a generator that does not, an
 // extension's, is refused before any generator runs, in today's words for
-// a behavior it does not render. A decorator's engine type is refused and
-// served as it was.
+// a behavior it does not render.
 func TestCoreGeneratorsOnATableWhoseFieldsAreBehaviors(t *testing.T) {
 	schema := fieldBehaviorsDB(t)
-	if engine := codegen.EngineTypes(schema); len(engine) != 0 {
-		t.Fatalf("engine types = %v, want none", engine)
-	}
 	reg := CoreRegistry(naming.Default())
 	cfg := &schemaconfig.SchemaConfig{Name: "fixture-workflow-fields-db", Kind: ir.SchemaKindDB,
 		Outputs: map[string]any{"types": map[string]any{LangTypeScript: map[string]any{"enabled": true}, LangGo: map[string]any{"enabled": true}}}}
@@ -377,19 +168,20 @@ func TestCoreGeneratorsOnATableWhoseFieldsAreBehaviors(t *testing.T) {
 	}
 
 	var rendering []registry.GeneratorSpec
-	for _, name := range []string{typesGenerator, "sql", ormGenerator, "api", "sdks", "envConfig", enginedocGenerator, projectengineGenerator} {
+	for _, name := range []string{typesGenerator, "sql", ormGenerator, "api", "sdks", "envConfig", rulescoreGenerator} {
 		spec, ok := reg.Generator(name)
 		if !ok || !spec.RendersFieldBehaviors {
 			t.Fatalf("generator %s: registered %v, renders field behaviors %v", name, ok, spec.RendersFieldBehaviors)
 		}
 		rendering = append(rendering, spec)
 	}
-	if err := refuseBehaviors(schema, rendering); err != nil {
+	r := run{registry.GenerateContext{Schema: schema, Registry: reg}}
+	if err := r.refuseBehaviors(rendering); err != nil {
 		t.Fatalf("refuseBehaviors with the generators that render field behaviors: %v", err)
 	}
 	extension := registry.GeneratorSpec{Name: "acme-docs"}
 	want := "generator: acme-docs does not render behaviors yet: type Order composes behavior Workflow on its field status (D103)"
-	if err := refuseBehaviors(schema, append(rendering, extension)); err == nil || err.Error() != want {
+	if err := r.refuseBehaviors(append(rendering, extension)); err == nil || err.Error() != want {
 		t.Errorf("refuseBehaviors with an extension's generator: %v, want %q", err, want)
 	}
 }
@@ -423,13 +215,13 @@ func TestAPIGeneratorsRenderAnImportedFieldBehaviorTable(t *testing.T) {
 		}
 		enabled = append(enabled, spec)
 	}
-	if err := r.refuseImportedEngineTypes(enabled); err != nil {
-		t.Fatalf("refuseImportedEngineTypes with types, api and sdks: %v", err)
+	if err := r.refuseImportedBehaviorTypes(enabled); err != nil {
+		t.Fatalf("refuseImportedBehaviorTypes with types, api and sdks: %v", err)
 	}
 	extension := registry.GeneratorSpec{Name: "acme-docs"}
 	want := "generator: acme-docs does not render behaviors yet: orders-api imports fixture-workflow-fields-db.Order, which composes behavior Workflow on its field status (D103)"
-	if err := r.refuseImportedEngineTypes(append(enabled, extension)); err == nil || err.Error() != want {
-		t.Fatalf("refuseImportedEngineTypes with an extension's generator: %v, want %q", err, want)
+	if err := r.refuseImportedBehaviorTypes(append(enabled, extension)); err == nil || err.Error() != want {
+		t.Fatalf("refuseImportedBehaviorTypes with an extension's generator: %v, want %q", err, want)
 	}
 }
 

@@ -175,6 +175,12 @@ class JobRetries(BaseModel):
     exhausted: bool = Field(..., alias="exhausted", serialization_alias="exhausted")
     # Whether the instance failed with the same signature stuckAfter times in a row.
     stuck: bool = Field(..., alias="stuck", serialization_alias="stuck")
+    # When the row may run again after its last failure, in epoch milliseconds, as its class's backoff gives it; absent when it may run at once. A table's alone: an engine type keeps none.
+    retry_at: Optional[int] = Field(default=None, alias="retryAt", serialization_alias="retryAt")
+    # When the first failure since the row's last success was recorded, in epoch milliseconds, which giveUpAfterMs counts from; absent after a success, and without giveUpAfterMs. A table's alone: an engine type keeps none.
+    failing_since: Optional[int] = Field(default=None, alias="failingSince", serialization_alias="failingSince")
+    # The value of keyField the counts were made under, as text; absent without keyField. A table's alone: an engine type keeps none.
+    keyed_by: Optional[str] = Field(default=None, alias="keyedBy", serialization_alias="keyedBy")
 
 class JobBudgetMetersCpuSeconds(BaseModel):
     """
@@ -913,94 +919,6 @@ class TicketTimers(BaseModel):
     # Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed.
     deadlines: TicketTimersDeadlines = Field(..., alias="deadlines", serialization_alias="deadlines")
 
-class TicketLinksTargetsSpec(BaseModel):
-    """
-    TicketLinksTargetsSpec types TicketLinksTargets.spec.
-    """
-
-    model_config = ConfigDict(
-        strict=True,
-        extra='ignore',
-        use_enum_values=True,
-        populate_by_name=True,
-    )
-
-    id: str = Field(..., alias="id", serialization_alias="id")
-    # The target's latest revision.
-    latest: Optional[int] = Field(default=None, alias="latest", serialization_alias="latest")
-    # The target's revision the link records.
-    revision: Optional[int] = Field(default=None, alias="revision", serialization_alias="revision")
-    # Always "documents".
-    schema_: Literal["documents"] = Field(..., alias="schema", serialization_alias="schema")
-    # Whether the target has moved past that revision.
-    stale: Optional[bool] = Field(default=None, alias="stale", serialization_alias="stale")
-
-class TicketLinksTargetsReviewersItem(BaseModel):
-    """
-    TicketLinksTargetsReviewersItem types an item of TicketLinksTargets.reviewers.
-    """
-
-    model_config = ConfigDict(
-        strict=True,
-        extra='ignore',
-        use_enum_values=True,
-        populate_by_name=True,
-    )
-
-    id: str = Field(..., alias="id", serialization_alias="id")
-    # Always "people".
-    schema_: Literal["people"] = Field(..., alias="schema", serialization_alias="schema")
-
-class TicketLinksTargetsProject(BaseModel):
-    """
-    TicketLinksTargetsProject types TicketLinksTargets.project.
-    """
-
-    model_config = ConfigDict(
-        strict=True,
-        extra='ignore',
-        use_enum_values=True,
-        populate_by_name=True,
-    )
-
-    id: str = Field(..., alias="id", serialization_alias="id")
-    # Always "projects".
-    schema_: Literal["projects"] = Field(..., alias="schema", serialization_alias="schema")
-
-class TicketLinksTargets(BaseModel):
-    """
-    TicketLinksTargets types TicketLinks.targets.
-    """
-
-    model_config = ConfigDict(
-        strict=True,
-        extra='ignore',
-        use_enum_values=True,
-        populate_by_name=True,
-    )
-
-    # The projects instance project points at.
-    project: TicketLinksTargetsProject = Field(..., alias="project", serialization_alias="project")
-    # The people instances reviewers points at, in the order they were linked.
-    reviewers: Optional[List[TicketLinksTargetsReviewersItem]] = Field(default=None, alias="reviewers", serialization_alias="reviewers")
-    # The documents instance spec points at.
-    spec: Optional[TicketLinksTargetsSpec] = Field(default=None, alias="spec", serialization_alias="spec")
-
-class TicketLinks(BaseModel):
-    """
-    TicketLinks holds the fields a Ticket's Links adds, as a read returns them: a field with no value is absent.
-    """
-
-    model_config = ConfigDict(
-        strict=True,
-        extra='ignore',
-        use_enum_values=True,
-        populate_by_name=True,
-    )
-
-    # The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none.
-    targets: TicketLinksTargets = Field(..., alias="targets", serialization_alias="targets")
-
 class TicketDependencies(BaseModel):
     """
     TicketDependencies holds the fields a Ticket's Dependencies adds, as a read returns them: a field with no value is absent.
@@ -1108,8 +1026,6 @@ class TicketBehaviors(BaseModel):
     revisions: TicketRevisions = Field(..., alias="Revisions", serialization_alias="Revisions")
     # The fields of Dependencies.
     dependencies: TicketDependencies = Field(..., alias="Dependencies", serialization_alias="Dependencies")
-    # The fields of Links.
-    links: TicketLinks = Field(..., alias="Links", serialization_alias="Links")
     # The fields of Timers.
     timers: TicketTimers = Field(..., alias="Timers", serialization_alias="Timers")
     # The fields of Approvals.

@@ -302,8 +302,6 @@ func buildType(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) (Type,
 		for _, field := range declaration.Fields {
 			shape, ok := behavior.Narrowed.Fields[field.Name]
 			if !ok {
-				// The type's form keeps none of it (an engine type's
-				// Retries' retryAt, D104).
 				continue
 			}
 			fieldName := MemberName(field.Name)

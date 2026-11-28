@@ -35,7 +35,6 @@
             "outcomes": { "expired": "failure", "cancelled": "neutral" }
           }
         },
-        { "name": "Links", "config": { "links": { "counter": { "schema": "CollectionPoint" } } } },
         {
           "name": "Holds",
           "config": {

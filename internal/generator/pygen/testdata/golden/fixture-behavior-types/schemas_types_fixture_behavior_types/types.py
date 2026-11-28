@@ -205,7 +205,7 @@ class Batch(BaseModel):
 
 class Job(BaseModel):
     """
-    A job a worker claims from its topic's queue and holds under a lease, within a CPU budget, retried per failure class.
+    A job a worker holds under a lease, within a CPU budget, retried per failure class.
     """
 
     model_config = ConfigDict(
@@ -908,7 +908,7 @@ class Request(BaseModel):
 
 class Ticket(BaseModel):
     """
-    A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
+    A ticket that moves through its states, waits for the tickets that block it, and keeps deadlines.
     """
 
     model_config = ConfigDict(

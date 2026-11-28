@@ -56,9 +56,6 @@ import type { {{ join .DatabaseTypeImports ", " }} } from '{{ .Deps.DatabaseType
 {{- if .DepsORM }}
 import type { {{ .Deps.ORM }}{{ if .WorkerEvents }}, {{ .DepsTx }}{{ end }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
 {{- end }}
-{{- if .Deps.Engine }}
-import type { EngineBackground } from '{{ .Deps.Engine.Package }}/server';
-{{- end }}
 {{- if .DepsRuntimeTypes }}
 import type { {{ join .DepsRuntimeTypes ", " }} } from '{{ .RuntimePackage }}{{ .RuntimeEntry }}';
 {{- end }}
@@ -141,16 +138,6 @@ export interface Deps {
    * subscribe while it is unreachable is held until it reconnects.
    */
   readonly {{ .Field }}: MemoryStore;
-{{- end }}
-{{- with .Deps.Engine }}
-  /**
-   * The engine of {{ .Database }}, the API's engine database (D58), which the
-   * entrypoint opens in the background, so it starts while the database is
-   * not up yet: engine.wait() resolves with it once it opens, and
-   * engine.engine() returns it at once, or throws why it is not open. Its
-   * types' instances are the engine's, in namespace {{ .Namespace }}.
-   */
-  readonly engine: EngineBackground;
 {{- end }}
 {{- with .Deps.Agents }}
   /**
@@ -395,7 +382,7 @@ export type DerivedAnswer<T> =
  * The derivers of {{ .SchemaName }}, a member per @deriver class. A deriver's
  * entrypoint pulls the stale derived fields of its schemas and calls the
  * method of each with a signal that aborts when the deriver stops. A value
- * of the wrong type fails to compile; one {{ .DeriverJudge }} still refuses counts
+ * of the wrong type fails to compile; one the behaviors' core still refuses counts
  * an attempt.
  */
 export interface Derivers {

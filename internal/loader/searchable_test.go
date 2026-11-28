@@ -136,11 +136,12 @@ export abstract class Ticket {
 	}
 }
 
-// TestSearchableOnSQLiteTakesNoRustTypes: a service that lists sqlite
-// serves @searchable with the TypeScript and Go types, whose writes the
-// index's triggers keep (D186), and refuses the Rust types, whose search
-// runs on Postgres alone (D188).
-func TestSearchableOnSQLiteTakesNoRustTypes(t *testing.T) {
+// TestSearchableOnSQLiteTakesThePythonTypesAlone: a service that lists
+// sqlite serves @searchable with the TypeScript, Go and Rust types, whose
+// writes the index's triggers keep (D186) and whose TypeScript and Rust
+// runtimes search it there (#615), and refuses the Python types, which
+// have no repositories.
+func TestSearchableOnSQLiteTakesThePythonTypesAlone(t *testing.T) {
 	const schema = `
 import { Identity } from "superscalar";
 import { AutoGenerate, key, queue, searchable } from "@superschematic/db";
@@ -155,7 +156,8 @@ export abstract class Ticket {
 	base := filepath.ToSlash(filepath.Join(testpaths.RepoRoot(t), "internal", "loader", "tsreader", "testdata", "tsconfig.base.json"))
 	for _, tc := range []struct{ types, want string }{
 		{`"typescript": {"enabled": true}, "go": {"enabled": true}`, ""},
-		{`"typescript": {"enabled": true}, "rust": {"enabled": true}`, "@searchable on Ticket: tickets-db lists the sqlite dialect and enables the Rust types"},
+		{`"typescript": {"enabled": true}, "rust": {"enabled": true}`, ""},
+		{`"typescript": {"enabled": true}, "python": {"enabled": true}`, "@searchable on Ticket: tickets-db lists the sqlite dialect and enables the Python types"},
 	} {
 		dir := writeService(t, map[string]string{
 			"schema.config.json":    `{"name": "tickets-db", "kind": "DB", "outputs": {"types": {` + tc.types + `}, "sql": {"dialects": ["postgres", "sqlite"]}}}`,

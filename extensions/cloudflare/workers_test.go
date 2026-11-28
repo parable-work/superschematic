@@ -400,7 +400,7 @@ func TestWorkersRefusals(t *testing.T) {
 		for i := range services {
 			switch services[i].Name {
 			case "shop-db":
-				services[i].Engine, services[i].Derived = true, []string{"Ticket"}
+				services[i].DerivedTables = []string{"Ticket"}
 			case stacktest.ShopOrders.Name:
 				services[i].Language = registry.APILanguageTypeScript
 				services[i].Derivers = []ir.Deriver{{Name: "TriageTickets"}}
@@ -408,7 +408,7 @@ func TestWorkersRefusals(t *testing.T) {
 		}
 		_, errs := resolveOver(t, reg, s, services, "Staging")
 		refusedWith(t, errs, stack.CodeUnrealizable, "deriver shop-orders-triage-tickets: target cloudflare places no deriver: a deriver fills Derived fields in a loop that lasts as long as its process, "+
-			"over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target")
+			"through its API's repositories, and a Worker runs only per request or per firing; run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target")
 	})
 	t.Run("an app", func(t *testing.T) {
 		// D78: the refusal says why and where an app runs.

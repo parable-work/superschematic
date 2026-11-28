@@ -1,309 +1,159 @@
 ---
 title: Work queues
-description: Make a schema's instances claimable work with @superschematic/engine-workqueue. Leases with fencing tokens, assignment, claims in priority order, worker heartbeats, children stamped from a blueprint, budgets and retries.
+description: Work rows as claimable work on the behaviors' core. Leases with fencing tokens, a claim that is a read and a lease, worker heartbeats, children stamped from a blueprint, budgets and retries, on a table and on development mode, with examples/engine-jobs.
 sidebar:
   order: 8
 ---
 
 import Snippet from '../../../components/Snippet.astro';
 
-`@superschematic/engine-workqueue` turns an engine schema into a work
-queue. Workers claim instances in priority order, hold them under a lease
-they renew, and give them back. The engine's runner puts back the work of
-a worker that stops renewing. Seven behaviors do this, and you compose
-the ones you need:
+A row can be work: a worker takes it, holds it while it works, and gives
+it back. A worker that stops renewing loses what it held, and the work
+goes back for another. Five behaviors of the core do this, and you
+compose the ones you need:
 
 | Behavior | What it adds | Requires |
 | --- | --- | --- |
 | [`Lease`](#lease) | an exclusive, time-bounded lease with a fencing token, heartbeats, expiry and messages to the holder | |
-| [`Assignment`](#assignment) | one principal the instance is assigned to, who alone may claim it | |
-| [`Queue`](#queue) | `claim`, and `claimNext`, which claims the best candidate | `Workflow`, `Lease` |
-| [`Presence`](#presence) | a heartbeat on an instance that stands for a worker; a missed one releases its leases | |
+| [`Presence`](#presence) | a heartbeat on a row that stands for a worker; a missed one releases its leases | |
 | [`Blueprint`](#blueprint) | children created with their parent, with dependencies between them | |
 | [`Budget`](#budget) | reserve-then-settle budgets against limits, across enclosing scopes | |
-| [`Retries`](#retries) | attempts counted per failure class, with caps, kept results and stuck detection | `Workflow` |
+| [`Retries`](#retries) | attempts counted per failure class, with caps and stuck detection | `Workflow` |
 
-This page assumes you have read [the engine](/superschematic/guides/engine/)
-guide and know [schema-level operations](/superschematic/guides/engine-behaviors/#schema-level-operations)
-and [the runner](/superschematic/guides/engine-behaviors/#the-runner).
-The package's
-[README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md)
-is the full reference for every refusal, guard and config change.
+They run on the behaviors' core, so a DB table implements them
+(`implements Lease<Job, { ... }>`,
+[Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)),
+and [development mode](/superschematic/guides/development-mode/) serves
+them for a General schema's `@behavior`. Two behaviors the work queue
+once had are not behaviors any more:
+
+- **Queue** folds into a schema feature (D103). A queue's messages are a
+  `@queue`'s, which its workers claim
+  ([Queues](/superschematic/guides/queues/)). Rows that are work are
+  claimed by a read and a lease ([A claim](#a-claim)). The build refuses
+  `Queue`, naming `@queue`.
+- **Assignment** is a bundle on a table, `Seats` with one seat
+  ([Beyond plain tables](/superschematic/guides/database-tables/#beyond-plain-tables)).
+
+`examples/engine-jobs` is a job runner on development mode, which CI
+builds and tests: workers claim jobs in priority order, hold them under
+leases, retry them by failure class and reserve CPU seconds for them; a
+worker that stops beating loses its jobs to another; and a batch stamps a
+job per step and settles when they finish.
 
 ## Set up
 
-The core declares the seven behaviors, so the default meta-schema admits
-a schema that composes them, and `@behavior` types their configs. They
-are Rust (`runtime/engine-workqueue/rust`), and the engine's addon is
-built with them, but the engine runs them only once your server names
-them in the engine's `behaviors` option. Until then it refuses to define
-such a schema, and a live version that composes one answers 503
-`unavailable`. `@superschematic/engine-workqueue` holds their names, the
-types of their configs and records, and the worker.
-
-Nothing is published yet. Build the package from the checkout after the
-engine:
+From the repository root, after `make setup`:
 
 ```sh
-cd runtime/engine-workqueue/typescript
-bun install --frozen-lockfile
-bun run build
+examples/engine-jobs/scripts/check.sh
 ```
 
-It needs `@superschematic/engine` beside it in `node_modules` as a peer
-dependency: its types and its worker's client are the engine's, so both
-must be the copy your server opens. Pass the behaviors' names as the
-engine's `behaviors`, with a runner for the timed sweeps. The
-`examples/engine-jobs` server, a job runner that CI builds and tests,
-opens its engine this way, and its `src/main.ts` then calls
-`engine.runner.start()`:
+It builds `@superschematic/rules-handler`, which needs cargo and the
+`wasm32-unknown-unknown` target, links it into the example, type-checks
+it and runs its test on Node.js and Bun. The example opens the handler
+over a SQLite connection, with its schemas, its policy, its callers and
+its runner, on a clock the caller gives:
 
-<Snippet example="engine-jobs" file="src/server.ts" symbol="openJobs" />
+<Snippet example="engine-jobs" file="src/dev.ts" symbol="openJobsDev" />
 
-Two permissions are easy to miss:
+The host's runner runs the change queue the writes fill, Reactions among
+them, and the deadlines that fall due on the host's clock: Lease's
+expiries and Presence's misses. It runs as a caller of its own, which a
+miss needs Lease's `overridePermission` for:
 
-- **The runner reads what it sweeps.** Its principal needs `write` on
-  each schema its sweeps and reactions change and the permissions their
-  configs name, and also `read` on each schema a sweep reads. Without
-  `read`, every run fails `forbidden` and is retried with the backoff;
-  `engine.runner.status()` shows the schedule `retrying` with the error.
-- **Defining reads the schemas a config names.** Presence's
-  `releaseLeases`, Blueprint's `schema`, a Budget meter's `scope` and the
-  core's `Rollups` are checked against the live version of the schema
-  they name when you define or publish, as you, so you need `read` on it;
-  otherwise the define is `forbidden`. The example's server defines as a
-  principal that holds `jobs.read` for this.
+<Snippet example="engine-jobs" file="src/dev.ts" symbol="devRunner" />
 
-<Snippet example="engine-jobs" file="src/auth.ts" symbol="runner" />
-
-`workQueueBehaviors` is the seven names, typed `WorkQueueBehavior`. A
-server that runs only some names those: `behaviors: ['Lease', 'Queue']`.
+The test moves its clock by hand and calls `dev.runDue()` itself, so a
+worker's 15 seconds pass at once. A server calls it on a timer.
 
 ## A job queue
 
-The `jobs` schema below is the fixture the package's end-to-end test
-runs. A job is queued, running, done or failed; a worker claims the
-queued job with the highest priority, and a job whose lease lapses goes
-back in the queue, until its third expiry fails it. Each claim reserves
-CPU seconds from a daily budget, and failures are retried per class.
+A job is queued, running, done or failed. A lease that lapses puts it
+back in the queue, until its third expiry fails it; a claim reserves CPU
+seconds from its budget; failures are retried per class; and a job a
+batch stamped waits for the steps before it:
 
-```ts
-import { Generic } from "superscalar";
-import { Validate, behavior } from "@superschematic/schema";
+<Snippet example="engine-jobs" file="schemas/dev/jobs.schema.json" />
 
-@behavior("Workflow", {
-  states: ["queued", "running", "done", "failed"],
-  transitions: [
-    { from: "queued", to: "running" },
-    { from: "running", to: "queued" },
-    { from: "running", to: "done" },
-    { from: "running", to: "failed" },
-    { from: "queued", to: "failed" },
-  ],
-})
-@behavior("Lease", {
-  ttlMs: 30000,
-  maxHoldField: "timeLimitMs",
-  onExpiry: { transition: "queued", from: ["running"] },
-  maxExpiries: 3,
-  escalate: { transition: "failed", from: ["running"] },
-  overridePermission: "jobs.override",
-})
-@behavior("Assignment", { permission: "jobs.assign" })
-@behavior("Queue", { claim: { from: ["queued"], to: "running" }, priorityField: "priority", match: ["topic"] })
-@behavior("Budget", { meters: { cpuSeconds: { limit: 3600, reserve: 600, reset: "daily" } }, limitPermission: "jobs.budget" })
-@behavior("Retries", {
-  classes: { timeout: { attempts: 3 }, invalidOutput: { attempts: 2 }, rejected: "terminal" },
-  totalAttempts: 4,
-  exhaustedState: "failed",
-})
-export abstract class Job {
-  title: Validate<string, { maxLength: 200 }>;
-  topic?: string;
-  priority?: Generic.Int64;
-  timeLimitMs?: Generic.Int64;
-}
-```
+- **`batch` is a relation**, held as `batchId`: the Batch that stamped
+  the job, which Blueprint and the batch's Reactions read.
+- **`Dependencies` gates `running`**, so a step does not start before the
+  steps it comes after, by a claim or by a plain transition.
+- **`Constants` keeps `step` and `topic`**, so no one, the worker holding
+  the job's lease included, turns a step into another one.
 
-`superschematic format --to=json` writes the JSON document you define and
-publish in the engine. `examples/engine-jobs` publishes a schema like it,
-`schemas/jobs.schema.json`, and runs its workers as separate processes
-over the HTTP API. There `claimNext` is a schema-level route and the rest
-are instance operations, each with the lease's token in the
-`Preconditions` header:
+### A claim
 
-```
-POST /namespaces/default/schemas/jobs/operations/claimNext                 {"match": {"topic": "search"}}
-POST /namespaces/default/schemas/jobs/instances/{id}/operations/heartbeat  Preconditions: {"Lease": {"token": 1}}
-```
+A claim is a read and a lease. Read the rows that may be claimed, in the
+order you want, and take Lease's `acquire` on the first you can. A
+claimer that loses the race meets `held_by_another` and goes on to the
+next row. The holder then moves the row with the lease's token, and
+reserves its budget:
 
-A claim takes the best queued job, highest priority first, then oldest:
-it takes the lease, reserves the budget and moves the status to running,
-all in one transaction. The holder renews the lease while it works,
-presents the token on every write, reports usage and the attempt by
-failure class, finishes the job and gives the lease back. The example's
-workers leave that loop to the package's worker
-([Write a worker](#write-a-worker)).
+<Snippet example="engine-jobs" file="src/dev.ts" symbol="claim" />
 
-A heartbeat's result also carries the directives sent to the holder and
-not yet acknowledged, and `heartbeat({ acknowledge: ids })` acknowledges
-the ones handled in the same write. A failed attempt's result carries its
-class's `hint`, which can steer the next attempt.
+- **Blocked work waits at its gate.** A read shows `Dependencies`'
+  `dependenciesBlocked`, so the claim passes over a blocked row. Give
+  `Dependencies` the state a claim moves to in `gatedStates`
+  (`["running"]`), so a move that skips the read waits for the blockers
+  too.
+- **Every write presents the token**, in the `Preconditions` header over
+  HTTP: `Preconditions: {"Lease": {"token": 1}}`.
+- **Search is a filter.** A list's `filter[title][contains]=index`
+  matches a field's text anywhere, case aside. A compiled table searches
+  with `@searchField` and `@searchable`.
 
-A large result, a field whose JSON is longer than 64 KiB that
-`recordAttempt` keeps or the worker writes, is stored once in the
-engine's value store, and the job's row and events keep a ref to it, so
-heartbeats and the other writes under the lease never rewrite it. A
-dashboard that lists jobs passes `valueRefs` to receive the refs rather
-than the results ([The engine](/superschematic/guides/engine/#instances)).
+### Finish or fail
+
+A successful attempt charges what the work used, records the attempt,
+moves the job to done and releases the lease:
+
+<Snippet example="engine-jobs" file="src/dev.ts" symbol={['finish', 'fail']} />
+
+- **Retries keeps no result.** A table's Retries takes no `resultField`.
+  The example keeps a result in the successful attempt's `detail`, since
+  its workers write a job only through the work's operations; an app
+  whose holders may update the row writes it there, with the token.
+- **A failure of a terminal class** fails the job for good: the
+  example's operator cancels a running job with a `cancel` directive,
+  which the holder reads at its next heartbeat and records as a
+  `cancelled` failure.
 
 A refusal carries a code to branch on. A worker whose lease is gone gets
-409 `vetoed` with `details.behavior` `Lease` and `details.code`
-`token_stale` (another lease replaced it) or `lapsed` (it ran out), and
-stops:
-
-```json
-{ "status": 409, "code": "vetoed",
-  "details": { "behavior": "Lease", "action": "transition", "reason": "token 1 is stale: the lease is at token 3",
-               "code": "token_stale", "details": { "token": 1, "current": 3 } } }
-```
-
-The engine's client reads it as an `EngineVeto`, and
-`isVeto(error, 'Lease', ['lapsed', 'token_stale'])` branches on it. Not
-every `Lease` veto means the lease is gone: `held_by_another` refuses a
-principal that never held it. The worker below takes `lapsed`,
-`token_stale`, `not_holder` and `not_leased`, and a deleted instance, as
-the lease lost.
-
-An agent that works the queue over MCP reads the same from the tools:
-each tool's guidance, in its `_meta`, says what the job's config means
-for it. `jobs_heartbeat`'s says to call it at least every 10 seconds
-with the token; `jobs_claim_next`'s names the order, the `topic` match
-and what keeps a job out; each write's `errors` list the codes a call
-can meet, Lease's `held_by_another`, `token_stale` and `lapsed` among
-them.
-
-A worker that dies stops renewing. Once its lease passes `expiresAt`, or
-the job's `timeLimitMs`, the runner's `expire` sweep clears the holder,
-advances the token, counts the expiry, settles the budget reservation
-and moves the job back to `queued`, where the next `claimNext` finds it.
-After the test's run, a job that timed out reads, its own fields in
-`data` and each behavior's under its name in `behaviors`:
-
-```json
-{
-  "data": { "title": "index", "topic": "search", "priority": 5, "timeLimitMs": 45000 },
-  "behaviors": {
-    "Workflow": { "status": "queued", "enteredAt": 1045000 },
-    "Lease": { "token": 2, "active": false, "expiries": 1, "ended": { "reason": "maxHold", "at": 1045000 } },
-    "Assignment": {},
-    "Budget": { "meters": { "cpuSeconds": { "used": 100, "reserved": 0, "limit": 3600, "remaining": 3500 } } },
-    "Retries": { "total": 1, "classAttempts": { "timeout": 1, "invalidOutput": 0, "rejected": 0 }, "exhausted": false, "stuck": false }
-  }
-}
-```
-
-A free lease has no `holder`, and no `acquiredAt`, `renewedAt` or
-`expiresAt`: a behavior's field with no value is absent.
-
-## Write a worker
-
-The package's `./worker` subpath runs the loop above for you, on the
-engine's typed client
-([The engine](/superschematic/guides/engine/#call-it-from-typescript)).
-It imports only `@superschematic/engine/client`, so a worker process
-loads no engine addon and no SQLite. The example's workers run on it:
-each process calls as its own principal, beats the worker instance that
-stands for it, claims the jobs of its topic, and runs a handler over
-each, which an operator's `cancel` directive stops:
-
-<Snippet example="engine-jobs" file="src/worker.ts" symbol={['jobWorker', 'work']} />
-
-A process makes its client and starts the worker; a stop hands back what
-it holds:
-
-```ts
-import { EngineClient } from '@superschematic/engine/client';
-import { jobWorker } from './worker.ts';
-
-const client = new EngineClient({ baseUrl: 'http://127.0.0.1:8788/api', auth: { token: 'worker-1-token' } });
-const worker = jobWorker(client, 'worker-1', async ({ job, signal }) => crawl(job, { signal }), { topic: 'search' });
-await worker.start();
-process.on('SIGTERM', () => worker.stop());
-```
-
-- **Claims.** `start()` reads the schema's describe document and claims
-  with `claimNext` until it holds `concurrency` jobs. An empty queue is
-  watched, not polled: the schema's event stream wakes the worker, and
-  between events it looks again with `countClaimable`, a read that takes
-  no write lock, after a backoff that doubles (`idle`).
-- **Presence.** With `presence`, the worker beats that instance as its
-  principal before it claims, then on a timer of its own, a third of the
-  Presence `ttlMs` apart by default, whatever its handlers are doing.
-  While the engine refuses a beat, or none succeeds for the `ttlMs`, it
-  claims nothing, `onError` hears a `PresenceLostError`, and the next beat
-  that succeeds brings it back. The jobs it holds go on: their own
-  heartbeats keep their leases, and a miss expires only the leases not
-  renewed since the last beat.
-- **The job.** `job.instance` reads the claimed instance and presents
-  the lease's token on every write; `job.client` reaches everything else,
-  without it. Each job heartbeats at the claim's interval, and the
-  directives a heartbeat returns go to `job.onDirective`'s listeners, once
-  each; the next heartbeat acknowledges them in its own write.
-- **A lost lease.** A `lapsed` or `token_stale` refusal of a heartbeat or
-  a write, a deleted instance, or no heartbeat for the lease's length
-  aborts `job.signal` with a `LeaseLostError`. Pass the signal to what
-  the handler waits on. A write through `job.instance` after that throws
-  without being sent, and the worker writes nothing more for the job.
-- **How it ends.** `{ transition: 'done' }` records a successful attempt
-  when the schema composes `Retries`, with the `attempt` given (the
-  example's `result`), moves the status and releases. Returning nothing
-  hands the job back. A `WorkFailure` records its failure class and hands
-  the job back, or abandons it with `abandon: true`, which counts toward
-  `maxExpiries`; any other error abandons it, so a job no worker can
-  finish escalates instead of coming back forever. The example's cancel
-  is a failure of a terminal class, so `Retries` fails the job for good.
-- **Stopping.** `stop()` claims nothing more, waits up to 30 seconds for
-  the jobs it holds (`timeoutMs`; `drain: false` waits for none), then
-  aborts the rest and releases their leases, which counts nothing, so a
-  deploy hands work back at once instead of letting it lapse. It beats
-  until nothing is held.
-
-The package's
-[README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md#the-worker)
-has every option.
+409 `vetoed`, its `details.vetoCode` `token_stale` (another lease replaced
+it) or `lapsed` (it ran out), and stops writing.
 
 ## Lease
 
-An exclusive, time-bounded lease on the instance, held by one principal.
+An exclusive, time-bounded lease on the row, held by one principal.
 
 | | |
 | --- | --- |
-| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `sweepMs` (5000), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`[{ revised: { link }, name, data? }]`) |
+| Config | all optional: `ttlMs` (60000), `heartbeatMs` (a third of `ttlMs`, at most half), `maxHoldMs` or `maxHoldField`, `onExpiry` and `escalate` (`{ transition, from }`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, and on a table with several Workflows `status` |
 | Precondition | `{ token }`: `preconditions: { Lease: { token } }`, or the `Preconditions` header over HTTP |
-| Fields | `holder`, `token`, `acquiredAt`, `renewedAt`, `expiresAt`, `active`, `expiries`, `ended`, under `Lease`; a list filters on `Lease.holder`, null for a free instance |
-| Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and the schema-level `expireHolder({ holder, notRenewedAfter? })` |
-| Schedule | `expire`, every `sweepMs`, on the runner |
-| Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations (`"Revisions.propose"`), read-only ones, operations beside the instance (Comments' `post`), Queue's `refresh`, and principals with `overridePermission` |
+| Fields | `holder`, `token`, `acquiredAt`, `renewedAt`, `expiresAt`, `active`, `expiries`, `ended`; a list filters on the holder |
+| Operations | `acquire({ ttlMs? })`, `heartbeat({ acknowledge? })`, `release({ abandon? })`, `expire({ holder?, notRenewedAfter? })`, `direct({ name, data?, dedupeKey? })`, `acknowledge({ ids })`, `resetExpiries()`, and `expireHolder({ holder, notRenewedAfter? })`, an operation of the table as a whole |
+| Deadline | `expire`, when the lease falls due, which a table's behavior worker or development mode's runner runs |
+| Guard | a write that presents a stale token is refused, whoever calls; while a lease is active, only the holder may update, delete or call a writing operation, except `exempt` operations, read-only ones, operations beside the row (Comments' `post`), and principals with `overridePermission` |
 
 - **The token is a fencing counter, not a secret.** It advances at every
   acquire, release and expiry. A write presents it as Lease's
   precondition, and one that presents an old token is refused
   (`token_stale`), so a worker process that lost its lease cannot write,
   renew or release after another process of the same principal took the
-  job again. `heartbeat`, `acknowledge` and `release` need it.
+  job again. `heartbeat` and `acknowledge` need it.
 - **`requireToken: true`** makes every write under an active lease
   present the token, the holder's own included, so a fleet under one
-  principal cannot write unfenced by mistake. Exempt and read-only
-  operations, the runner's sweep and overrides are not held to it.
+  principal cannot write unfenced by mistake.
 - **Lapsed is not held.** A lease past `expiresAt`, or past its longest
-  hold (`maxHoldField` on the instance, else `maxHoldMs`), gives its
-  holder nothing. A heartbeat never extends past the longest hold.
+  hold (`maxHoldField` on the row, else `maxHoldMs`), gives its holder
+  nothing. A heartbeat never extends past the longest hold.
 - **Expiry moves the status.** `onExpiry` moves it back (running to
   queued); at `maxExpiries`, `escalate` moves it instead (running to
-  failed), and `acquire` is refused until `resetExpiries`. An expiry on
-  an instance already in a terminal state is not counted: a holder that
-  finished and died before releasing has not failed.
+  failed), and `acquire` is refused until `resetExpiries`. An expiry of a
+  row already in a terminal state is not counted: a holder that finished
+  and died before releasing has not failed.
 - **Give up with `abandon`.** `release({ abandon: true })` counts as an
   expiry, so a job that every worker takes and drops reaches
   `maxExpiries` and escalates. A plain `release` hands it back without
@@ -311,391 +161,166 @@ An exclusive, time-bounded lease on the instance, held by one principal.
 - **Expiries say why.** `expire` returns `reason`: `ttl` (the holder
   stopped renewing), `maxHold` (it renewed past its longest hold, so it
   is stuck) or `holder` (an active lease expired by its holder's name).
-  `Lease.ended` keeps how the last lease ended, and the event of each end
-  carries it.
+  `ended` keeps how the last lease ended.
 - **Directives** are messages to the holder: `direct` sends one, every
   heartbeat returns those not yet acknowledged, and `acknowledge`, or a
   heartbeat's own `acknowledge`, stops them in the same write. A
-  `dedupeKey` sends a directive once per lease, so a sender that fires
-  on every change does not queue it twice. They end with the lease.
-- **Tell the holder a linked target moved.** `directOn` sends a
-  directive when the target of one of the type's links gains a revision
-  or a release, as `Reactions`' `revised` hears it: with
-  `{ "revised": { "link": "plan" }, "name": "rebase" }`, the holder of
-  each step pinned to an earlier revision of its plan hears `rebase`,
-  its `data.revised` saying which plan and which revision. The runner
-  sends it with `direct`, as its principal, which needs
-  `directPermission`, once per lease and move. A step with no lease
-  hears nothing, and nothing waits for its next holder, who takes it
-  after the move.
-- **List by holder.** `where: { "Lease.holder": "worker-1" }` lists the
-  instances whose lease worker-1 holds, a lapsed one until its expiry is
-  applied, and `null` the free ones: what a worker reads at a restart.
+  `dedupeKey` sends a directive once per lease. They end with the lease.
 - **A gone holder.** `expireHolder` expires every lease one principal
   holds and returns the ids; `notRenewedAfter` spares a lease renewed
   after a time, whose own heartbeats show it alive.
-- **The sweep** needs the runner's principal to hold `read` and `write`
-  on the schema and any permission an `onExpiry` transition names.
-- **Beside `Branches`.** A type composes `Lease` with the core's
-  [`Branches`](/superschematic/guides/engine-behaviors/#branches), whose
-  release-pointer operation is `releaseCommit`, so `release` stays
-  Lease's and ends the lease. The guard holds `Branches`' writes
-  (`save`, `commit`, `merge`, `releaseCommit` and the rest) to the
-  holder like any other writing operation, so a worker that holds a
-  recipe's lease edits, merges and releases its version graph while
-  others only read it. The token fences those writes as it fences the
-  rest.
 - **Beside `Approvals`.** A sign-off is a writing operation of another
   principal than the holder, so the guard refuses
   [`Approvals`](/superschematic/guides/engine-behaviors/#approvals)'
   `signOff` and `withdrawSignOff` while a lease is active. List
   `"Approvals.signOff"` and `"Approvals.withdrawSignOff"` in `exempt` to
   let approvers sign leased work off.
-- **Beside `Numbering`.** A create holds no lease, so
+- **Beside `Numbering` and `Timers`.** A create holds no lease, so
   [`Numbering`](/superschematic/guides/engine-behaviors/#numbering)
-  numbers each new instance whoever holds what. Its `assignNumber`, which
-  numbers an instance made before the schema composed it, writes: list
-  `"Numbering.assignNumber"` in `exempt` to backfill leased instances.
-- **Beside `Timers`.** The runner fires a
+  numbers each new row whoever holds what; list
+  `"Numbering.assignNumber"` in `exempt` to backfill leased rows. List
+  `"Timers.fireTimer"` to let a
   [`Timers`](/superschematic/guides/engine-behaviors/#timers) deadline
-  through `fireTimer`, a writing operation of its own principal, so the
-  guard refuses the fire of a leased instance, and the sweep leaves the
-  deadline for its next run. List `"Timers.fireTimer"` in `exempt` to let
-  a deadline move leased work on; its move is a call of the instance's
-  own, which the guard lets through.
-- **Heartbeats fill the log.** Each one is an operation event. A
-  dashboard that streams the event log passes `exclude=heartbeat` and
-  keeps its place past them without receiving one.
-- **A worker fleet as a service.** A fleet that calls the engine with a
-  service credential and no end user (D37) is one principal,
-  `service:<deployable>`, which holds no permissions: give it what it may
-  do in the access policy, and fence its processes from each other with
-  the token.
-- **A table's Lease.** A DB table implements Lease too (D104,
-  [Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)):
-  its lease is the table's columns, its expiry a deadline the API's
-  behavior worker runs, and its config takes `status`, the Workflow its
-  moves read. The engine refuses `status` at define, naming the table
-  form (`implements Lease<T, { ... }> on a DB table`); a table refuses
-  `sweepMs` and `directOn`, and has no `expireHolder`.
-
-## Assignment
-
-One principal the instance is assigned to, or none.
-
-| | |
-| --- | --- |
-| Config | `permission`, optional |
-| Field | `assignee`, the principal's subject; a list filters on `Assignment.assignee`, null for the unassigned |
-| Operations | `assign({ to })`, `unassign()` |
-| Guard | while assigned, a `Lease.acquire` or `Queue.claim` by anyone but the assignee is `vetoed` (`assigned_to_another`) |
-
-A principal may assign an unassigned instance to itself and unassign
-itself; every other move needs `permission`. `claimNext` skips work
-assigned to someone else, so in the test above a worker never claims the
-job assigned to another, whatever its priority. A list of my work, or of
-work no one has, filters on the assignee:
-`where: { "Assignment.assignee": [null, "worker-1"] }`.
-
-## Queue
-
-Claimable work: one transaction that checks an instance can be claimed,
-takes its lease and moves its status.
-
-| | |
-| --- | --- |
-| Config | `claim`: `{ from, to }`, the states an instance is claimed in and the one a claim moves it to; `priorityField`, an integer field; `match`, the fields `claimNext` may filter on; `maxCandidates` (100); `excludeStale`, `Links` links pinned to a revision or a release |
-| Operations | `claim({ ttlMs? })`, `refresh()`, the schema-level `claimNext({ match?, assignedOnly?, ttlMs? })`, which returns `{ claimed }`, a claim or null, and the schema-level, read-only `countClaimable({ match?, assignedOnly? })`, which returns `{ count }` |
-| Guard | `Lease.acquire` other than through a claim is `vetoed` (`claim_required`), so a claimable instance's lease is taken only by claiming it |
-
-`claim` expires a lapsed lease first, then checks the status is one of
-`claim.from`, that no `Dependencies` blocker holds the instance up, and
-that no link `excludeStale` names is pinned to a revision or a release its
-target has moved past (`stale_link`), then acquires the lease, reserves `Budget` when the type composes it, and
-transitions to `claim.to`. A refusal at any step leaves nothing behind.
-
-A claim waits on blockers; a plain `transition` to `claim.to` does not,
-unless `Dependencies` gates that state too. List it in `gatedStates`
-(`{ "gatedStates": ["running", "done"] }` on a schema like `jobs` above)
-and a manual start waits for the blockers as a claim does. A blocker
-counts as finished only in a terminal state whose outcome the
-dependent's `satisfiedBy` lists, a success by default
-([Outcomes](/superschematic/guides/engine-behaviors/#outcomes)).
-
-`claimNext` tries candidates highest priority first (an instance with no
-priority last), then oldest, then by id, skipping work that is blocked,
-assigned to another principal, at `maxExpiries`, exhausted by `Retries`,
-pinned to a superseded revision or release or over its `Budget`, and claims the first that succeeds; a claim
-refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
-the next. Each claim is one transaction, and a namespace's writes take
-turns, so two claims never interleave, even from several instances of a
-server on one Postgres schema.
-
-- **Pools in one order.** A `match` value may be a list: `{ topic:
-  ["search", "mail"] }` takes either topic, highest priority first across
-  both.
-- **Over budget is not tried.** Queue copies Budget's `checkReserve`, and
-  hears the values of the enclosing scopes it says its answer turns on,
-  each at the instance's own amount, so a pool that runs out takes its
-  queued work out of the candidates, and a pool that frees up, or a new
-  UTC day for a daily meter, puts it back. Work over its budget at the
-  head of the queue never hides claimable work behind it, and a write to
-  a pool with thousands of jobs queued under it reaches only the jobs
-  whose amount its remaining crosses.
-- **Outdated work is not tried.** With `excludeStale: ["spec"]` and a
-  pinned `spec` link, a job whose spec has a newer revision than the one
-  it pins is out of the candidates, and `claim` refuses it, until it is
-  linked to the spec again. A link pinned to a release (`pinned:
-  "release"`, to a schema that composes `Branches`) keeps its job out
-  the same way once the target is released again. A `revised` rule of `Reactions` can send it
-  back to review ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
-- **Your own work.** `assignedOnly: true` takes only work assigned to
-  the caller.
-- **How much is waiting.** `countClaimable` counts the candidates with
-  the same rules and claims nothing: a signal to scale workers on.
-
-Queue cannot be added to a schema that already has instances.
+  move leased work on.
+- **Not yet.** `directOn`, which sends a directive when a linked row
+  gains a revision or a release, waits for the core to hear one on a
+  table, and the build refuses it. The engine's `sweepMs` has no use: a
+  lease expires at its own deadline.
 
 ## Presence
 
-A heartbeat on an instance that stands for a worker. The instance's
+A heartbeat on a row that stands for a worker. The row's
 `principalField` names the principal, and only that principal may beat
 it.
 
 | | |
 | --- | --- |
-| Config | `ttlMs` and `principalField`, required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (5000) |
-| Fields | `deadline`, `lastBeatAt`, `missed`, `released`, under `Presence` |
+| Config | `ttlMs` and `principalField`, required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (the tables whose leases a miss releases), `ttlByState`, and `status` |
+| Fields | `deadline`, `lastBeatAt`, `missed`, `released` |
 | Operations | `beat()`, `miss()` |
-| Schedule | `miss`, every `sweepMs`, on the runner |
+| Deadline | `miss`, at the row's deadline |
 
-```ts
-@behavior("Presence", {
-  ttlMs: 30000,
-  principalField: "subject",
-  onMissed: { transition: "missing", from: ["idle", "busy"] },
-  onBeat: { transition: "idle", from: ["missing"] },
-  releaseLeases: ["jobs"],
-})
-export abstract class Worker {
-  subject: string;
-  name?: string;
-}
-```
+The example's Worker beats while it runs:
+
+<Snippet example="engine-jobs" file="schemas/dev/workers.schema.json" />
 
 A worker that misses its deadline is marked `missed`, moved to
 `missing`, and the leases its principal holds on the `releaseLeases`
-schemas are expired through `Lease.expireHolder`, so its jobs go back in
+tables are expired through Lease's `expireHolder`, so its jobs go back in
 the queue even if their own leases had time left. A lease acquired or
 renewed strictly after the worker's last beat is spared: its heartbeats
 show the process holding it is alive, and it expires on its own if they
-stop. A lease taken in the same millisecond as the beat is not spared.
-Keep lease heartbeats at most the presence `ttlMs` apart. The miss
-records the ids it expired in `Presence.released`, which its event
-carries. The runner's principal needs `read` and `write` on the worker
-schema, which the sweep reads (`workers.read` in the example), and
-`read` and Lease's `overridePermission` on each `releaseLeases` schema.
-Without `read`, the sweep fails `forbidden` and keeps retrying. A later
-`beat` clears the miss.
+stop. Keep lease heartbeats at most the presence `ttlMs` apart. The miss
+records the ids it expired in `released`. A later `beat` clears the miss,
+and `ttlByState` keeps a state's rows present longer.
 
-The example's test shows it on a clock it moves, with a worker
-`ttlMs` of 15 seconds and a lease of 30. worker-1 holds a job when the
-test cuts it off from the engine:
+The example's test shows it on a clock it moves, with a worker `ttlMs`
+of 15 seconds and a lease of 30:
 
-<Snippet example="engine-jobs" file="test/jobs.test.ts" from="// worker-1 is cut off holding the job" to="assert.equal(second.worker.jobs[0]?.token, 3);" />
-
-When worker-1 comes back, its next heartbeat presents token 1, which
-Lease refuses (`token_stale`, details `{ token: 1, current: 3 }`): the
-worker aborts its handler, and writes nothing more for the job.
-
-A DB table implements Presence too (D104,
-[Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)):
-its miss is a deadline the API's behavior worker runs, `ttlByState` keeps
-a state's rows present longer, and `status` names the Workflow it reads.
-The engine refuses `ttlByState` and `status` at define, naming the table
-form (`implements Presence<T, { ... }> on a DB table`), and a table
-refuses `sweepMs`.
+<Snippet example="engine-jobs" file="test/jobs.dev.test.ts" from="// worker-1 stops beating and renews nothing." to="[409, 'token_stale', { token: 1, current: 3 }]);" />
 
 ## Blueprint
 
-Children created with their parent: a map of steps says which instances
-of a child schema an instance has, and which block which.
+Children created with their parent: a map of steps says which rows of a
+child table a row has, and which block which.
 
 | | |
 | --- | --- |
-| Config | `schema` (the child schema, which keeps `keyField` and the copied fields with `Constants`), `parentLink` (its link back here) and `keyField` (a string field of the child), required; `steps` inline or `from` (`{ link, field }`, a map read from a pinned revision); `copyFields`, `copyLinks` |
+| Config | `schema` (the child table), `parentLink` (the child's relation to this table) and `keyField` (a string field of the child), required; `steps`; `copyFields`, `copyLinks` (this table's relations, each copied to the child's relation of the same name) |
 | Steps | by key: `{ after?, when?, data? }`; `after` lists the steps that block this one, `when` is `{ field, equals }` or `{ field, includes }` |
-| Field | `children`: `[{ key, id }]`, under `Blueprint` |
-| Guard | once stamped, moving the `from` link is `vetoed` (`stamped`); a stamp that cannot read its steps is too (`no_revision`, `unreadable`, `invalid_steps`, `no_dependencies`), and so is one whose child schema's live version no longer keeps `keyField` and the copied fields with `Constants` (`not_constant`), which refuses the create or the link that stamps |
+| Field | `children`, which a read computes: the child rows that point at the row, in the template's order |
 
-```ts
-@behavior("Blueprint", {
-  schema: "steps",
-  parentLink: "batch",
-  keyField: "step",
-  steps: {
-    fetch: {},
-    check: { after: ["fetch"], when: { field: "topic", equals: "search" } },
-    index: { after: ["check"], data: { title: "Index what was fetched" } },
-  },
-  copyFields: ["topic"],
-})
-export abstract class Batch {
-  title: string;
-  topic?: string;
-}
-```
+The example's Batch stamps three steps and settles from them:
 
-Creating a batch creates its steps in one transaction with the batch,
-each step created with its link to the batch and its `Dependencies`
-edges as
-[create parameters](/superschematic/guides/engine-behaviors/#create-parameters),
-so a step is blocked from its first event and `claimNext` never finds it
-early. A step whose `when` does not hold is left out and the chain
-closes over it: a batch with `topic: "copy"` gets `fetch` and `index`,
-with `index` blocked by `fetch`. When the child schema composes `Queue`,
-`claimNext` claims each step once its blockers finish. A step that ends
-in a failure state (`outcomes: { failed: "failure" }` on the child's
-`Workflow`) stays a blocker, so the steps after it are not claimed until
-someone removes the edge. The child schema needs `Links` with the
-`parentLink`, `Dependencies` when steps use `after`, and
+<Snippet example="engine-jobs" file="schemas/dev/batches.schema.json" />
+
+A create stamps a child per step in its own write, each through the child
+table's own create with its relation to the parent and its
+`Dependencies` blockers, so a failing child refuses the parent's create
+and a step is blocked from its first write. A child's key is a UUID the
+core draws. A step whose `when` does not hold is left out and the chain
+closes over it. A step that ends in a failure state (`outcomes: { failed:
+"failure" }` on the child's `Workflow`) stays a blocker, so the steps
+after it wait until someone removes the edge. The child table needs the
+`parentLink` relation, `Dependencies` when steps use `after`, and
 [`Constants`](/superschematic/guides/engine-behaviors/#constants-and-variants)
-over `keyField` and every copied field, so no one, the worker holding a
-step's lease included, can turn a step into another one:
-
-```ts
-@behavior("Constants", { fields: ["step", "topic"] })
-```
-
-Make the `parentLink` `required` and no step can be created without its
-batch, by Blueprint or anyone else. With `from`, a create that gives the
-definition's link stamps the steps in that create. To settle the parent
-from its steps, give it `Reactions` with `allTerminal` and `anyTerminal`
-rules ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
-A DB table implements Blueprint too, and `examples/engine-jobs` runs on
-development mode beside the engine
-([On a table and on development mode](#on-a-table-and-on-development-mode)).
+over `keyField` and every copied field. To settle the parent from its
+steps, give it `Reactions` with `allTerminal` and `anyTerminal` rules
+([Reactions](/superschematic/guides/engine-behaviors/#reactions)). It
+takes inline steps alone: the engine's `from`, a map read from a pinned
+revision, needs a pin a relation does not keep.
 
 ## Budget
 
 Reserve-then-settle budgets in units you name: each meter counts what the
-instance has used and reserved against a limit, and passes both up to
-the enclosing scopes its `scope` link points at.
+row has used and reserved against a limit, and passes both up to the
+enclosing scopes its `scope` relation points at.
 
 | | |
 | --- | --- |
-| Config | `meters` (required, by name): each `limit` and `limitField`, `reserve` and `reserveField`, `scope` (a `Links` link), `reset: "daily"`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }` |
-| Field | `meters`: by meter, `{ used, reserved, limit, remaining }`, under `Budget` |
+| Config | `meters` (required, by name): each `limit` and `limitField`, `reserve` and `reserveField`, `scope` (a to-one relation), `reset`; `limitPermission`; `onExceeded: { direct }`; `escalate: { transition, from }`; on a table `observe`, `observePermission` and `status` |
+| Field | `meters`: by meter, `{ used, reserved, limit, remaining }` |
 | Operations | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, and the scope side, `reserveFor`, `settleFor` and `recordUsageFor` |
 
-- A claim reserves each meter's amount, the instance's `reserveField`
-  or else `reserve`, and is refused when it does not fit (`over_limit`)
-  in the meter's limit, the instance's `limitField` or else `limit`.
-  `checkReserve` says whether it would fit, without reserving, and which
-  values of each scope its answer turns on; Queue copies it, so
-  `claimNext` does not try work over its budget.
+- A claim reserves each meter's amount, the row's `reserveField` or else
+  `reserve`, and is refused when it does not fit (`over_limit`) in the
+  meter's limit, the row's `limitField` or else `limit`. `checkReserve`
+  says whether it would fit, without reserving.
 - `recordUsage` is never refused, since the usage has happened. It
   releases the part the reservation covered and reports any overrun;
   with `onExceeded`, the lease holder also gets a directive, and with
-  `escalate`, each instance it leaves over its limit, a scope included,
-  moves its status by its own config, a pool to `paused` say.
-- On a type with `Lease`, a reservation lasts as long as the lease: a
+  `escalate`, each row it leaves over its limit, a scope included, moves
+  its status by its own config.
+- On a table with `Lease`, a reservation lasts as long as the lease: a
   release or an expiry settles it.
-- A `scope` link to a pool or a project applies that scope's own limit
-  too, in the same transaction.
-- A `daily` meter's usage resets at the start of each UTC day.
-- **A table's Budget.** A DB table implements Budget too (D104,
-  [Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)),
-  with a to-one relation for a meter's `scope`, resets `hourly`, `daily`,
-  `weekly`, `monthly` and `{ everyMs }`, `window: "rolling"`, `observe`
-  and `observePermission`, and `status`. The engine refuses each but
-  `daily` at define, naming the table form (`implements Budget<T, { ...
-  }> on a DB table`), and refuses every `observe`.
+- A `scope` relation to a pool or a project applies that scope's own
+  limit too, in the same write.
+- A table's meters reset `hourly`, `daily`, `weekly`, `monthly` or
+  `{ everyMs }`, in a fixed or a `rolling` window
+  ([Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)).
 
 ## Retries
 
 Attempts counted per failure class, against per-class caps and a total.
-On an engine type there is no backoff in time: work that may run again
-may be claimed at once. A DB table's Retries waits (D104,
-[Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)):
-a class's `backoff`, `retryInto`, `then`, `giveUpAfterMs`, `window` and
-`keyField`, with `status`, are a table's alone, and the engine refuses
-each at define, naming the table form (`implements Retries<T, { ... }> on
-a DB table`).
 
 | | |
 | --- | --- |
-| Config | `classes` (required: `{ attempts, hint? }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `limitsPermission`, `keepBest`, `stuckAfter`, `resultField`, `from`, `permission` |
-| Fields | `total`, `classAttempts`, `bestScore`, `exhausted`, `stuck`, under `Retries`; a list filters on `Retries.exhausted` |
+| Config | `classes` (required: `{ attempts, hint?, backoff? }` or `"terminal"`), `totalAttempts` and `exhaustedState`, required; `limitsField`, `limitsPermission`, `keepBest`, `stuckAfter`, `from`, `permission`; on a table `retryInto`, `then`, `giveUpAfterMs`, `window`, `keyField` and `status` |
+| Fields | `total`, `classAttempts`, `bestScore`, `exhausted`, `stuck`, `retryAt`, `failingSince`, `keyedBy`; a list filters on `exhausted` |
 | Operation | `recordAttempt({ failure?, score?, result?, signature?, predicates?, detail? })`, which returns the class's `hint` |
-| Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring or claiming, are `vetoed` (`exhausted`); `limitsField` changes only with `limitsPermission`, and never by the lease holder (`limits_fixed`) |
+| Guard | once exhausted, transitions to any state but `exhaustedState`, and acquiring, are `vetoed` (`exhausted`); `limitsField` changes only with `limitsPermission`, and never by the lease holder (`limits_fixed`) |
 
 - An attempt without `failure` is a success.
 - A terminal class, a class out of room, or the total reaching its cap
-  exhausts the instance and moves it to `exhaustedState`.
-- `keepBest` keeps a failed attempt's `result` in `resultField` when its
-  `score` improves on the best by `minDelta`.
-- `stuckAfter` exhausts an instance that fails with the same `signature`
-  that many times in a row.
+  exhausts the row and moves it to `exhaustedState`.
+- A class's `backoff` waits before a retry, `retryInto` names the states a
+  retry may enter, and `then` moves the row once its wait is over
+  ([Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)).
+- `stuckAfter` exhausts a row that fails with the same `signature` that
+  many times in a row.
 - A class's `hint` comes back from `recordAttempt` to steer the next
-  attempt; an attempt's `detail`, validation errors say, is kept in its
-  event.
+  attempt; an attempt's `detail` is kept with it.
 - A worker cannot raise its own caps: `limitsField` needs
-  `limitsPermission`, and the lease holder may not change it. `Constants`
-  is the general rule for a field nothing changes after the create;
-  Retries guards its own field because the rule reads who holds the
-  lease, and the holder must never raise its caps, even with the
-  permission.
+  `limitsPermission`, and the lease holder may not change it.
 - Nothing resets exhaustion.
 
-## On a table and on development mode
+## The engine's work-queue package
 
-Lease, Presence, Budget, Retries and Blueprint also run on the behaviors'
-core, so a DB table implements them (`implements Lease<Job, { ... }>`)
-and [development mode](/superschematic/guides/development-mode/) serves
-them. Queue and Assignment do not. `examples/engine-jobs` runs on both:
-`test/jobs.dev.test.ts` serves `schemas/dev` with
-`@superschematic/rules-handler` on a clock the test moves.
-
-**A claim is a read and a lease.** Queue folds into the app's own claim:
-a read of the rows that may be claimed, in the order you want, and
-Lease's `acquire` on the one you pick. A claimer that loses the race meets
-`held_by_another` and goes on to the next row. The holder then moves the
-row with the lease's token, and reserves its budget:
-
-<Snippet example="engine-jobs" file="src/dev.ts" symbol="claim" />
-
-- **Blocked work waits at its gate.** A read shows `Dependencies`'
-  `blocked`, so the claim passes over a blocked row. Give `Dependencies`
-  the state a claim moves to in `gatedStates` (`["running"]`), so a move
-  that skips the read waits for the blockers too.
-- **Retries keeps no result.** A table's Retries takes no `resultField`.
-  The example keeps a result in the successful attempt's `detail`, since
-  its workers write a job only through the work's operations. An app
-  whose holders may update the row writes it there, with the token.
-- **Search is a filter.** Development mode serves no `Search`. A list's
-  `filter[title][contains]=...` matches a field's text anywhere, case
-  aside, with no weights and no ranking.
-
-**Blueprint on a table.** A table implements `Blueprint<Batch, { schema,
-parentLink, keyField, steps, copyFields?, copyLinks? }>`. `parentLink` is
-the child table's to-one relation to this one, and `copyLinks` names this
-table's relations, each copied to the child's relation of the same name.
-A create stamps a child per step in its change set, each through the child
-table's own create, so a failing child refuses the parent's create. A
-child's key is a UUID the core draws. Blueprint keeps no state: a read
-computes `children`, the child rows that point at the row, in the
-template's order. So it joins and leaves a table with rows. It takes inline
-steps alone: `from` reads a pinned revision, and a relation pins none. The
-build holds the config to the child table: the relation, `keyField`,
-`Constants` over the stamped fields, `Dependencies` for an `after`, the
-fields a step's data sets, and a `when`'s `includes` over a list.
+`@superschematic/engine-workqueue` ran these behaviors, Queue and
+Assignment among them, on the engine (`@superschematic/engine`), with a
+worker loop over the engine's client. Nothing in the repository's
+examples runs on the engine any more, and the engine and its packages are
+removed in a later step. The package's
+[README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md)
+documents it until then.
 
 ## Where to go next
 
-- The package
-  [README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md):
-  every behavior's refusals, guards and config changes in full.
-- [Engine behaviors](/superschematic/guides/engine-behaviors/): the
-  runner, schema-level operations, and the core's Dependencies and Links,
-  which Queue and Blueprint build on.
+- [Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters):
+  the same behaviors on a compiled table, with their columns, deadlines
+  and the API's behavior worker.
+- [Development mode](/superschematic/guides/development-mode/): the
+  requests, routes, policy and runner the example uses.
+- [Engine behaviors](/superschematic/guides/engine-behaviors/): the core's
+  Dependencies, Rollups and Reactions, which Blueprint and a batch build
+  on.

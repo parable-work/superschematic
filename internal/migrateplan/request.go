@@ -25,8 +25,13 @@ type Request struct {
 	// Dialect is the database's: postgres or sqlite.
 	Dialect sqlmigrate.Dialect `json:"dialect"`
 	// Documents are every schema document of the DB service, each as
-	// `format --to=json` writes it.
+	// `format --to=json` writes it, or development mode's General
+	// documents, which lower to its tables (D117).
 	Documents []json.RawMessage `json:"documents"`
+	// Service names the DB service General documents lower into; empty
+	// takes the name they share. Documents of a DB service must name it
+	// when it is given.
+	Service string `json:"service,omitempty"`
 	// From is the model the database recorded, as
 	// `superschematic-migrate status --model` prints it, or null for an
 	// empty database. It is required, so a request that leaves it out by
@@ -178,6 +183,9 @@ func Answer(req *Request, env Env) (*Response, error) {
 	sources := make([]Source, len(req.Documents))
 	for i, doc := range req.Documents {
 		sources[i] = Source{Name: fmt.Sprintf("documents[%d]", i), Data: doc}
+	}
+	if req.Service != "" {
+		env.Service = req.Service
 	}
 
 	schema, plan, err := planDocuments(sources, from, req.Dialect, renames, env)

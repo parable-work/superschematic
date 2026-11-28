@@ -43,7 +43,7 @@ func TestWorkflowPrincipalsFixturesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	question := db.Types["Question"]
-	if question == nil || question.IsEngineType() || len(question.FieldBehaviors()) != 2 {
+	if question == nil || len(question.TypeBehaviors()) > 0 || len(question.FieldBehaviors()) != 2 {
 		t.Fatalf("Question = %s", marshal(t, question))
 	}
 	compareExpanded(t, db, "fixture-workflow-principals-db.expanded.json")
@@ -270,75 +270,6 @@ func TestWorkflowByIsHeldToTheTable(t *testing.T) {
 				t.Fatalf("LoadService = %v", err)
 			}
 		})
-	}
-}
-
-// TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes (D104, D113): an engine
-// type's @behavior("Workflow", ...) naming a transition's by, an
-// overridePermission, repeat or finished, which the shared declaration's
-// configSchema accepts, is refused, one problem per member, naming the
-// table form, as the engine refuses each.
-func TestEngineTypesRefuseWhatOnlyATablesWorkflowTakes(t *testing.T) {
-	const member = "type Note: @behavior Workflow names %s, which a table's Workflow takes (status: Workflow<{ ... }> on a DB table, D104); an engine type's Workflow takes none of by, overridePermission, repeat and finished, so leave it out"
-	engineType := func(config map[string]any) func(doc, _ map[string]any) {
-		return func(doc, _ map[string]any) {
-			doc["types"].(map[string]any)["Note"] = map[string]any{"name": "Note", "role": "DBTable", "behaviors": []any{
-				map[string]any{"name": "Workflow", "config": config},
-			}, "fields": []any{questionField("id", "Identity.UUID", map[string]any{"required": true, "key": true})}}
-		}
-	}
-	transitions := func(by ...any) []any {
-		out := []any{}
-		for i, entry := range by {
-			move := map[string]any{"from": []string{"draft", "sent"}[i], "to": []string{"sent", "read"}[i]}
-			if entry != nil {
-				move["by"] = entry
-			}
-			out = append(out, move)
-		}
-		return out
-	}
-	states := []any{"draft", "sent", "read"}
-	for _, tc := range []struct {
-		name   string
-		config map[string]any
-		want   []string
-	}{
-		{"by", map[string]any{"states": states, "transitions": transitions([]any{"author"}, nil)},
-			[]string{`by on the transition from "draft" to "sent"`}},
-		{"by on two transitions", map[string]any{"states": states, "transitions": transitions([]any{"author"}, []any{"reader"})},
-			[]string{`by on the transition from "draft" to "sent"`, `by on the transition from "sent" to "read"`}},
-		{"overridePermission", map[string]any{"states": states, "transitions": transitions(nil), "overridePermission": "notes.moderate"},
-			[]string{"overridePermission"}},
-		{"repeat", map[string]any{"states": states, "transitions": transitions(nil), "repeat": "unchanged"},
-			[]string{"repeat"}},
-		{"finished", map[string]any{"states": states, "transitions": transitions(nil, nil), "finished": map[string]any{"sent": "success"}},
-			[]string{"finished"}},
-		{"all four", map[string]any{"states": states, "transitions": transitions([]any{"author"}, nil), "overridePermission": "notes.moderate", "repeat": "unchanged", "finished": map[string]any{"sent": "success"}},
-			[]string{`by on the transition from "draft" to "sent"`, "overridePermission", "repeat", "finished"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := loadQuestions(t, engineType(tc.config))
-			if err == nil {
-				t.Fatal("LoadService succeeded")
-			}
-			last := -1
-			for _, m := range tc.want {
-				want := strings.Replace(member, "%s", m, 1)
-				at := strings.Index(err.Error(), want)
-				if at < 0 || at < last {
-					t.Fatalf("LoadService = %v, want %q, after the problems before it", err, want)
-				}
-				last = at
-			}
-			if got := strings.Count(err.Error(), "@behavior Workflow names"); got != len(tc.want) {
-				t.Errorf("LoadService = %v, want %d problems", err, len(tc.want))
-			}
-		})
-	}
-	// An engine type's Workflow without them loads.
-	if _, err := loadQuestions(t, engineType(map[string]any{"states": states, "transitions": transitions(nil)})); err != nil {
-		t.Errorf("an engine type's Workflow without the table's members: %v", err)
 	}
 }
 

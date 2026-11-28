@@ -2,16 +2,13 @@
 // a behavior adds to a type (D16), as the type's config narrows its
 // declaration: Workflow's states, Links' names, Dependencies' blocker
 // schemas, Timers' deadlines. It is the one narrowing the generators that
-// render behaviors share: engine-client's TypeScript module (D49) and the
-// types generator's <T>Behaviors in Go, TypeScript, Rust and Python.
+// render behaviors share: the types generator's <T>Behaviors in Go,
+// TypeScript, Rust and Python, and the repositories and API operations of
+// a table's behaviors.
 //
 // Narrow starts from a declaration's JSON Schemas and applies a core
 // behavior's narrowing; a behavior without one, an extension's, keeps its
-// declaration's shapes, and its fields hold any JSON. The engine narrows
-// the create parameters again in TypeScript (createParamsSchema(config)),
-// and its test suite holds the two to each other through
-// runtime/engine/testdata/client_codegen_parity.json, which engineclientgen
-// writes.
+// declaration's shapes, and its fields hold any JSON.
 //
 // TSRenderer renders a narrowed JSON Schema as a TypeScript type; Build
 // models each type's behaviors' fields as structs and enums for the

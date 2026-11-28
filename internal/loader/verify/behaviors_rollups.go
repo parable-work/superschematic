@@ -94,7 +94,7 @@ func rollupProblem(schema *ir.Schema, td *ir.TypeDef, spec rollupSpec) string {
 		return "latest reads the linked row created last, and a table's row carries no time of its creation the core reads: latest waits for a later step (D104's step 4)"
 	}
 	linking := schema.Types[spec.Schema]
-	if linking == nil || linking.Role != ir.RoleDBTable || linking.JsonField || linking.IsEngineType() {
+	if linking == nil || linking.Role != ir.RoleDBTable || linking.JsonField {
 		return fmt.Sprintf("%s is not a table of %s", spec.Schema, schema.Name)
 	}
 	link := fieldNamedIn(linking, spec.Link)
