@@ -584,6 +584,13 @@ func partiesCases(t *testing.T, open func(*testing.T) dialect) map[string]any {
 		if len(filed) != 1 || filed[0].Name != "gate.jpg" || filed[0].ContentHash != photoSHA || filed[0].ObjectKey != files[0].ObjectKey {
 			t.Fatalf("the report's files: %+v", filed)
 		}
+		// A run request run again, after its handler failed, files nothing
+		// twice.
+		filer := must(w.inbound.PrincipalOf(ctx, orchestration.PartyRef{Table: "Contact", Key: w.dee}, ""))
+		check(t, w.inbound.File(ctx, inbound.FileInput{Message: outcome.Message, To: rowrefs.RowRef{Table: "Report", Key: report}, As: filer}))
+		if again := w.attachments("Report", report); len(again) != 1 {
+			t.Fatalf("the report's files after filing again: %+v", again)
+		}
 		for _, row := range [][2]string{{"Job", w.job}, {"Report", report}, {"Contact", w.dee}} {
 			if !slices.Contains(w.backlinks(row[0], row[1]), outcome.Message) {
 				t.Fatalf("%s %s does not list the message: %v", row[0], row[1], w.backlinks(row[0], row[1]))

@@ -9,7 +9,7 @@ import type { ChannelAdapter, InboundAttachment, InboundAuthentication, InboundM
 import type { Providers } from './providers/registry.js';
 import type { QueueDefinition } from './queue-core.js';
 import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
-import { RowFeatureError, type RowRef } from './rowfeatures.js';
+import type { Attachments, RowRef } from './rowfeatures.js';
 import { sha256 } from './sha256.js';
 import type { WorkerQueue } from './worker.js';
 
@@ -336,8 +336,8 @@ export function createInbound(options: InboundOptions): Inbound {
   /** Stores an inbound message's files on its row through the messages table's @attachments, and answers what could not be. */
   const store = async (message: string, files: readonly InboundAttachment[]): Promise<string | undefined> => {
     if (files.length === 0) return undefined;
-    const attachments = sys().attachments;
-    if (!attachments || !options.bucket) return `${files.length} file(s) dropped: the inbound path has no bucket or the messages table no @attachments`;
+    const attachments: Attachments | undefined = sys().attachments;
+    if (!attachments || !attachments.holds(messageType) || !options.bucket) return `${files.length} file(s) dropped: the inbound path has no bucket or the messages table no @attachments`;
     const dropped: string[] = [];
     for (const file of files) {
       try {
@@ -626,16 +626,17 @@ export function createInbound(options: InboundOptions): Inbound {
     if (!seen) throw new InboundError(`${input.to.table} ${input.to.key} is not there`);
     const role = input.role ?? 'about';
     await refer(orm, input.message, input.to, role);
-    const attachments = sys().attachments;
-    if (!attachments) return;
+    // Only a messages table with @attachments has files to file, and only a
+    // row of a table with them takes one: any other row gets the reference
+    // alone.
+    const attachments: Attachments | undefined = sys().attachments;
+    if (!attachments || !attachments.holds(messageType) || !attachments.holds(input.to.table)) return;
+    // Filing is idempotent, as the reference is: a run request whose handler
+    // failed after filing is run again, and the row takes no file twice.
+    const filed = new Set((await attachments.list(input.to)).map(file => file.filedFrom));
     for (const attachment of await attachments.list({ table: messageType, key: input.message })) {
-      try {
-        await attachments.file({ table: messageType, id: attachment.id, to: input.to, role });
-      } catch (err) {
-        // A row of a table that holds no files gets the reference alone.
-        if (err instanceof RowFeatureError && err.code === 'not_a_holder') return;
-        throw err;
-      }
+      if (filed.has(`${messageType}:${attachment.key}:${attachment.id}`)) continue;
+      await attachments.file({ table: messageType, id: attachment.id, to: input.to, role });
     }
   };
 
