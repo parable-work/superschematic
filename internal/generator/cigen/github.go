@@ -50,6 +50,10 @@ var (
 	actionGoogleAuth = action{"google-github-actions/auth", "7c6bc770dae815cd3e89ee6cdf493a5fab2cc093", "v3.0.0"}
 	actionUpload     = action{"actions/upload-artifact", "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"}
 	actionDownload   = action{"actions/download-artifact", "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "v8.0.1"}
+	// The two halves of actions/cache, which a Tasks workflow that reuses
+	// a pass looks one up with and keeps one with.
+	actionCacheRestore = action{"actions/cache/restore", "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "v6.1.0"}
+	actionCacheSave    = action{"actions/cache/save", "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "v6.1.0"}
 )
 
 // preparedArtifact names the artifact the prepare job uploads and every

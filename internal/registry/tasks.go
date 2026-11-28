@@ -64,6 +64,22 @@ type TaskResolution struct {
 	// holds. The plan requires each to be covered by an output the task
 	// uses, and fails with the path and its manifest when one is not.
 	Generated []TaskGeneratedPath
+	// Values are the parts of the input that are no file's bytes: what a
+	// tracked file says, as the resolver reads it. Each enters the
+	// input's digest by its name and the SHA-256 of its data, so a file
+	// read by value changes the digest when what it says changes, and not
+	// when its comments or its layout do. A resolver that gives a file's
+	// value leaves the file out of Paths. As a path's, a value is a
+	// function of the commit alone.
+	Values []TaskValue
+}
+
+// TaskValue is one value of an input: a name that says what it is the
+// value of, unique among the input's values and of one line, and the
+// bytes that stand for it.
+type TaskValue struct {
+	Name string
+	Data []byte
 }
 
 // TaskGeneratedPath is a path a manifest of the commit names and the

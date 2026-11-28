@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	inttasks "github.com/parable-work/superschematic/internal/tasks"
@@ -52,7 +53,7 @@ func TestTasksPlanProfilesWhatItCost(t *testing.T) {
 	require.Contains(t, profile, "resolve the inputs and key")
 	// lint and test both read `go`: two inputs, one resolution.
 	require.Regexp(t, `path\s+2 inputs,\s+1 resolved,\s+1 files`, profile)
-	require.Regexp(t, `schema\s+1 inputs,\s+1 resolved,\s+4 files`, profile)
+	require.Regexp(t, `schema\s+1 inputs,\s+1 resolved,\s+3 files`, profile)
 }
 
 // TestTasksReachMeasuresAHistory: `tasks reach` walks the commits that
@@ -65,8 +66,11 @@ func TestTasksReachMeasuresAHistory(t *testing.T) {
 	// One service: the two others' inputs keep their digests.
 	require.NoError(t, os.WriteFile(filepath.Join(schemas, "services", "shop-extra", "notes.md"), []byte("notes\n"), 0o644))
 	commitAll(t, root, "extra")
-	// The naming file is every service's.
+	// A comment in the naming file says nothing new: no input changes.
 	editFile(t, filepath.Join(schemas, "superschematic.toml"), "[tasks.sections.forge]", "# the forge's section\n[tasks.sections.forge]")
+	commitAll(t, root, "a comment")
+	// What the naming file says is every service's.
+	editFile(t, filepath.Join(schemas, "superschematic.toml"), "# the forge's section\n", "package_author = \"Acme\"\n\n# the forge's section\n")
 	commitAll(t, root, "naming")
 	// Outside the root: no commit of the walk.
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
@@ -74,11 +78,11 @@ func TestTasksReachMeasuresAHistory(t *testing.T) {
 
 	out, err := runTasks(t, "tasks", "reach", schemas)
 	require.NoError(t, err, out)
-	require.Contains(t, out, "schemas: 2 commits that changed it, back from HEAD (1 more left out: no parent, or the root begins there)")
-	require.Regexp(t, `changed every schema input's digest\s+1\s+50%`, out)
-	require.Regexp(t, `changed some\s+1\s+50%`, out)
-	require.Regexp(t, `changed none\s+0\s+0%`, out)
-	require.Regexp(t, `changed a file that belongs to no service\s+1\s+50%`, out)
+	require.Contains(t, out, "schemas: 3 commits that changed it, back from HEAD (1 more left out: no parent, or the root begins there)")
+	require.Regexp(t, `changed every schema input's digest\s+1\s+33%`, out)
+	require.Regexp(t, `changed some\s+1\s+33%`, out)
+	require.Regexp(t, `changed none\s+1\s+33%`, out)
+	require.Regexp(t, `changed a file that belongs to no service\s+1\s+33%`, out)
 	require.Regexp(t, `median schema inputs changed\s+1 of 3`, out)
 
 	out, err = runTasks(t, "tasks", "reach", schemas, "--json", "--commits", "1")
@@ -271,6 +275,72 @@ func TestTasksWritesAndChecksTheWorkflow(t *testing.T) {
 	restored, err := os.ReadFile(workflow)
 	require.NoError(t, err)
 	require.Equal(t, text, string(restored))
+}
+
+// TestAReusingWorkflowReadsTheKeysThePlanPrints: with the section's
+// `reuse` the workflow's first job plans the commit from the committed
+// task file, and each keyed task's job reads its key from an output of
+// that job named as the task. `tasks plan --keys` prints exactly those
+// names, each with the key the plan gives it.
+func TestAReusingWorkflowReadsTheKeysThePlanPrints(t *testing.T) {
+	root := prepareTasksRepo(t)
+	service := filepath.Join(root, "schemas", "services", "repo-tasks")
+	githubTasksConfig(t, root, "ci/workflows")
+	editFile(t, filepath.Join(service, "src", "tasks.schema.yaml"), "          imageRepository: ghcr.io/acme/ci\n", "          imageRepository: ghcr.io/acme/ci\n          reuse: {}\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "ci", "workflows"), 0o755))
+	out, err := runTasks(t, "tasks", service)
+	require.NoError(t, err, out)
+	commitAll(t, root, "tasks")
+
+	written, err := os.ReadFile(filepath.Join(root, "ci", "workflows", "repo-tasks.yml"))
+	require.NoError(t, err)
+	var workflow struct {
+		Jobs map[string]struct {
+			Needs   []string          `yaml:"needs"`
+			Outputs map[string]string `yaml:"outputs"`
+			Steps   []struct {
+				Name string            `yaml:"name"`
+				Run  string            `yaml:"run"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	require.NoError(t, yaml.Unmarshal(written, &workflow))
+	planJob := workflow.Jobs["plan"]
+	require.Len(t, planJob.Steps, 2)
+	// The plan reads the file where the service commits it.
+	require.Contains(t, planJob.Steps[1].Run, `superschematic tasks plan HEAD --file ci/tasks.json --keys >> "$GITHUB_OUTPUT"`)
+
+	keys, err := runTasks(t, "tasks", "plan", "HEAD", "--repo", root, "--file", "ci/tasks.json", "--keys")
+	require.NoError(t, err, keys)
+	full, err := runTasks(t, "tasks", "plan", "HEAD", "--repo", root, "--file", "ci/tasks.json")
+	require.NoError(t, err, full)
+	plan, err := tasks.DecodePlan([]byte(full))
+	require.NoError(t, err)
+	printed := map[string]string{}
+	var order []string
+	for _, line := range strings.Split(strings.TrimSuffix(keys, "\n"), "\n") {
+		name, key, ok := strings.Cut(line, "=")
+		require.True(t, ok, line)
+		printed[name] = key
+		order = append(order, name)
+	}
+	require.Equal(t, []string{"lint", "schema-build", "test"}, order)
+	for name, task := range plan.Tasks {
+		require.NotNil(t, task.Key, name)
+		require.Equal(t, *task.Key, printed[name], name)
+		// The plan job gives the key under the task's name, and the task's
+		// job reads it there.
+		require.Equal(t, "${{ steps.keys.outputs."+name+" }}", planJob.Outputs[name])
+		require.Contains(t, workflow.Jobs[name].Needs, "plan")
+		require.Equal(t, "${{ needs.plan.outputs."+name+" }}", workflow.Jobs[name].Steps[0].Env["TASK_KEY"])
+	}
+	require.Len(t, planJob.Outputs, len(plan.Tasks))
+
+	// A service that commits no task file has none to plan from.
+	editFile(t, filepath.Join(service, "schema.config.yaml"), "    install: ci/tasks.json\n", "")
+	_, err = runTasks(t, "tasks", service)
+	require.ErrorContains(t, err, "sections.github.reuse plans the commit from its committed task file, and the service commits none; give outputs.tasks.install the file's path")
 }
 
 // TestTasksRefusesAWorkflowItCannotRender: a renderer nobody registered,

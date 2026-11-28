@@ -300,6 +300,7 @@ type (
 	TaskResolverSpec   = registry.TaskResolverSpec
 	TaskResolveRequest = registry.TaskResolveRequest
 	TaskResolution     = registry.TaskResolution
+	TaskValue          = registry.TaskValue
 	TaskGeneratedPath  = registry.TaskGeneratedPath
 	TaskTree           = registry.TaskTree
 	TaskTreeEntry      = registry.TaskTreeEntry

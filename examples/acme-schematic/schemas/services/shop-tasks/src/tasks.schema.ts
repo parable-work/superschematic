@@ -7,8 +7,9 @@ import { task, tasks } from "@superschematic/tasks";
 // and its platform. The plan command ships in that image. The acme section
 // (ext/tasks.go) holds what acme's forge reads and the core does not: the
 // tiers, each with its budget. The github section holds what the core's
-// github renderer reads when it writes the workflow: when it runs, and
-// the repository the image is pulled from.
+// github renderer reads when it writes the workflow: when it runs, the
+// repository the image is pulled from, and that it keeps each task's pass
+// under its input key, which a job plans with this binary.
 @tasks({
   image: "sha256:6a1f0c5d2b7e4f8093a1c6d5e4b3a29187f6e5d4c3b2a1908f7e6d5c4b3a2918",
   platform: "linux/amd64",
@@ -21,7 +22,8 @@ import { task, tasks } from "@superschematic/tasks";
     },
     github: {
       on: { pull_request: { branches: ["main"] }, schedule: [{ cron: "0 5 * * *" }] },
-      imageRepository: "ghcr.io/acme/ci"
+      imageRepository: "ghcr.io/acme/ci",
+      reuse: { command: ["acme-schematic"] }
     }
   }
 })

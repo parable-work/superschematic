@@ -289,14 +289,20 @@ func TestTasksPlanKeysACommit(t *testing.T) {
 	}
 	before := plan("HEAD")
 	require.Equal(t, first, before.Commit)
-	require.Equal(t, "1:sha1", before.KeyVersion)
+	require.Equal(t, "2:sha1", before.KeyVersion)
 	require.Equal(t, []string{"lint", "schema-build", "test"}, before.Order)
 	for name, task := range before.Tasks {
 		require.NotNil(t, task.Key, name)
 	}
 	// The schema input holds shop-media's directory and the root's shared
-	// files, and not shop-extra, which shop-media does not name.
-	require.Equal(t, 4, before.Tasks["schema-build"].Inputs[0].Files)
+	// files, and not shop-extra, which shop-media does not name. The
+	// naming file is in it by what it says, and is no file of it.
+	require.Equal(t, 3, before.Tasks["schema-build"].Inputs[0].Files)
+
+	// --keys prints the keys alone: a line for each task that has one.
+	keys, err := runTasks(t, "tasks", "plan", "HEAD", "--repo", root, "--file", "ci/tasks.json", "--keys")
+	require.NoError(t, err, keys)
+	require.Equal(t, "lint="+*before.Tasks["lint"].Key+"\nschema-build="+*before.Tasks["schema-build"].Key+"\ntest="+*before.Tasks["test"].Key+"\n", keys)
 
 	// An edit that is not committed is not the commit's.
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
