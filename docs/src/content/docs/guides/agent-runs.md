@@ -336,10 +336,14 @@ of `session.GrantAuthenticator`, which refuses one: the route runs as the
 run's principal, narrowed as above, and each call is held to the run's
 autonomy first, so an entered sender's write answers 428 until someone
 approves it. The
-sandbox's side is `providers.RunAgentInstance`. A Go server is refused an
-operation's `@autonomy`, which holds an agent run's calls of the API's MCP
-tools, since it serves no MCP endpoint; `MCPGate` is that gate for the day
-one does.
+sandbox's side is `providers.RunAgentInstance`. An operation's
+`@autonomy` holds an agent run's calls of the API's MCP tools (#621): the
+Go API's MCP endpoint (#660) takes the dispatcher's `MCPCallGate` as its
+call gate, which a stack's server passes, so a run's call of a tool asks
+by the tool's `@autonomy` until an approval of its exact parameters is
+approved, runs once, and asks again for any changed parameter.
+`Authenticator` leaves the endpoint's own request, and a call's request to
+the tool's route, to that gate.
 
 On SQLite the Go runtime runs the same dispatcher (#618), as the
 TypeScript one does (D189). `(*SQLiteDatabase).Orchestration()` is its
@@ -386,8 +390,7 @@ An app that builds a part itself puts it in `Deps` before `Wire` runs, or
 mounts routes of its own beside the generated ones. Over a database that
 lists `sqlite` first the generated server wires none of it yet and its
 workers are refused (#717): the implementation builds the parts over
-`Deps.DB` itself, which run on SQLite as above. `@autonomy` waits for a Go
-MCP endpoint.
+`Deps.DB` itself, which run on SQLite as above.
 
 ## In Rust
 

@@ -249,6 +249,14 @@ type Config struct {
 	// which its EnvConfig holds.
 	MinClientVersions clientversion.Minimums
 {{- authSnippet "routesConfigFields" . }}
+{{- if .MCP }}
+
+	// MCP configures the API's MCP endpoint at POST /api/mcp (D81, #660):
+	// the key it signs confirmations with{{ if .MCP.Confirming }}, which it needs, since a tool
+	// asks the person before it runs (D93){{ end }}; the gate an agent run's call is
+	// held to (D158); and the tools it serves beside its routes' (mcp.go).
+	MCP MCPOptions
+{{- end }}
 
 	// Implementations contains all namespace implementation instances
 	Implementations Implementations
@@ -419,6 +427,15 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 	if openAPIBaseURL == "" {
 		openAPIBaseURL = defaultOpenAPIBaseURL
 	}
+{{- if .MCP }}
+
+	// The MCP endpoint, whose tools' calls are requests to r's routes
+	// (mcp.go).
+	mcpHandler, err := mcpEndpoint(r, cfg, openAPIVersion)
+	if err != nil {
+		return fmt.Errorf("the MCP endpoint of {{ .SchemaName }}: %w", err)
+	}
+{{- end }}
 {{- if .Auth.Identity }}
 
 	// The identity runtime authenticates the protected routes' callers
@@ -471,6 +488,9 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 {{- end }}
 {{- if .HasManualRoutes }}
 		registerManualRoutes(r, cfg)
+{{- end }}
+{{- if .MCP }}
+		registerMCP(r, cfg, mcpHandler)
 {{- end }}
 	})
 

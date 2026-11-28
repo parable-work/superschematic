@@ -109,7 +109,7 @@ export type ApiOutputConfig = {
   readonly language?: ApiLanguage;
   readonly scaffoldsOutputDir?: string;
   /**
-   * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API and a Rust API serve it; the build refuses it on a Go API, where support follows. Unset is off.
+   * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript, a Rust and a Go API serve it (#660). Unset is off.
    */
   readonly mcp?: boolean;
   /**

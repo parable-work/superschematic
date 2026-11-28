@@ -3672,7 +3672,7 @@ reads no file, on Bun, Node.js and Workers alike. It still exports
 `openapi.json` as `<package>/openapi.json`. A server that serves several
 APIs answers both routes from the first API's router.
 
-With `outputs.api.mcp` on, a TypeScript or a Rust API also serves its MCP
+With `outputs.api.mcp` on, a TypeScript, a Rust or a Go API also serves its MCP
 tools at `POST /api/mcp`
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
 A tool whose `@mcp` says `invocationPolicy: "ask"` runs there only once

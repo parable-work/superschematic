@@ -37,6 +37,7 @@ import (
 
 	"github.com/parable-work/superschematic/runtime/http/go/agents"
 	"github.com/parable-work/superschematic/runtime/http/go/inbound"
+	"github.com/parable-work/superschematic/runtime/http/go/mcp"
 	"github.com/parable-work/superschematic/runtime/http/go/notify"
 	"github.com/parable-work/superschematic/runtime/http/go/providers"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
@@ -1813,6 +1814,101 @@ func TestAgentRuns(t *testing.T) {
 		if got := call(guarded, verified, http.MethodGet, "/app/tasks/"+a, nil); got != http.StatusUnauthorized {
 			t.Fatalf("the ended run's token answered %d", got)
 		}
+	})
+
+	t.Run("a run's call of the API's MCP tool is held to the tool's autonomy: an ask waits for its approval and runs once, and a changed amount asks again", func(t *testing.T) {
+		w := newWorld(t)
+		invoice := w.ids.invoice
+		// The app's route that pays an invoice, and the API's MCP endpoint
+		// over the app's router (#660), both behind the dispatcher's
+		// authenticator: pay_invoice moves money (@autonomy, #621).
+		mux := http.NewServeMux()
+		var app http.Handler
+		mux.HandleFunc("POST /app/invoices/{id}/pay", func(rw http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Amount int64 `json:"amount"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(rw, err.Error(), http.StatusBadRequest)
+				return
+			}
+			amount := types.GenericInt64(body.Amount)
+			row, err := w.db.GetInvoiceRepository().UpdateOne(system, w.id(r.PathValue("id")), &orm.InvoiceUpdate{Paid: &amount})
+			if err != nil {
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(map[string]any{"data": map[string]any{"paid": row.Paid}, "meta": map[string]any{}})
+		})
+		tools := must(mcp.ParseRouteTools(`[{"name": "pay_invoice", "title": "Pay an invoice", "inputSchema": {"type": "object"}, "_meta": {"invocationPolicy": "auto"}, "operation": "invoices.pay", "method": "POST", "path": "/app/invoices/{id}/pay", "arguments": [{"key": "invoice", "in": "path", "name": "id"}, {"key": "amount", "in": "body", "name": "amount"}], "autonomy": {"class": "moneyMovement"}}]`))
+		endpoint := must(mcp.Mount{API: "pay-api", Version: "1.0.0", RequiresAuth: true, Tools: tools, Routes: http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { app.ServeHTTP(rw, r) })}.Handler(mcp.EndpointOptions{CallGate: w.agents.MCPCallGate()}))
+		mux.Handle("POST "+mcp.Path, endpoint)
+		app = w.agents.Authenticator(w.db, nil, agents.AuthenticatorOptions{})(mux)
+		server := httptest.NewServer(app)
+		t.Cleanup(server.Close)
+		id := w.ask("payer", w.ids.a, "")
+		w.exited(id)
+		pay := func(amount int) (map[string]any, bool) {
+			t.Helper()
+			body := must(json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "pay_invoice", "arguments": map[string]any{"invoice": invoice, "amount": amount}}}))
+			request := must(http.NewRequest(http.MethodPost, server.URL+mcp.Path, bytes.NewReader(body)))
+			request.Header.Set("Authorization", "Bearer "+w.sandbox.token(id))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Accept", "application/json, text/event-stream")
+			response := must(http.DefaultClient.Do(request))
+			defer response.Body.Close()
+			data := must(io.ReadAll(response.Body))
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("POST /api/mcp answered %d %s", response.StatusCode, data)
+			}
+			var answer struct {
+				Result struct {
+					IsError           bool           `json:"isError"`
+					StructuredContent map[string]any `json:"structuredContent"`
+				} `json:"result"`
+			}
+			check(t, json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(string(data), "event: message\ndata: "), "\n\n")), &answer))
+			return answer.Result.StructuredContent, answer.Result.IsError
+		}
+		// The call asks: its approval holds the exact parameters, and
+		// nothing is paid.
+		asked, refused := pay(100)
+		if !refused || asked["status"] != float64(428) || asked["code"] != "approval_required" || w.paid() != 0 {
+			t.Fatalf("the first call answered %v, paid %d", asked, w.paid())
+		}
+		approvals := w.approvalsOf(id)
+		params := map[string]any{"invoice": invoice, "amount": 100}
+		if len(approvals) != 1 || approvals[0].Str("id") != asked["approval"] || approvals[0].Str("operation") != "pay_invoice" || approvals[0].Str("operationClass") != "moneyMovement" || approvals[0].Str("paramsHash") != agents.ParamsHash("pay_invoice", params) {
+			t.Fatalf("the approvals: %v", approvals)
+		}
+		// Approved, the call runs once, through the route.
+		check(t, w.agents.Approve(ctx, w.ann, approvals[0].Str("id"), "inapp"))
+		if got, refused := pay(100); refused || fmt.Sprint(got["paid"]) != "100" || w.paid() != 100 {
+			t.Fatalf("the approved call answered %v, paid %d", got, w.paid())
+		}
+		if again, refused := pay(100); !refused || again["code"] != "approval_required" {
+			t.Fatalf("the call again answered %v, want it asked again", again)
+		}
+		// A changed amount finds no approval of its parameters: it asks
+		// again, and nothing more is paid.
+		changed, refused := pay(250)
+		if !refused || changed["code"] != "approval_required" || w.paid() != 100 {
+			t.Fatalf("a changed amount answered %v, paid %d", changed, w.paid())
+		}
+		var hashes []string
+		for _, approval := range w.approvalsOf(id) {
+			if approval.Str("operation") != "pay_invoice" {
+				t.Fatalf("the endpoint's own request was held as %s", approval.Str("operation"))
+			}
+			if approval.Str("state") == "pending" {
+				hashes = append(hashes, approval.Str("paramsHash"))
+			}
+		}
+		if !slices.Contains(hashes, agents.ParamsHash("pay_invoice", map[string]any{"invoice": invoice, "amount": 250})) {
+			t.Fatalf("no pending approval of 250: %v", hashes)
+		}
+		w.watch()
 	})
 
 	t.Run("administering agents is permissions, and an agent cannot start a run", func(t *testing.T) {
