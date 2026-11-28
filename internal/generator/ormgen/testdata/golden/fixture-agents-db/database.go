@@ -5,7 +5,9 @@ package orm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 
 	types "example.com/schemas/types/go/fixture-agents-db"
 	"github.com/jackc/pgx/v5"
@@ -425,3 +427,30 @@ var (
 	// holds for callers written before the two were told apart.
 	ErrVersionConflict = fmt.Errorf("%w at the expected version", ErrNotFound)
 )
+
+// uniqueViolationCode is the Postgres SQLSTATE unique_violation: an insert or
+// an update broke a unique constraint or a unique index.
+const uniqueViolationCode = "23505"
+
+// UniqueViolation returns the Postgres error that err wraps when it is a
+// unique_violation (SQLSTATE 23505), through %w and errors.Join. Read its
+// TableName or ConstraintName to tell which rule refused the write. Use
+// IsUniqueViolation when the constraint name is enough.
+func UniqueViolation(err error) (*pgconn.PgError, bool) {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolationCode {
+		return pgErr, true
+	}
+	return nil, false
+}
+
+// IsUniqueViolation reports whether err wraps a Postgres unique_violation
+// (SQLSTATE 23505). With constraint names, it also requires that the
+// violated constraint or index is one of them.
+func IsUniqueViolation(err error, constraints ...string) bool {
+	pgErr, ok := UniqueViolation(err)
+	if !ok {
+		return false
+	}
+	return len(constraints) == 0 || slices.Contains(constraints, pgErr.ConstraintName)
+}

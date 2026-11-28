@@ -138,6 +138,13 @@ pgx. Each table gets a repository:
 - `CreateOne` leaves out a zero id and `createdAt`, so the database fills
   them in, and returns the inserted row.
 - A lookup that finds nothing returns `orm.ErrNotFound`.
+- A write that breaks a unique constraint or a unique index returns a
+  Postgres `unique_violation` (SQLSTATE 23505).
+  `orm.IsUniqueViolation(err)` reports one that `err` wraps, and
+  `orm.IsUniqueViolation(err, "products_name_key")` also requires that
+  the constraint is one of the names. `orm.UniqueViolation(err)` returns
+  the `*pgconn.PgError`, whose `TableName` and `ConstraintName` tell which
+  rule refused the write.
 - `orm.NewNoOpDatabase()` implements the same interfaces without a
   database: lists are empty, a lookup is not found, and a create returns
   its input. The tests in the next parts run against it.
