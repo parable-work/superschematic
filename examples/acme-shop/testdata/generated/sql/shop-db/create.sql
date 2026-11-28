@@ -379,12 +379,20 @@ CREATE TABLE refund_approvals_sign_offs (
   number TEXT NOT NULL,
   state TEXT,
   subject TEXT,
+  kind TEXT,
+  acting_for TEXT,
+  acting_for_kind TEXT,
+  agent TEXT,
+  signed_in_at TIMESTAMPTZ,
+  user_verified BOOLEAN,
+  held JSONB,
+  "values" JSONB,
   note TEXT,
   at TIMESTAMPTZ,
   consumed_at TIMESTAMPTZ
 );
 
-COMMENT ON TABLE refund_approvals_sign_offs IS 'One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the subject who signed, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.';
+COMMENT ON TABLE refund_approvals_sign_offs IS 'One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the caller who signed (its subject and kind, whom it acted for and its run''s Agent), the assurance its host reported, the permissions it held and the values of the fields the gate''s requirements reset on, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.';
 
 CREATE TABLE refund_number_counts (
   scope TEXT NOT NULL PRIMARY KEY,
@@ -604,8 +612,8 @@ CREATE TABLE ticket_derived_derivations (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   ticket_id UUID NOT NULL,
   field TEXT NOT NULL,
-  source_hash TEXT,
-  settled_hash TEXT,
+  source_hash VARCHAR(64),
+  settled_hash VARCHAR(64),
   model TEXT,
   confidence DOUBLE PRECISION,
   settled_at TIMESTAMPTZ,

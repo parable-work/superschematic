@@ -511,6 +511,33 @@ func validateGenericInt64Value(value GenericInt64, required bool) (bool, []Valid
 	return valid, coreErrs
 }
 
+// validateGenericProbabilityValue validates one Generic.Probability value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateGenericProbabilityValue(value GenericProbability, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < 0 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least 0"})
+	}
+	if float64(value) > 1 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 1"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // validateIdentityNameValue validates one Identity.Name value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -7002,7 +7029,7 @@ type Order struct {
 
 	Customer User `json:"customer"`
 
-	Status OrderStatus `json:"status"`
+	Status OrderStatus `json:"status,omitzero"`
 
 	PlacedAt TemporalDateTime `json:"placedAt"`
 
@@ -8647,7 +8674,7 @@ func RefundFromYAMLNonStrict(data []byte) (*Refund, error) {
 	return decoded, nil
 }
 
-// RefundApprovalsSignOffs - One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the subject who signed, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.
+// RefundApprovalsSignOffs - One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the caller who signed (its subject and kind, whom it acted for and its run's Agent), the assurance its host reported, the permissions it held and the values of the fields the gate's requirements reset on, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.
 type RefundApprovalsSignOffs struct {
 	Refund Refund `json:"refund"`
 
@@ -8656,6 +8683,22 @@ type RefundApprovalsSignOffs struct {
 	State string `json:"state,omitempty"`
 
 	Subject string `json:"subject,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	ActingFor string `json:"actingFor,omitempty"`
+
+	ActingForKind string `json:"actingForKind,omitempty"`
+
+	Agent string `json:"agent,omitempty"`
+
+	SignedInAt *TemporalDateTime `json:"signedInAt,omitempty"`
+
+	UserVerified *bool `json:"userVerified,omitempty"`
+
+	Held *GenericJSON `json:"held,omitempty"`
+
+	Values *GenericJSON `json:"values,omitempty"`
 
 	Note string `json:"note,omitempty"`
 
@@ -8683,6 +8726,22 @@ func (t *RefundApprovalsSignOffs) MaskSecrets() *RefundApprovalsSignOffs {
 
 	masked.Subject = t.Subject
 
+	masked.Kind = t.Kind
+
+	masked.ActingFor = t.ActingFor
+
+	masked.ActingForKind = t.ActingForKind
+
+	masked.Agent = t.Agent
+
+	masked.SignedInAt = t.SignedInAt
+
+	masked.UserVerified = t.UserVerified
+
+	masked.Held = t.Held
+
+	masked.Values = t.Values
+
 	masked.Note = t.Note
 
 	masked.At = t.At
@@ -8696,7 +8755,7 @@ func (t *RefundApprovalsSignOffs) MaskSecrets() *RefundApprovalsSignOffs {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*RefundApprovalsSignOffs) JSONFieldNames() []string {
-	return []string{"refund", "number", "state", "subject", "note", "at", "consumedAt"}
+	return []string{"refund", "number", "state", "subject", "kind", "actingFor", "actingForKind", "agent", "signedInAt", "userVerified", "held", "values", "note", "at", "consumedAt"}
 }
 
 // Validate validates all fields in RefundApprovalsSignOffs
@@ -8707,6 +8766,15 @@ func (t *RefundApprovalsSignOffs) Validate() ValidationErrors {
 
 	if fieldErrs := t.Refund.Validate(); fieldErrs.HasErrors() {
 		errors.AddNestedError("refund", fieldErrs)
+	}
+
+	// Validate signedInAt (optional)
+
+	// Validate optional pointer field
+	if t.SignedInAt != nil {
+		if valid, fieldErrs := t.SignedInAt.Validate(); !valid {
+			errors.SetFieldErrors("signedInAt", fieldErrs)
+		}
 	}
 
 	// Validate at (optional)
@@ -8746,6 +8814,17 @@ func (t *RefundApprovalsSignOffs) UnmarshalJSON(data []byte) error {
 
 	if err := json.Unmarshal(data, aux); err != nil {
 		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "held", "values")
+		if nulls[0] && t.Held == nil {
+			null := GenericJSON("null")
+			t.Held = &null
+		}
+		if nulls[1] && t.Values == nil {
+			null := GenericJSON("null")
+			t.Values = &null
+		}
 	}
 
 	// Preserve nil lists on input: absent/null required arrays must fail Validate.
@@ -10848,7 +10927,7 @@ type RestockRequest struct {
 
 	Product Product `json:"product"`
 
-	Status RestockStatus `json:"status"`
+	Status RestockStatus `json:"status,omitzero"`
 
 	Quantity GenericInt64 `json:"quantity"`
 
@@ -13313,13 +13392,13 @@ type TicketDerivedDerivations struct {
 
 	Field string `json:"field"`
 
-	SourceHash string `json:"sourceHash,omitempty"`
+	SourceHash *CryptoSHA256 `json:"sourceHash,omitempty"`
 
-	SettledHash string `json:"settledHash,omitempty"`
+	SettledHash *CryptoSHA256 `json:"settledHash,omitempty"`
 
 	Model string `json:"model,omitempty"`
 
-	Confidence float64 `json:"confidence,omitempty"`
+	Confidence *GenericProbability `json:"confidence,omitempty"`
 
 	SettledAt *TemporalDateTime `json:"settledAt,omitempty"`
 
@@ -13391,6 +13470,33 @@ func (t *TicketDerivedDerivations) Validate() ValidationErrors {
 
 	if fieldErrs := t.Ticket.Validate(); fieldErrs.HasErrors() {
 		errors.AddNestedError("ticket", fieldErrs)
+	}
+
+	// Validate sourceHash (optional)
+
+	// Validate optional pointer field
+	if t.SourceHash != nil {
+		if valid, fieldErrs := validateCryptoSHA256Value(*t.SourceHash, false); !valid {
+			errors.SetFieldErrors("sourceHash", fieldErrs)
+		}
+	}
+
+	// Validate settledHash (optional)
+
+	// Validate optional pointer field
+	if t.SettledHash != nil {
+		if valid, fieldErrs := validateCryptoSHA256Value(*t.SettledHash, false); !valid {
+			errors.SetFieldErrors("settledHash", fieldErrs)
+		}
+	}
+
+	// Validate confidence (optional)
+
+	// Validate optional pointer field
+	if t.Confidence != nil {
+		if valid, fieldErrs := validateGenericProbabilityValue(*t.Confidence, false); !valid {
+			errors.SetFieldErrors("confidence", fieldErrs)
+		}
 	}
 
 	// Validate settledAt (optional)
@@ -13638,7 +13744,7 @@ type TicketProvenanceRecords struct {
 
 	WrittenAt *TemporalDateTime `json:"writtenAt,omitempty"`
 
-	Confidence float64 `json:"confidence,omitempty"`
+	Confidence *GenericProbability `json:"confidence,omitempty"`
 
 	Review string `json:"review,omitempty"`
 
@@ -13704,6 +13810,15 @@ func (t *TicketProvenanceRecords) Validate() ValidationErrors {
 	if t.WrittenAt != nil {
 		if valid, fieldErrs := t.WrittenAt.Validate(); !valid {
 			errors.SetFieldErrors("writtenAt", fieldErrs)
+		}
+	}
+
+	// Validate confidence (optional)
+
+	// Validate optional pointer field
+	if t.Confidence != nil {
+		if valid, fieldErrs := validateGenericProbabilityValue(*t.Confidence, false); !valid {
+			errors.SetFieldErrors("confidence", fieldErrs)
 		}
 	}
 

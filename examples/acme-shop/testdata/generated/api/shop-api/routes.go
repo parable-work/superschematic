@@ -412,7 +412,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimesession.RequirePermissions("refunds.approve"),
 			},
 		},
-		// Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
+		// Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
 		{
 			Method:  "POST",
 			Path:    "/refund/{id}/approvals/sign-off",
@@ -889,7 +889,7 @@ func createRefundApprovalsListSignOffsHandler(db orm.DatabaseInterface) gohttp.H
 
 // createRefundApprovalsSignOffHandler creates a handler for POST /api/refund/{id}/approvals/sign-off
 //
-// Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
+// Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
 //
 // It runs Refund's Approvals signOff, an Approvals (D103), through the
 // ORM of shop-db, which runs it through the behaviors' core in a

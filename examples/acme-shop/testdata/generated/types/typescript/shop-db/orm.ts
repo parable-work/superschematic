@@ -423,7 +423,7 @@ export const checkoutTable: TableDefinition = {
     update: "UPDATE checkout SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\"",
     updateMany: "UPDATE checkout SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO checkout (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
@@ -664,7 +664,7 @@ export const collectionPointTable: TableDefinition = {
     update: "UPDATE collection_point SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"name\", \"_version\"",
     updateMany: "UPDATE collection_point SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO collection_point (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
@@ -930,7 +930,7 @@ export const inventoryTable: TableDefinition = {
     update: "UPDATE inventory SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\"",
     updateMany: "UPDATE inventory SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO inventory (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
@@ -1492,12 +1492,13 @@ export interface RefundRelations {
 export interface RefundUses {
   /** The operations of Approvals, which Refund implements. */
   readonly approvals: UseOperations<{
-    /** Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+    /** Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
     signOff: {
       params: { note?: string; state: 'approved'; version?: number };
       result: {
         at: number;
         count: number;
+        countsToward?: string[];
         note?: string;
         signedBy: string[];
         state: 'approved';
@@ -1507,13 +1508,22 @@ export interface RefundUses {
     /** Withdraws the caller's sign-off for a gated state, one not yet consumed. */
     withdrawSignOff: {
       params: { state: 'approved' };
-      result: { at: number; note?: string; state: 'approved'; subject: string };
+      result: {
+        actingFor?: string;
+        agent?: string;
+        at: number;
+        note?: string;
+        state: 'approved';
+        subject: string;
+      };
     };
     /** Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. */
     listSignOffs: {
       params: { cursor?: string; limit?: number; state?: string };
       result: {
         items: Array<{
+          actingFor?: string;
+          agent?: string;
           at: number;
           consumedAt?: number;
           note?: string;
@@ -1720,7 +1730,7 @@ export const refundTable: TableDefinition = {
     update: "UPDATE refund SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\"",
     updateMany: "UPDATE refund SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO refund (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
@@ -2565,7 +2575,7 @@ export const ticketTable: TableDefinition = {
     update: "UPDATE ticket SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\"",
     updateMany: "UPDATE ticket SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO ticket (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
@@ -4885,6 +4895,55 @@ export const shopDbRules: RulesLayout = {
                   "type": "string"
                 },
                 {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "actingFor",
+                  "field": "actingFor",
+                  "column": "acting_for",
+                  "type": "string"
+                },
+                {
+                  "name": "actingForKind",
+                  "field": "actingForKind",
+                  "column": "acting_for_kind",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "field": "agent",
+                  "column": "agent",
+                  "type": "string"
+                },
+                {
+                  "name": "signedInAt",
+                  "field": "signedInAt",
+                  "column": "signed_in_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "userVerified",
+                  "field": "userVerified",
+                  "column": "user_verified",
+                  "type": "boolean"
+                },
+                {
+                  "name": "held",
+                  "field": "held",
+                  "column": "held",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "values",
+                  "field": "values",
+                  "column": "values",
+                  "type": "Generic.JSON"
+                },
+                {
                   "name": "note",
                   "field": "note",
                   "column": "note",
@@ -5740,13 +5799,13 @@ export const shopDbRules: RulesLayout = {
                   "name": "sourceHash",
                   "field": "sourceHash",
                   "column": "source_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "settledHash",
                   "field": "settledHash",
                   "column": "settled_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "model",
@@ -5758,7 +5817,7 @@ export const shopDbRules: RulesLayout = {
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "settledAt",
@@ -5871,7 +5930,7 @@ export const shopDbRules: RulesLayout = {
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "review",
