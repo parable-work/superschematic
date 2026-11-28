@@ -78,8 +78,9 @@ export abstract class LineItem {
 }
 
 // An approved registrant holds member, which reads and writes at once
-// (D88); the first registrant is the administrator.
-@seedRoles([{ name: "member", permissions: ["smoke.read", "smoke.write"] }])
+// (D88); the first registrant is the administrator. A payee's grant holds
+// payee, which reads the line item it names (D156, D157).
+@seedRoles([{ name: "member", permissions: ["smoke.read", "smoke.write"] }, { name: "payee", permissions: ["smoke.read"] }])
 export abstract class Role implements UserRole {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -88,6 +89,9 @@ export abstract class Role implements UserRole {
   name: Identity.Slug;
 
   permissions: string[];
+
+  // The rows a grant of the role reaches from its target; none here.
+  reaches: Nullable<string[]>;
 }
 
 // The user model (D50), which the API signs its users in with.
