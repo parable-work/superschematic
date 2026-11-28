@@ -761,6 +761,7 @@ pub fn job_table() -> Table {
         operations: vec![
             Operation::new("find", false),
             Operation::of_table("rows", false),
+            Operation::of_table("permissions", false),
         ],
         tables: Vec::new(),
     };
@@ -1285,7 +1286,9 @@ impl Behavior for Echo {
 /// answers the page of `{type, use, field, value, after}`. Its read-only
 /// operation of the table as a whole, `rows` (D104), answers the page of a
 /// read across a table, `{type, equal, tables, after}`, as Pool's pick
-/// reads its members.
+/// reads its members. Its read-only operation of the table as a whole,
+/// `permissions` (D200), answers the permissions each of `{subjects}`
+/// holds now, as Approvals' recheckPermission reads them.
 pub struct Finder;
 
 impl Behavior for Finder {
@@ -1295,6 +1298,7 @@ impl Behavior for Finder {
         Declaration::new("Finder")
             .operation("find", false)
             .table_operation("rows", false)
+            .table_operation("permissions", false)
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
@@ -1303,6 +1307,14 @@ impl Behavior for Finder {
 
     fn operation(&self, cx: &Cx<'_, Value>, name: &str, params: &Value) -> Hook<Value> {
         let param = |name: &str| params.get(name).and_then(Value::as_str);
+        if name == "permissions" {
+            let subjects: Vec<String> = params
+                .get("subjects")
+                .and_then(|subjects| serde_json::from_value(subjects.clone()).ok())
+                .unwrap_or_default();
+            let held = cx.permissions_of(&subjects)?;
+            return Ok(serde_json::to_value(held).unwrap_or_default());
+        }
         if name == "rows" {
             let equal = params
                 .get("equal")

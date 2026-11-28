@@ -77,6 +77,8 @@ mod convert;
 mod host;
 mod layout;
 #[cfg(any(feature = "postgres", feature = "sqlite", test))]
+mod permissions;
+#[cfg(any(feature = "postgres", feature = "sqlite", test))]
 mod run;
 
 #[cfg(feature = "postgres")]
@@ -93,8 +95,8 @@ use serde_json::{Map, Value};
 
 pub use host::{Host, WAKE_HORIZON_MS};
 pub use layout::{
-    Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, SharedTable,
-    SubTable, Table, Use,
+    Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, Permissions,
+    SharedTable, SubTable, Table, Use,
 };
 pub use superschematic_rules::{
     Action, Assurance, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,

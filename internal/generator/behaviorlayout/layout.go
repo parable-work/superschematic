@@ -151,6 +151,10 @@ type Layout struct {
 	// hands them to its core (the bindings' declare) before it checks the
 	// layout's specs. Absent when no use names one.
 	Declarations []json.RawMessage `json:"declarations,omitempty"`
+	// Permissions is where an adapter answers the core's permissions read
+	// (D200): the schema's identity tables; absent for a schema with none,
+	// or whose tables compose no Approvals.
+	Permissions *Permissions `json:"permissions,omitempty"`
 }
 
 // Table is the layout of one table that composes behaviors: where the core's
@@ -672,6 +676,9 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 		return nil, err
 	}
 	layout.Declarations = declarations
+	if layout.Permissions, err = permissionsOf(schema); err != nil {
+		return nil, err
+	}
 	// A table a use reads beside its own row's (registry.BehaviorReads:
 	// Recurrence's holidays and relative target, D152) that composes no
 	// behavior is in the layout read-only, so an adapter answers the core's
