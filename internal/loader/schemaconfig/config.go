@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -121,9 +120,11 @@ type SchemaConfig struct {
 	MaxBytes int64 `json:"maxBytes,omitempty" yaml:"maxBytes,omitempty"`
 
 	// Providers lists the runtime provider packages an API may use (D159):
-	// each a directory relative to the service's directory, in slash form,
-	// whose package.json declares the provider. The loader reads each into
-	// ir.Schema.Providers. It is valid on an API config only.
+	// each its directory relative to the service's directory, in slash
+	// form, which starts with "./" or "../", or its npm name, which
+	// resolves from the service's node_modules (#608, ResolveProvider).
+	// The package's package.json declares the provider. The loader reads
+	// each into ir.Schema.Providers. It is valid on an API config only.
 	Providers []string `json:"providers,omitempty" yaml:"providers,omitempty"`
 
 	// Outputs is the raw outputs configuration. The v2 generators
@@ -405,21 +406,22 @@ func (c *SchemaConfig) ContentMaxBytes() int64 {
 }
 
 // validateProviders checks providers (D159): an API config's list of
-// runtime provider package directories, each a clean relative path in
-// slash form, listed once.
+// runtime provider packages, each its directory, a clean relative path in
+// slash form that starts with "./" or "../", or its npm name (#608),
+// listed once.
 func validateProviders(cfg *SchemaConfig) error {
 	if len(cfg.Providers) > 0 && cfg.Kind != ir.SchemaKindAPI {
 		return fmt.Errorf("schema config for %s sets providers, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
 	}
 	seen := make(map[string]bool, len(cfg.Providers))
-	for _, dir := range cfg.Providers {
-		switch {
-		case dir == "" || path.IsAbs(dir) || strings.Contains(dir, `\`) || path.Clean(dir) != dir:
-			return fmt.Errorf("schema config for %s lists provider %q; a provider is its package's directory, a clean relative path in slash form from the service's directory", cfg.Name, dir)
-		case seen[dir]:
-			return fmt.Errorf("schema config for %s lists provider %s more than once", cfg.Name, dir)
+	for _, entry := range cfg.Providers {
+		if err := checkProviderEntry(entry); err != nil {
+			return fmt.Errorf("schema config for %s lists provider %w", cfg.Name, err)
 		}
-		seen[dir] = true
+		if seen[entry] {
+			return fmt.Errorf("schema config for %s lists provider %s more than once", cfg.Name, entry)
+		}
+		seen[entry] = true
 	}
 	return nil
 }

@@ -141,7 +141,7 @@ export class QueueWake extends WorkflowEntrypoint<unknown, WakeParams> {
 async function drain(on: { readonly cron?: string; readonly wake?: string }): Promise<void> {
   // The string bindings, and the value of each Secrets Store secret the
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, ['CREDENTIALS_TOKEN', 'SMS_TOKEN']);
+  const values = await stackEnvWithSecrets(env, ['CREDENTIALS_TOKEN', 'SMS_TOKEN'], ['CREDENTIALS_TOKEN', 'SMS_TOKEN']);
   const workApiConfig = configure('work-api', () => workApiApi.loadEnvConfig(values));
 
   // The API's database, over the hyperdrive binding its connection names
