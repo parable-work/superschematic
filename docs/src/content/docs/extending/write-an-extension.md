@@ -543,6 +543,9 @@ r.RegisterTaskResolver(registry.TaskResolverSpec{
         // by directory and by pattern.
         // Return the tracked files the input covers in Paths, and in
         // Generated each path a manifest names that the commit lacks.
+        // Values holds what a tracked file says, where its bytes say
+        // more than a build reads: a name and the bytes that stand for
+        // it, in place of the file in Paths.
     },
 })
 ```

@@ -851,8 +851,11 @@ from the same file: a job per task, each needing the tasks its task uses
 and follows, with `schema-build`'s generated tree carried to `api-build`
 as an artifact. The renderer reads the `github` section beside acme's
 for the triggers and the repository the image is pulled from. The
-workflow is installed in the example's own directory and not in
-`.github/workflows`, so GitHub does not run it.
+section also holds `reuse`, so the workflow's first job plans the commit
+with `acme-schematic tasks plan --keys`, and each task that has a key
+looks for a pass under it before it runs; `smoke`, which is not
+hermetic, runs every time. The workflow is installed in the example's
+own directory and not in `.github/workflows`, so GitHub does not run it.
 
 `ext/tasks_test.go` is a reader: a forge in miniature. It decodes the
 committed file with the public `tasks` package, reads acme's section to

@@ -29,9 +29,13 @@ has a `fetch.ts` and each worker a `drain.ts` with the same wiring when an
 environment places the stack on Cloudflare Workers.
 
 The providers are `examples/runtime-providers`'s: the local-process
-sandbox, the model stub, the vault broker and the first SMS relay.
-Swapping the sandbox for a container platform's, or the model for a model
-API's, is config alone, though no such provider ships yet.
+sandbox, the model stub, the vault broker and the first SMS relay, so the
+example runs with no account. Swapping the sandbox for one over a
+container runtime, or the model for one over a model API, is a provider
+package the app writes and the config of the environment that names it:
+the runtime providers guide's
+[Set up your own provider](https://parable-work.github.io/superschematic/guides/runtime-providers/#set-up-your-own-provider)
+gives the steps.
 
 ## What it shows
 

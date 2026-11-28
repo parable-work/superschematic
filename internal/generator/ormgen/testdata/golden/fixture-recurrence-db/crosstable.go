@@ -31,7 +31,7 @@ conditions on SQLite.
 */
 
 // crossTables are the definitions the reads across tables run on.
-var crossTables = crosstable.MustParse(`{"Contract":{"table":"contract","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"contract","kind":"renewal","title":"title","field":"ends_on"}]},"Filing":{"table":"filing","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"filing","kind":"deadline","color":"filing","title":"title","occurrences":{"table":"filing_recurrence_occurrences","row":"filing_id","key":"\"key\"","due":"due","dueAt":"due_at","state":"state"}}]}}`, ``)
+var crossTables = crosstable.MustParse(`{"Contract":{"table":"contract","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"contract","kind":"renewal","title":"title","field":"ends_on"}]},"Filing":{"table":"filing","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"filing","kind":"deadline","color":"filing","title":"title","permission":"filings.work","occurrences":{"table":"filing_recurrence_occurrences","row":"filing_id","key":"\"key\"","due":"due","dueAt":"due_at","state":"state"}}]}}`, ``)
 
 // CrossTables is the database as the reads across tables run through it
 // (D187): its calendar and its search.
@@ -115,7 +115,7 @@ func (h crossTablesHost) Grants() crosstable.Grants {
 // sqliteCrossTables are the definitions the reads across tables run on
 // SQLite (D186, #615): the calendar's, and the search index's in SQLite's
 // words, its words the FTS5 table beside the index.
-var sqliteCrossTables = crosstable.MustParse(`{"Contract":{"table":"contract","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"contract","kind":"renewal","title":"title","field":"ends_on"}]},"Filing":{"table":"filing","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"filing","kind":"deadline","color":"filing","title":"title","occurrences":{"table":"filing_recurrence_occurrences","row":"filing_id","key":"\"key\"","due":"due","dueAt":"due_at","state":"state"}}]}}`, ``)
+var sqliteCrossTables = crosstable.MustParse(`{"Contract":{"table":"contract","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"contract","kind":"renewal","title":"title","field":"ends_on"}]},"Filing":{"table":"filing","key":"id","keyType":"uuid","uuid":true,"sources":[{"name":"filing","kind":"deadline","color":"filing","title":"title","permission":"filings.work","occurrences":{"table":"filing_recurrence_occurrences","row":"filing_id","key":"\"key\"","due":"due","dueAt":"due_at","state":"state"}}]}}`, ``)
 
 // CrossTables is the SQLite database as the reads across tables run
 // through it (D186, #615): its calendar and its search, in SQLite's words.

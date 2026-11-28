@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -188,8 +190,13 @@ func rootOf(tree registry.TaskTree, spec SchemaSpec) (SchemaRoot, error) {
 //     dependency, how a schema references a service, and how a document
 //     imports a file of another service;
 //   - every tracked file of the schemas root that belongs to no service:
-//     the naming file, the workspace's manifests and lockfile, and the
-//     shared files the services import;
+//     the workspace's manifests and lockfile, and the shared files the
+//     services import;
+//   - what the naming file says, and not its bytes: its tables and keys
+//     as a value (readNaming). A comment, the layout and the order of
+//     its keys are no part of it, and neither is [deps], which says where
+//     build-all copies the dependency graph and nothing of what a service
+//     generates. A root with no naming file says what an empty one does;
 //   - but no file in a directory a build writes, by the names the build
 //     cache leaves out (SkippedDirs), and not the copy of the dependency
 //     graph the naming file's [deps] copy names, which a build writes;
@@ -212,7 +219,7 @@ func resolveSchema(req registry.TaskResolveRequest) (registry.TaskResolution, er
 	if err != nil {
 		return registry.TaskResolution{}, err
 	}
-	return registry.TaskResolution{Paths: set.Paths, Generated: set.Generated}, nil
+	return registry.TaskResolution{Paths: set.Paths, Generated: set.Generated, Values: set.Values}, nil
 }
 
 // SchemaSet is the static input set of a schema service.
@@ -227,6 +234,51 @@ type SchemaSet struct {
 	Shared []string
 	// Generated are the [cache] inputs the commit does not hold.
 	Generated []registry.TaskGeneratedPath
+	// Values are what the set holds by value: the naming file, by what
+	// it says to a build. They are in every service's set, as Shared is.
+	Values []registry.TaskValue
+}
+
+// NamingValue names the value of a schemas root's naming file in a
+// schema input.
+func NamingValue(namingFile string) string { return "naming " + namingFile }
+
+// namingRead is what the schema resolver reads of a naming file: where
+// build-all copies the dependency graph, and the files generation reads
+// from outside the schemas root.
+type namingRead struct {
+	Deps struct {
+		Copy string `toml:"copy"`
+	} `toml:"deps"`
+	Cache struct {
+		Inputs []string `toml:"inputs"`
+	} `toml:"cache"`
+}
+
+// readNaming reads a naming file's bytes: the two tables the resolver
+// reads, and what the file says as a value: the document as JSON, its
+// keys sorted at every depth, with [deps] left out. The value is the
+// file's own content and nothing of the binary that reads it. A default
+// the file does not spell out is no part of it, since the binary is the
+// image's, which is in the task's work hash; and a key this binary does
+// not know is part of it and no error here, since the build that reads
+// the file is what refuses it. So one binary reads the naming file of
+// any commit, as a walk over a history does.
+func readNaming(data []byte, name string) (namingRead, []byte, error) {
+	var read namingRead
+	doc := map[string]any{}
+	if err := toml.Unmarshal(data, &doc); err != nil {
+		return read, nil, fmt.Errorf("naming: parse %s: %w", name, err)
+	}
+	if err := toml.Unmarshal(data, &read); err != nil {
+		return read, nil, fmt.Errorf("naming: parse %s: %w", name, err)
+	}
+	delete(doc, "deps")
+	said, err := json.Marshal(doc)
+	if err != nil {
+		return read, nil, fmt.Errorf("naming: %s holds a value that is no JSON value: %w", name, err)
+	}
+	return read, said, nil
 }
 
 // SkippedDirs are the directory names a schema input leaves out wherever
@@ -271,28 +323,28 @@ func SchemaInputSet(tree registry.TaskTree, root SchemaRoot, name string) (Schem
 	for _, service := range root.Services {
 		known[service] = true
 	}
-	// The naming file says what else is no input: the copy of the
-	// dependency graph build-all writes ([deps] copy), which a build
-	// produces and none reads.
+	// The naming file is read by what it says. It also says what else is
+	// no input: the copy of the dependency graph build-all writes ([deps]
+	// copy), which a build produces and none reads. A root with no naming
+	// file says what an empty one does.
 	namingFile := path.Join(root.Dir, naming.FileName)
-	var names *naming.Naming
+	var data []byte
 	if _, ok := tree.Entry(namingFile); ok {
-		data, err := tree.Read(namingFile)
-		if err != nil {
+		var err error
+		if data, err = tree.Read(namingFile); err != nil {
 			return SchemaSet{}, err
 		}
-		parsed, err := naming.Parse(data, namingFile)
-		if err != nil {
-			return SchemaSet{}, err
-		}
-		names = &parsed
+	}
+	names, said, err := readNaming(data, namingFile)
+	if err != nil {
+		return SchemaSet{}, err
 	}
 	depsCopy := ""
-	if names != nil && names.Deps.Copy != "" {
+	if names.Deps.Copy != "" {
 		depsCopy = path.Join(path.Dir(root.Dir), names.Deps.Copy)
 	}
 	for _, entry := range rootFiles {
-		if skipped(root.Dir, entry.Path) || entry.Path == depsCopy {
+		if skipped(root.Dir, entry.Path) || entry.Path == depsCopy || entry.Path == namingFile {
 			continue
 		}
 		rest, inServices := strings.CutPrefix(entry.Path, servicesDir)
@@ -338,21 +390,20 @@ func SchemaInputSet(tree registry.TaskTree, root SchemaRoot, name string) (Schem
 	// The naming file's [cache] inputs: files generation reads from
 	// outside the schemas root. One the commit does not hold is a file a
 	// task writes.
-	if names != nil {
-		// An entry is relative to the parent of the schemas root, as the
-		// build cache reads it.
-		for _, rel := range names.Cache.Inputs {
-			file := path.Join(path.Dir(root.Dir), rel)
-			if root.Dir == "" || file == ".." || strings.HasPrefix(file, "../") {
-				return SchemaSet{}, fmt.Errorf("%s: [cache] inputs names %q, which is outside the repository, so no commit holds it", namingFile, rel)
-			}
-			if _, ok := tree.Entry(file); ok {
-				set.Paths = append(set.Paths, file)
-				continue
-			}
-			set.Generated = append(set.Generated, registry.TaskGeneratedPath{Path: file, From: namingFile})
+	// An entry is relative to the parent of the schemas root, as the
+	// build cache reads it.
+	for _, rel := range names.Cache.Inputs {
+		file := path.Join(path.Dir(root.Dir), rel)
+		if root.Dir == "" || file == ".." || strings.HasPrefix(file, "../") {
+			return SchemaSet{}, fmt.Errorf("%s: [cache] inputs names %q, which is outside the repository, so no commit holds it", namingFile, rel)
 		}
+		if _, ok := tree.Entry(file); ok {
+			set.Paths = append(set.Paths, file)
+			continue
+		}
+		set.Generated = append(set.Generated, registry.TaskGeneratedPath{Path: file, From: namingFile})
 	}
+	set.Values = []registry.TaskValue{{Name: NamingValue(namingFile), Data: said}}
 	sort.Strings(set.Paths)
 	return set, nil
 }

@@ -203,8 +203,8 @@ func TestKeyVectors(t *testing.T) {
 func TestKeysOfTwoObjectFormatsNeverMatch(t *testing.T) {
 	one := planOf(t, FormatSHA1, testFiles(), testFile(), nil)
 	two := planOf(t, FormatSHA256, testFiles(), testFile(), nil)
-	require.Equal(t, "1:sha1", one.KeyVersion)
-	require.Equal(t, "1:sha256", two.KeyVersion)
+	require.Equal(t, "2:sha1", one.KeyVersion)
+	require.Equal(t, "2:sha256", two.KeyVersion)
 	for name, key := range keysOf(one) {
 		require.NotEqual(t, key, keysOf(two)[name], name)
 	}

@@ -236,7 +236,11 @@ pub struct Wired {
 {{- if $w.Calendar }}
     pub calendar: CalendarOptions,
 {{- end }}
+{{- if .WiringAuthenticates }}
+    /// The implementation's `Wire`, which `handlers` asks for the
+    /// authenticator; a wiring that wraps none has no use for it.
     wire: Arc<dyn Wire>,
+{{- end }}
 }
 
 impl Wired {
@@ -293,6 +297,10 @@ impl Wired {
         agents.set_inbound(inbound.clone());
 {{- end }}
 {{- end }}
+{{- if not (or $w.Agents $w.Notifier $w.Inbound $w.Search $w.Calendar .WiringAuthenticates) }}
+        // No part asks `wire` for anything, nor does `handlers`.
+        let _ = wire;
+{{- end }}
         Ok(Self {
             tables,
 {{- if $w.Notifier }}
@@ -310,7 +318,9 @@ impl Wired {
 {{- if $w.Calendar }}
             calendar: wire.calendar(),
 {{- end }}
+{{- if .WiringAuthenticates }}
             wire,
+{{- end }}
         })
     }
 {{- if .WiringAuthenticates }}

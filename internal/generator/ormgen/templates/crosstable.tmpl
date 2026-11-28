@@ -13,6 +13,9 @@ import (
 
 	"{{ .Naming.SchemaRuntimeGoModule }}/access"
 	"{{ .Naming.SchemaRuntimeGoModule }}/crosstable"
+{{- if .HasEncryptedFields }}
+	"{{ .Naming.SchemaRuntimeGoModule }}/fieldcrypt"
+{{- end }}
 {{- if and .Access .Access.Grants }}
 	types "{{ .TypesModule }}"
 {{- end }}
@@ -133,6 +136,15 @@ func (h crossTablesHost) Conditions(ctx context.Context, typeName string, args *
 func (h crossTablesHost) Definitions() *crosstable.Definitions {
 	return crossTables
 }
+{{- if .HasEncryptedFields }}
+
+// FieldKeys are the keys of the database's Encrypted<T> fields
+// (WithFieldKeys), which a calendar source titled by one opens its titles
+// under (crosstable.Unsealer, #616).
+func (h crossTablesHost) FieldKeys() *fieldcrypt.Keyring {
+	return h.db.fieldKeys
+}
+{{- end }}
 
 func (h crossTablesHost) Grants() crosstable.Grants {
 {{- if and .Access .Access.Grants }}

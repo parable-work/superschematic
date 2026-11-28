@@ -218,6 +218,13 @@ pub struct Implementations {
     /// method for it.
     pub graphs: crate::graphs::Graphs,
 {{- end }}
+{{- if .HasRowFeatureOperations }}
+    /// What the row feature operations run on (#723): the repositories of
+    /// {{ .RowFeatureDatabase }}{{ if .RowFeatureBucket }} and the bucket of their files{{ end }}, through whose references and
+    /// attachments the router's handler of each runs it, so no namespace
+    /// trait has a method for it.
+    pub row_features: crate::rowfeatures::RowFeatures,
+{{- end }}
 }
 {{- if .WebhookProviders }}
 

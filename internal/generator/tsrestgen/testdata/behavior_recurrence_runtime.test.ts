@@ -9,7 +9,7 @@ serves the API over the generated repositories of fixture-recurrence-db
 worker FilingDeadlines runs in process, its queues as the API's package
 generates them (filingDeadlinesQueues: Filing's deadlines, changes and
 events) under the runtime's runWorker, with a Workers of the test's own that
-records each event Recurrence emits as it opens, reminds and misses an
+records each event Recurrence emits as it opens, reminds, falls due and misses an
 occurrence (D153), which a notifier raises.
 
 A Filing implements Recurrence in Europe/London: each occurrence opens two
@@ -184,6 +184,7 @@ const hear = (kind: string) => async (event: { key: string; payload: { key: stri
 const workers = {
   filingDeadlinesRecurrenceOpened: hear('opened'),
   filingDeadlinesRecurrenceReminded: hear('reminded'),
+  filingDeadlinesRecurrenceDue: hear('due'),
   filingDeadlinesRecurrenceMissed: hear('missed'),
 };
 const worker = (): WorkerQueue[] => (onSQLite ? sqliteQueues() : (filingDeadlinesQueues(pool, orm, workers, logger as never) as WorkerQueue[]));
@@ -310,6 +311,24 @@ test('the remind deadline fires on the worker, records the reminder and emits th
   ]);
 });
 
+test('the due deadline fires on the worker at an occurrence due, records it and emits due (#601)', async () => {
+  const id = await newFiling();
+  // Due in ten days: its two-week window is open at once.
+  expect((await call('manager', id, 'set-recurrence', { anchor: 'calendar', rule: 'FREQ=MONTHLY', start: londonDay(10) })).status).toBe(200);
+  const first = (await occurrences(id))[0]!;
+  expect(first.state).toBe('open');
+  expect((await deadlines(id)).get('due')).toBe(Number(first.due_at));
+  // Its due comes: the occurrence's due is a second ago, and its deadline now.
+  const past = new Date(Date.now() - 1000);
+  await raw(`UPDATE filing_recurrence_occurrences SET due_at = $1 WHERE filing_id = $2 AND key = $3`, [onSQLite ? past.toISOString() : past, uuidToDb(id), first.key]);
+  await makeDue(id, 'due');
+  await workUntil(async () => heard.some(e => e.row === id && e.kind === 'due'));
+  const [row] = (await raw(`SELECT state, fell_due_at FROM filing_recurrence_occurrences WHERE filing_id = $1 AND key = $2`, [uuidToDb(id), first.key])).rows;
+  expect(row!.state).toBe('open');
+  expect(millis(row!.fell_due_at)).toBeGreaterThanOrEqual(past.getTime());
+  expect(heard.filter(e => e.row === id && e.kind === 'due').map(e => e.key)).toEqual([first.key]);
+});
+
 test('complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it', async () => {
   const id = await newFiling();
   expect((await call('manager', id, 'set-recurrence', { anchor: 'afterDone', every: 'P90D', start: londonDay(5) })).status).toBe(200);
@@ -341,6 +360,11 @@ test('the calendar merges a contract end date and a filing occurrences, each dat
   expect(deadlines[0]).toMatchObject({ kind: 'deadline', color: 'filing', title: 'Quarterly return', occurrence: { key: londonDay(10), state: 'open' } });
   const starts = read.entries.map(entry => entry.start);
   expect([...starts].sort()).toEqual(starts);
+  // The filing source needs filings.work, the schema's permission (#601):
+  // a caller without it reads the contract's end alone.
+  const unworked = await readCalendar(orm, { subject: callers.manager.subject, permissions: ['filings.manage'] }, { from: new Date(), to: new Date(Date.now() + 45 * DAY) });
+  expect(unworked.entries.some(entry => entry.source === 'filing')).toBe(false);
+  expect(unworked.entries.some(entry => entry.source === 'contract' && entry.key === contract.id)).toBe(true);
 });
 
 test('a raw SQL write of a filing holiday calendar is heard by the worker, which plans again', async () => {

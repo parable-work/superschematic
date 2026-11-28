@@ -1411,8 +1411,14 @@ hand. `Resolve` receives a `TaskResolveRequest`: `Tree`, the commit, as a
 path, its mode and its object id; `Entry`; and `Read`, which returns a
 tracked file's bytes and refuses a submodule and a file over 1 MiB),
 `Task`, the task's name for errors, and `Spec`. It returns a
-`TaskResolution`: `Paths`, the tracked files the input covers, and
-`Generated`, each path a manifest names that the commit does not hold.
+`TaskResolution`: `Paths`, the tracked files the input covers;
+`Generated`, each path a manifest names that the commit does not hold;
+and `Values`, each a `TaskValue` with a name and bytes, for the part of
+an input that is what a tracked file says and not the file's bytes. A
+resolver that gives a file's value leaves the file out of `Paths`. The
+`schema` resolver gives one, the naming file's: the document's tables
+and keys in one order, with `[deps]` left out, so a comment or a layout
+changes no key.
 
 The rules of a resolver are part of the seam, since the keys it feeds
 decide what a forge reuses and it runs on a commit somebody else may
@@ -1446,7 +1452,9 @@ covers it. So a file a build writes never enters a key as a file: it
 enters through the key of the task that wrote it.
 
 The digest of an input is the SHA-256 over the sorted lines `<mode>
-<path> <object id>` of its `Paths`. It is a second convention beside the
+<path> <object id>` of its `Paths`, with a line `value <sha256> <name>`
+for each of its `Values`. A file's line starts with its mode, which is
+digits, so no value's line is a file's. It is a second convention beside the
 build cache's `TreeDigest` (section 7.4), not the same one: `TreeDigest`
 hashes a working tree's contents with no git and sees untracked files,
 which the build cache needs, and a plan must be a function of a commit.
@@ -1545,8 +1553,9 @@ says what work a commit needs, for any forge. They meet when a deploy
 uses an image a task produced.
 
 A CI renderer renders either. `CIRendererSpec.RenderTasks` receives a
-`CITasksRequest`, the service's name and its task file, and returns the
-workflow's files; `Render` is the stack's, and a renderer gives one or
+`CITasksRequest`, the service's name, its task file and the path the
+file is committed at (`TaskFile`, "" for a service that installs none),
+and returns the workflow's files; `Render` is the stack's, and a renderer gives one or
 both. A Tasks service opts in with `outputs.tasks.ci.<renderer>`, and
 the `tasks` generator writes the files under
 `<out>/tasks/<service>/ci/<renderer>/`, with a manifest of where each
@@ -1562,8 +1571,13 @@ a job output. What is GitHub's is a section it registers, `github`: the
 triggers, the permissions, the runner and the repository the image is
 pulled from, and each task's runner, timeout and condition. So the
 renderer is a reader of the task file like any forge, and the core
-holds no trigger. The workflow runs every task on every run: it keeps
-no pass by key, which a forge that reads the plan does.
+holds no trigger. The workflow runs every task on every run unless the
+section holds `reuse`. With it a first job runs `tasks plan --keys` in
+the file's image, and each task that has a key looks for a pass under
+it in GitHub's cache before it runs, keeps the pass it makes, and hands
+on its outputs either way. What may read a pass is the cache's own
+rule: a pull request's runs read their own entries and the default
+branch's, so a change leaves no pass for the branch it lands on.
 
 ## 4. The open IR
 

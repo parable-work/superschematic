@@ -193,8 +193,17 @@ may read of the commit:
   other's directory name or package name, in its config, its schema
   files or a sidecar document;
 - every tracked file of the schemas root that belongs to no service: the
-  naming file, the workspace's manifests and the shared files;
+  workspace's manifests and the shared files;
+- what the naming file says, and not its bytes;
 - each file the naming file's `[cache] inputs` lists.
+
+The naming file is read by value: its tables and keys, in one order.
+A comment, the layout and the order of its keys are no part of the
+input, and neither is `[deps]`, which says where `build-all` copies the
+dependency graph and nothing of what a service generates. A root with
+no naming file says what an empty one does. Any other edit changes
+every schema input of the root, as it changes every service's build
+cache key: nothing says which keys one service's generators read.
 
 It leaves out what a build writes and a tool keeps, wherever it sits
 under the root: the directories named `dist`, `node_modules`, `bin`,
@@ -243,6 +252,7 @@ inputs: [
   { kind: "go-module", spec: { dir: "go/shop-api" } },
   { kind: "rust-crate", spec: { dir: "crates/shop" } },
   { kind: "js-package", spec: { dir: "web/shop" } },
+  { kind: "js-package", spec: { dir: "typescript/shop-cart", workspace: "schemas/dist" } },
   { kind: "image", spec: { dockerfile: "docker/api.Dockerfile", context: "." } }
 ]
 ```
@@ -280,21 +290,36 @@ tracked file of the commit holds. Output generated of task schema-build
 covers it: add `uses: [{ task: schema-build, output: "generated" }]`
 ```
 
-Five cases need a word:
+Six cases need a word:
 
 - **A JS dependency on a generated package.** A workspace often lists a
   directory a build writes, as `schemas/dist/types/typescript/*`. A
   dependency whose version is `workspace:` or `*`, and whose name no
   tracked member has, may be one of those packages, and the workspace's
   lockfile says which. The resolver reads `bun.lock`,
-  `package-lock.json`, `npm-shrinkwrap.json` and `pnpm-lock.yaml`. A
-  name the lockfile resolves to a directory of the workspace is that
-  directory, reported as generated when the commit does not hold it. A
-  name it resolves to a version of the registry is the registry's. A
-  name it does not resolve, and a workspace with no lockfile the
-  resolver reads, fall back to a wider rule: the directory of each
-  member pattern that names no tracked package is reported as
-  generated.
+  `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml` and
+  `yarn.lock`. A name the lockfile resolves to a directory of the
+  workspace is that directory, reported as generated when the commit
+  does not hold it. A name it resolves to a version of the registry is
+  the registry's. A name it does not resolve, and a workspace with no
+  lockfile the resolver reads, fall back to a wider rule: the directory
+  of each member pattern that names no tracked package is reported as
+  generated. Yarn 1's lockfile holds no member, so it settles the
+  registry's names and leaves a member's to the wider rule. bun's binary
+  `bun.lockb` is not read: its format is bun's own and unwritten, and
+  `bun install --save-text-lockfile` writes `bun.lock` in its place.
+- **A JS workspace whose root is not above the package.** A workspace
+  is found at or above a package. A generator that owns an output root
+  writes the workspace's root there and lists the project's packages as
+  `../` members, so the root is not above them, and the commit may not
+  hold it at all. `workspace` names the root's directory. A root the
+  commit holds is read as any other. A root it does not hold is
+  reported as generated, so the task uses the output that writes it,
+  and the lockfile the project commits beside it says what the manifest
+  would: a member the commit holds is taken as a package, and one it
+  does not hold is reported at its directory. With no lockfile the
+  resolver reads, a `workspace:` dependency is refused, since nothing
+  tracked says where a member is.
 - **A tsconfig's project references.** A referenced directory that
   holds a `package.json` is taken as a package, with what it depends on.
   Any other is taken with the files under it. One the commit does not
@@ -391,15 +416,19 @@ and follows.
 A key covers, in order:
 
 1. the key version, with the repository's object format in it, as
-   `1:sha1`;
+   `2:sha1`;
 2. the task's **work hash**: the SHA-256 of its work fields in canonical
    JSON, with the image and the platform in effect;
-3. for each input, a digest of the tracked files it resolves to;
+3. for each input, a digest of what it resolves to;
 4. for each `uses` edge, the upstream task's key.
 
 The digest of an input is the SHA-256 over the sorted lines
 `<mode> <path> <object id>` of the files it matches in the commit's
 tree. Git already holds those ids, so the plan hashes no file contents.
+A resolver may also give a value: what a tracked file says, where its
+bytes say more than a build reads. A value is a line of its own,
+`value <sha256> <name>`. The `schema` resolver gives one, the naming
+file's.
 
 - The mode is in the line, so an executable bit, a symbolic link and a
   submodule's commit change the key.
@@ -417,6 +446,10 @@ at once.
 `tasks plan` is the code that must be trusted for keys. Ship it in the
 image the task file names, and have your forge accept a plan only from
 an image on its own list.
+
+`--keys` prints the keys alone, a line for each task that has one, as
+`<task>=<key>`. It is what a CI step appends to the file its job's
+outputs are read from.
 
 ### The sandbox
 
@@ -540,9 +573,10 @@ count for a trigger.
 
 ## Run the tasks on GitHub Actions
 
-A forge that reads the plan reuses a pass by its key. GitHub Actions is
-not one, and it can still run the tasks. The core's `github` renderer
-writes a workflow from the task file: a job per task.
+The core's `github` renderer writes a workflow from the task file: a
+job per task. With `reuse` the workflow also plans the commit and keeps
+each task's pass under its input key, as a forge that reads the plan
+does.
 
 ```ts
 // schemas/services/repo-tasks/schema.config.ts
@@ -583,6 +617,7 @@ export abstract class Deploy {}
 | `permissions` | `@tasks` | the workflow's permissions. `contents: read` unless given |
 | `imageRepository` | `@tasks` | the repository the tasks' image is pulled from by its digest. Required when a task runs from an image |
 | `runsOn` | `@tasks`, `@task` | the runner. Unless given it is the hosted runner of the task's platform: `ubuntu-latest` for `linux/amd64`, `ubuntu-24.04-arm` for `linux/arm64` |
+| `reuse` | `@tasks` | keep each task's pass under its input key. See [Reuse a pass](#reuse-a-pass) |
 | `timeoutMinutes` | `@task` | the job's timeout |
 | `if` | `@task` | the job's condition, written as GitHub writes `if` |
 
@@ -606,13 +641,12 @@ What the workflow does with each part of a task:
 The renderer refuses what the workflow cannot carry, and names the task:
 a command or a variable that holds `${{`, which GitHub would read as an
 expression; a platform with no hosted runner and no `runsOn`; an image
-with no `imageRepository`; a variable named `TASK_OUTPUTS`, `TASK_USES`
-or `TASK_ARTIFACTS`, which the workflow sets.
+with no `imageRepository`; a variable named `TASK_OUTPUTS`, `TASK_USES`,
+`TASK_ARTIFACTS`, `TASK_PASS` or `TASK_KEY`, which the workflow sets.
 
 Three things to know:
 
-- **Every run runs every task.** The workflow keeps no pass by its
-  input key. A forge that reads `tasks plan` does that.
+- **Every run runs every task, unless the section asks for reuse.**
 - **The file does not say how a command hands a runner a value.** The
   two directories above are this renderer's rule. Another runner may
   have another.
@@ -624,6 +658,65 @@ of superschematic, so an upgrade does not make the committed file stale.
 
 An extension registers a renderer for another CI with `RenderTasks` on
 its `CIRendererSpec`, and names it under `outputs.tasks.ci`.
+
+### Reuse a pass
+
+```ts
+github: {
+  on: { pull_request: { branches: ["main"] }, push: { branches: ["main"] } },
+  imageRepository: "ghcr.io/acme/ci",
+  reuse: { command: ["acme-schematic"] }
+}
+```
+
+With `reuse` the workflow has one more job, `plan`. It runs
+`tasks plan HEAD --file <the committed task file> --keys` in the image
+`@tasks` names and gives each task's key as a job output. `command` is
+the plan command's first words, `["superschematic"]` unless given: the
+binary that links the resolvers your inputs name, as the image calls
+it.
+
+Each task that has a key then does this:
+
+1. It looks for a pass in GitHub's cache, under the service, the task
+   and the key.
+2. When it finds one, it runs nothing. It hands on what the pass left:
+   the archives of its paths outputs as artifacts, and its values as
+   job outputs. A job that uses them reads what it would have read had
+   the task run.
+3. When it finds none, it checks out, puts what it uses in place, runs,
+   and keeps the pass: its outputs, and the key it passed under.
+
+A task that is not hermetic has no key, and its job is the job of a
+workflow that reuses nothing.
+
+What may read a pass is GitHub's rule. A cache entry a pull request's
+run saved is read by that pull request's runs alone. One a run on the
+default branch saved is read by every branch. So a pull request reuses
+the default branch's passes and its own, and leaves none for the branch
+it lands on.
+
+On a pull request the plan is given a base: the merge commit's first
+parent, the commit the change lands on, when that commit holds the task
+file. A task whose definition the change edits is then keyed on both
+definitions, as [a change that edits a task](#a-change-that-edits-a-task)
+has it.
+
+`reuse` needs three things, and the renderer refuses a service that
+lacks one: the task file committed (`outputs.tasks.install`), since the
+plan reads it from the commit; an image on `@tasks`, since the plan
+command ships in it; and `imageRepository`. The image also needs `git`.
+
+Things to know:
+
+- **A reused job still starts.** GitHub starts the job's container and
+  its service containers before the first step, so a pass saves the
+  task's run and not the job's start.
+- **A cache entry may be evicted.** GitHub keeps a repository's cache to
+  a size and drops an entry no run has read for a week. A pass that is
+  gone is a task that runs.
+- **The key decides, not the result's age.** A pass is kept only after
+  the task's command and every declared output succeeded.
 
 ## Measure a schema input's reach
 
@@ -639,29 +732,33 @@ commits that changed a schemas root, back along first parents, and for
 each one compares every service's schema input with its parent's.
 
 ```
-examples/acme-shop/schemas: 43 commits that changed it, back from HEAD (1 more left out: no parent, or the root begins there)
-  changed every schema input's digest          13   30%
-  changed some                                 23   53%
-  changed none                                  7   16%
-  changed a file that belongs to no service    12   28%
+examples/acme-shop/schemas: 46 commits that changed it, back from HEAD (1 more left out: no parent, or the root begins there)
+  changed every schema input's digest          14   30%
+  changed some                                 23   50%
+  changed none                                  9   20%
+  changed a file that belongs to no service    13   28%
   median services edited                        1 of 9
   median schema inputs changed                  6 of 9
 ```
 
 Read it this way:
 
-- **Changed every input** is the cost of the root's shared files. Each
-  is in every service's set, so a commit that edits the naming file or
-  a shared tsconfig changes them all.
+- **Changed every input** is the cost of what the root shares. A shared
+  file is in every service's set, and so is what the naming file says,
+  so a commit that edits a value of the naming file or a shared
+  tsconfig changes them all.
 - **Changed some** is the input working: the commit changed the
   services that reach what it edited, and no other.
-- **Changed none** is a commit that touched only what a build writes.
+- **Changed none** is a commit that touched only what a build writes,
+  or a comment of the naming file, or its `[deps]`.
 
-A high first line means shared files change often. The numbers above
-are from this repository, whose examples edit their naming files in a
-quarter of their commits. Before the set left out what a build writes,
-the first line was 60 percent: half of it was lockfiles committed under
-the output root.
+A high first line means what the root shares changes often. The numbers
+above are from this repository, whose examples edit their naming files
+in a quarter of their commits. Before the set left out what a build
+writes, the first line was 60 percent: half of it was lockfiles
+committed under the output root. Reading the naming file by value moved
+one commit of the 78 the two example roots had between them, an edit
+to `[deps]`: every other edit to a naming file here changed a value.
 
 It reads commits through git, loads no schema and runs no build.
 `--commits` bounds the walk and `--json` writes every measured commit.
@@ -684,18 +781,18 @@ Tasks service never runs it, so a build changes for no one else.
 
 ## What is not built
 
-- A workflow that reuses a pass by its input key. The github renderer
-  runs every task on every run.
-- A schema input that reads the naming file by what it says and not by
-  its bytes. An edit to the naming file changes every schema input of
-  its root, whatever the edit is.
-- A JS package whose workspace root is itself a file a build writes.
-  The commit holds no workspace above it, so a `workspace:` dependency
-  fails the resolver, which says so. Name the package's files with a
-  `path` input, and use the output of the task that writes the
-  workspace.
-- A `yarn.lock` and a binary `bun.lockb` are not read, so their
-  workspaces keep the wider rule for a generated member.
+- A schema input that knows which keys of the naming file a service's
+  generators read. An edit to a value of the naming file changes every
+  schema input of its root, as it changes every service's build cache
+  key.
+- A JS workspace whose root a build writes and whose lockfile the
+  commit does not hold. Nothing tracked says where its members are, so
+  a `workspace:` dependency fails the resolver, which says so. Commit
+  the lockfile, or name the package's files with a `path` input.
+- A reader of bun's binary `bun.lockb`. A workspace that has only that
+  keeps the wider rule for a generated member.
+- A reusing workflow on a merge queue. The plan is given a base on a
+  pull request alone.
 
 [D203](https://github.com/parable-work/superschematic/issues/692) lists
 these under Left.
