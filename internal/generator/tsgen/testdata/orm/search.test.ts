@@ -10,6 +10,7 @@ import {
   grantAuthenticator,
   indexSearch,
   issueGrant,
+  reindexSearch,
   revokeGrant,
   searchRoutes,
   searchTables,
@@ -276,6 +277,26 @@ describe.skipIf(dsn === '')('search across tables on Postgres', () => {
     expect(failing.result.reranked).toBe(false);
     expect(failing.keys).toEqual(plain.keys);
     expect((await found(user(bob), 'walnut')).keys).toEqual(plain.keys);
+
+    // A reindex embeds a page of rows in one model call: with every
+    // embedding cleared, each table's rows are embedded again in one call,
+    // and its index rows are what indexing each row wrote.
+    const indexRows = async (): Promise<string[]> =>
+      (
+        await db.pool.query(
+          `SELECT format('%s %s %L %L %L %L %L %L %L %s %L %L', source_table, source_key, title, body, comments, files, scope, audience::text, agents::text, text_hash, embedding::text, embedding_model) AS row
+           FROM search_index ORDER BY source_table, source_key`
+        )
+      ).rows.map(r => String(r.row));
+    const written = await indexRows();
+    await db.pool.query(`UPDATE search_index SET embedding = NULL, embedding_model = NULL`);
+    let modelCalls = 0;
+    const textsBefore = calls;
+    const n = await reindexSearch(orm, { embeddings: { ...embeddings, embed: texts => (modelCalls++, embeddings.embed(texts)) } });
+    // The index rows and the soft-deleted note.
+    expect(n).toBe(written.length + 1);
+    expect([modelCalls, calls - textsBefore]).toEqual([6, written.length]);
+    expect(await indexRows()).toEqual(written);
   });
 });
 

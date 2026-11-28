@@ -389,18 +389,35 @@ func (h notifierHost) Permissions(ctx context.Context, user string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
+	// The grants' roles, in one read.
+	var roleIDs []{{ .UUIDGoType }}
+	for _, grant := range grants {
+		if grant.Role.Id != nil {
+			roleIDs = append(roleIDs, *grant.Role.Id)
+		}
+	}
+	if len(roleIDs) == 0 {
+		return []string{}, nil
+	}
+	roles, _, err := repositories.Get{{ .Notifications.Roles }}Repository().FindMany(ctx, &{{ .Notifications.Roles }}Filter{Id: &UUIDFilter{In: roleIDs}}, &{{ .Notifications.Roles }}FindOptions{Fields: {{ .Notifications.Roles }}Fields{}.All(), Limit: len(roleIDs), SkipCount: true})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[{{ .UUIDGoType }}]*types.{{ .Notifications.Roles }}, len(roles))
+	for _, role := range roles {
+		if role.Id != nil {
+			byID[*role.Id] = role
+		}
+	}
 	seen := map[string]bool{}
 	out := []string{}
 	for _, grant := range grants {
 		if grant.Role.Id == nil {
 			continue
 		}
-		role, err := repositories.Get{{ .Notifications.Roles }}Repository().GetOne(ctx, *grant.Role.Id, nil)
-		if errors.Is(err, ErrNotFound) {
+		role, found := byID[*grant.Role.Id]
+		if !found {
 			continue
-		}
-		if err != nil {
-			return nil, err
 		}
 		for _, permission := range role.Permissions {
 			if !seen[permission] {
@@ -453,19 +470,27 @@ func (h notifierHost) ActiveGrants(ctx context.Context, holder string, now time.
 	if err != nil {
 		return nil, err
 	}
+	// The grants' roles, by name, in one read.
+	var names []string
+	for _, grant := range grants {
+		names = append(names, grant.Role)
+	}
+	reachesOf := map[string][]string{}
+	if len(names) > 0 {
+		roles, _, err := repositories.Get{{ .Access.Roles }}Repository().FindMany(ctx, &{{ .Access.Roles }}Filter{Name: &StringFilter{In: names}}, &{{ .Access.Roles }}FindOptions{Fields: {{ .Access.Roles }}Fields{}.All(), Limit: len(names), SkipCount: true})
+		if err != nil {
+			return nil, err
+		}
+		for _, role := range roles {
+			name := string(role.Name)
+			if _, seen := reachesOf[name]; !seen {
+				reachesOf[name] = role.Reaches
+			}
+		}
+	}
 	out := []access.GrantReach{}
 	for _, grant := range grants {
-		name := grant.Role
-		var reaches []string
-		role, err := repositories.Get{{ .Access.Roles }}Repository().FindOne(ctx, &{{ .Access.Roles }}Filter{Name: &StringFilter{Eq: &name}}, nil)
-		switch {
-		case errors.Is(err, ErrNotFound):
-		case err != nil:
-			return nil, err
-		default:
-			reaches = role.Reaches
-		}
-		out = append(out, access.GrantReach{ID: grant.ID, TargetType: grant.TargetType, TargetID: grant.TargetID, Reaches: access.ReachesOf(reaches)})
+		out = append(out, access.GrantReach{ID: grant.ID, TargetType: grant.TargetType, TargetID: grant.TargetID, Reaches: access.ReachesOf(reachesOf[grant.Role])})
 	}
 	return out, nil
 {{- else }}
