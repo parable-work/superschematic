@@ -126,7 +126,9 @@ async function build(): Promise<Handle> {
   // A grant's token runs as its holder (D156), and the implementation's
   // authenticator establishes every other caller, a run's token among
   // them where it is the dispatcher's (D194).
-  const workApiAuthenticate = await construct('work-api', 'authenticator', async () => grantAuthenticator({ orm: workApiDeps.orm, inner: await workApiImpl.authenticate(workApiDeps), runTokens: 'inner' }));
+  // A provider that calls the app with its key, its slot's CALLER_KEY,
+  // runs as the provider with its role alone, before any other (#744).
+  const workApiAuthenticate = await construct('work-api', 'authenticator', async () => workApiApi.callerAuthenticator(workApiConfig, grantAuthenticator({ orm: workApiDeps.orm, inner: await workApiImpl.authenticate(workApiDeps), runTokens: 'inner' })));
   // The routes of its runtime pieces beside the router's (runtime.ts),
   // which answer before it: the agent routes a run's sandbox instance
   // calls, and the approvals' approve and deny (D158); the relays'

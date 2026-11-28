@@ -508,8 +508,9 @@ its manifest to its code. Start from the stub of your interface, under
    or the `Cargo.toml`'s `[package.metadata.superschematic.provider]`.
    Give it a name of lower-case words joined by hyphens, `implements` its
    interface, a `config` key per setting, `secret` on a key or a token,
-   `optional` on a setting it can do without, and a `role` only when it
-   calls the app. Name it and its settings after what they are
+   `optional` on a setting it can do without, and a `role` and a secret
+   `CALLER_KEY` only when it calls the app
+   ([a provider that calls the app](#a-provider-that-calls-the-app)). Name it and its settings after what they are
    (`container-sandbox`, `URL`, `TOKEN`), not after a service.
 3. **Implement the members** of its interface, below. Read a secret
    setting with `settings.secret(...)` (`Secret` in Go), which answers a
