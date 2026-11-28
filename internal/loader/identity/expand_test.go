@@ -103,6 +103,55 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 			{name: ir.IdentityAPIKeyLastUsedAtField, typeName: "Temporal.DateTime"},
 			{name: ir.IdentityAPIKeyRevokedAtField, typeName: "Temporal.DateTime"},
 		},
+		ir.IdentityOAuthClientTable: {
+			id,
+			{name: ir.IdentityOAuthClientIDField, typeName: "string", required: true, unique: true},
+			{name: ir.IdentityOAuthClientKindField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthClientNameField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthClientURIField, typeName: "string"},
+			{name: ir.IdentityOAuthClientRedirectURIsField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthClientCreatedAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityOAuthClientRefreshedAtField, typeName: "Temporal.DateTime"},
+			{name: ir.IdentityOAuthClientFreshUntilField, typeName: "Temporal.DateTime"},
+			{name: ir.IdentityOAuthClientLastUsedAtField, typeName: "Temporal.DateTime"},
+		},
+		ir.IdentityOAuthGrantTable: {
+			id,
+			{name: ir.IdentityOAuthGrantUserField, typeName: "Account", required: true, onDelete: "CASCADE"},
+			{name: ir.IdentityOAuthGrantClientField, typeName: ir.IdentityOAuthClientTable, required: true, onDelete: "CASCADE"},
+			{name: ir.IdentityOAuthGrantPermissionsField, typeName: "string"},
+			{name: ir.IdentityOAuthGrantResourceField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthGrantCreatedAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityOAuthGrantExpiresAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityOAuthGrantLastUsedAtField, typeName: "Temporal.DateTime"},
+			{name: ir.IdentityOAuthGrantRevokedAtField, typeName: "Temporal.DateTime"},
+		},
+		ir.IdentityOAuthCodeTable: {
+			id,
+			{name: ir.IdentityOAuthCodeClientField, typeName: ir.IdentityOAuthClientTable, required: true, onDelete: "CASCADE"},
+			{name: ir.IdentityOAuthCodeUserField, typeName: "Account", onDelete: "CASCADE"},
+			{name: ir.IdentityOAuthCodeGrantField, typeName: ir.IdentityOAuthGrantTable, onDelete: "CASCADE"},
+			{name: ir.IdentityOAuthCodeRedirectURIField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthCodeChallengeField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthCodeStateField, typeName: "string"},
+			{name: ir.IdentityOAuthCodeScopeField, typeName: "string"},
+			{name: ir.IdentityOAuthCodeResourceField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthCodeNonceField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthCodeCodeHashField, typeName: "Crypto.SHA256", unique: true},
+			{name: ir.IdentityOAuthCodeCreatedAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityOAuthCodeExpiresAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityOAuthCodeUsedAtField, typeName: "Temporal.DateTime"},
+		},
+		ir.IdentityOAuthTokenTable: {
+			id,
+			{name: ir.IdentityOAuthTokenGrantField, typeName: ir.IdentityOAuthGrantTable, required: true, onDelete: "CASCADE"},
+			{name: ir.IdentityOAuthTokenKindField, typeName: "string", required: true},
+			{name: ir.IdentityOAuthTokenTokenHashField, typeName: "Crypto.SHA256", required: true, unique: true},
+			{name: ir.IdentityOAuthTokenCreatedAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityOAuthTokenExpiresAtField, typeName: "Temporal.DateTime", required: true},
+			{name: ir.IdentityOAuthTokenUsedAtField, typeName: "Temporal.DateTime"},
+			{name: ir.IdentityOAuthTokenRevokedAtField, typeName: "Temporal.DateTime"},
+		},
 		ir.IdentityRoleGrantTable: {
 			id,
 			{name: ir.IdentityRoleGrantUserField, typeName: "Account", required: true, onDelete: "CASCADE"},
@@ -126,7 +175,9 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 			}
 			// A key's permissions are a list of text, one column as a
 			// role's are (D114); every other field holds one value.
-			list := name == ir.IdentityAPIKeyTable && fd.Name == ir.IdentityAPIKeyPermissionsField
+			list := (name == ir.IdentityAPIKeyTable && fd.Name == ir.IdentityAPIKeyPermissionsField) ||
+				(name == ir.IdentityOAuthGrantTable && fd.Name == ir.IdentityOAuthGrantPermissionsField) ||
+				(name == ir.IdentityOAuthClientTable && fd.Name == ir.IdentityOAuthClientRedirectURIsField)
 			if fd.TypeRef.IsArray != list || fd.TypeRef.IsMap || fd.JsonField {
 				t.Errorf("%s.%s is not one column", name, fd.Name)
 			}
@@ -152,7 +203,18 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 	if indexes := schema.Types[ir.IdentityAPIKeyTable].Indexes; !reflect.DeepEqual(indexes, wantSessionIndex) {
 		t.Errorf("UserApiKey indexes = %+v, want one on its user, %+v", indexes, wantSessionIndex)
 	}
-	wantGenerated := []GeneratedIndex{{ir.IdentitySessionTable, wantSessionIndex[0]}, {ir.IdentityAPIKeyTable, wantSessionIndex[0]}, {ir.IdentityRoleGrantTable, wantIndex[0]}}
+	if indexes := schema.Types[ir.IdentityOAuthGrantTable].Indexes; !reflect.DeepEqual(indexes, wantSessionIndex) {
+		t.Errorf("OAuthGrant indexes = %+v, want one on its user, %+v", indexes, wantSessionIndex)
+	}
+	wantTokenIndex := []ir.IndexDef{{Keys: []string{"grant"}, Name: "grant", Origin: ir.OriginIdentity}}
+	if indexes := schema.Types[ir.IdentityOAuthTokenTable].Indexes; !reflect.DeepEqual(indexes, wantTokenIndex) {
+		t.Errorf("OAuthToken indexes = %+v, want one on its grant, %+v", indexes, wantTokenIndex)
+	}
+	wantGenerated := []GeneratedIndex{
+		{ir.IdentitySessionTable, wantSessionIndex[0]}, {ir.IdentityAPIKeyTable, wantSessionIndex[0]},
+		{ir.IdentityOAuthGrantTable, wantSessionIndex[0]}, {ir.IdentityOAuthTokenTable, wantTokenIndex[0]},
+		{ir.IdentityRoleGrantTable, wantIndex[0]},
+	}
 	if got := Indexes(schema); !reflect.DeepEqual(got, wantGenerated) {
 		t.Errorf("Indexes = %+v, want the indexes Expand adds, %+v", got, wantGenerated)
 	}
@@ -171,7 +233,8 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 }
 
 // TestExpandWithoutRoles: a User table without a UserRole table gets
-// Session, UserCredential and UserApiKey, and no UserRoleGrant.
+// Session, UserCredential, UserApiKey and the OAuth tables, and no
+// UserRoleGrant.
 func TestExpandWithoutRoles(t *testing.T) {
 	schema := userSchema(false)
 	Expand(schema)
@@ -181,8 +244,9 @@ func TestExpandWithoutRoles(t *testing.T) {
 	if schema.Types[ir.IdentityRoleGrantTable] != nil {
 		t.Error("Expand added UserRoleGrant to a schema without a UserRole table")
 	}
-	if got := Indexes(schema); len(got) != 2 || got[0].Type != ir.IdentitySessionTable || got[1].Type != ir.IdentityAPIKeyTable {
-		t.Errorf("Indexes = %+v for a schema without a UserRole table, want Session's and UserApiKey's alone", got)
+	if got := Indexes(schema); len(got) != 4 || got[0].Type != ir.IdentitySessionTable || got[1].Type != ir.IdentityAPIKeyTable ||
+		got[2].Type != ir.IdentityOAuthGrantTable || got[3].Type != ir.IdentityOAuthTokenTable {
+		t.Errorf("Indexes = %+v for a schema without a UserRole table, want Session's, UserApiKey's, OAuthGrant's and OAuthToken's alone", got)
 	}
 }
 

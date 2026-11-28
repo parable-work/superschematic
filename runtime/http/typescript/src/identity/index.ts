@@ -28,6 +28,14 @@ the core owns.
   identityRoutes, mountIdentityRoutes), their operation table entries for
   a server that generates none (identityOperationSpec,
   mountIdentityOperations), identityCors and identityCorsRoutes.
+- The API's own OAuth 2.1 authorization server (#695), which
+  IdentityServiceOptions.oauth turns on: OAuthServer (IdentityService.oauth),
+  its store over the descriptor's OAuth tables (SqlOAuthStore,
+  IdentityStore.oauth), its routes and default consent page
+  (mountOAuthRoutes), the MCP endpoint's WWW-Authenticate
+  (oauthChallenge), the guarded fetch of a Client ID Metadata Document
+  (clientMetadataFetcher), and the protocol's pure parts the OAuth vectors
+  pin (runtime/http/testdata/oauth_parity.json).
 
 It needs node:crypto's argon2 (Node.js 24.7 or later, or Bun) and
 superscalar. It imports no database driver: pg and the SQLite modules are
@@ -52,7 +60,25 @@ export {
 export type { Argon2Params, IdentityConfig, IdentityConfigInput, SameSite } from './config.js';
 export { KEY_BYTES, PASSWORD_SCALAR, SALT_BYTES, hashPassword, hashPasswordWithSalt, isPassword, passwordProblem, verifyPassword } from './password.js';
 export type { PasswordVerification } from './password.js';
-export { API_KEY_LENGTH, API_KEY_PREFIX, TOKEN_BYTES, TOKEN_LENGTH, extractCredential, hashToken, isApiKey, isToken, newApiKey, newToken } from './token.js';
+export {
+  API_KEY_LENGTH,
+  API_KEY_PREFIX,
+  OAUTH_ACCESS_TOKEN_PREFIX,
+  OAUTH_REFRESH_TOKEN_PREFIX,
+  OAUTH_TOKEN_LENGTH,
+  TOKEN_BYTES,
+  TOKEN_LENGTH,
+  extractCredential,
+  hashToken,
+  isApiKey,
+  isOAuthAccessToken,
+  isOAuthRefreshToken,
+  isToken,
+  newApiKey,
+  newOAuthAccessToken,
+  newOAuthRefreshToken,
+  newToken,
+} from './token.js';
 export type { CredentialOutcome, HeaderSource, Transport } from './token.js';
 export { clearCookie, sessionCookie } from './cookie.js';
 export { corsAnswer, crossOriginAllowed, requestHost } from './crossorigin.js';
@@ -160,3 +186,80 @@ export type {
   IdentityRoutesOptions,
   IdentityRule,
 } from './hono.js';
+export { OAUTH_CLIENT_UNUSED_SECONDS, OAUTH_CODE_TTL_SECONDS, OAUTH_REQUEST_TTL_SECONDS, OAuthError, OAuthServer } from './oauth.js';
+export type {
+  ApproveOAuthRequestInput,
+  AuthorizeOutcome,
+  ConnectedApp,
+  DenyOAuthRequestInput,
+  OAuthAnswer,
+  OAuthClientInfo,
+  OAuthDecision,
+  OAuthHost,
+  OAuthOptions,
+  OAuthRequestView,
+} from './oauth.js';
+export { SqlOAuthStore } from './oauthstore.js';
+export type {
+  NewOAuthRequest,
+  NewOAuthToken,
+  OAuthApproval,
+  OAuthClientKind,
+  OAuthClientRow,
+  OAuthGrantRecord,
+  OAuthStore,
+  OAuthTokenKind,
+  OAuthTokenRecord,
+  StoredOAuthClient,
+  StoredOAuthGrant,
+  StoredOAuthRequest,
+  StoredOAuthToken,
+} from './oauthstore.js';
+export {
+  OAUTH_AUTHORIZE_RATE_LIMIT,
+  OAUTH_DISCOVERY_RATE_LIMIT,
+  OAUTH_REGISTER_RATE_LIMIT,
+  OAUTH_REVOKE_RATE_LIMIT,
+  OAUTH_TOKEN_RATE_LIMIT,
+  consentPage,
+  mountOAuthRoutes,
+  oauthBaseOf,
+  oauthChallenge,
+} from './oauth-hono.js';
+export {
+  AUTHORIZATION_SERVER_METADATA_PATH,
+  OAUTH_AUTHORIZE_PATH,
+  OAUTH_CONSENT_PATH,
+  OAUTH_REGISTER_PATH,
+  OAUTH_RESOURCE_PATH,
+  OAUTH_REVOKE_PATH,
+  OAUTH_TOKEN_PATH,
+  OFFLINE_ACCESS_SCOPE,
+  OPENID_CONFIGURATION_PATH,
+  PROTECTED_RESOURCE_METADATA_PATH,
+  authorizationServerMetadata,
+  bearerChallenge,
+  codeChallengeOf,
+  discoveryPaths,
+  isAllowedRedirect,
+  isCodeChallenge,
+  isCodeVerifier,
+  isLoopbackRedirect,
+  protectedResourceMetadata,
+  publicBaseOf,
+  redirectMatches,
+  resourceOf,
+  scopeNames,
+  scopesOf,
+  verifyCodeChallenge,
+} from './oauth-protocol.js';
+export type { OAuthMetadataOptions } from './oauth-protocol.js';
+export {
+  ClientMetadataError,
+  cacheSecondsOf,
+  clientMetadataFetcher,
+  isPrivateAddress,
+  metadataDocumentUrlProblem,
+  readClientMetadata,
+} from './cimd.js';
+export type { ClientMetadata, ClientMetadataFetchOptions, ClientMetadataFetcher } from './cimd.js';

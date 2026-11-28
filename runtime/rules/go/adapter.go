@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The adapter of the behaviors' pure core (D103): the one host every Go
@@ -144,7 +146,7 @@ func (h Host) now() int64 {
 
 func (h Host) request() string {
 	if h.Request == nil {
-		return hyphenatedBytes(randomUUID())
+		return uuid.NewString()
 	}
 	return h.Request()
 }
@@ -737,10 +739,10 @@ func prepared(host Host, table *Table, command Command, opts *ExecuteOptions) (C
 func newKey(table *Table) (string, error) {
 	switch {
 	case uuidTypes[table.Key.Type]:
-		raw := randomUUID()
+		raw := uuid.New()
 		return base62(new(big.Int).SetBytes(raw[:])), nil
 	case table.Key.Type == "string":
-		return hyphenatedBytes(randomUUID()), nil
+		return uuid.NewString(), nil
 	}
 	return "", &Refusal{
 		Code:    CodeInvalidArgument,

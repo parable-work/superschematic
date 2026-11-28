@@ -60,11 +60,9 @@ import (
 // A Rust app's entrypoint (D78) is a crate beside the servers' too,
 // `<output-root>/server/<stack>/<app>/`. Its main.rs (app_main.rs.tmpl)
 // builds its one API's Deps, identity service, service authenticator and
-// Implementations as a server's does, opens the engine of the API's engine
-// database and deploys its document as a server's does, waits for it to
-// open, and calls the app's program, the project's crate at the naming
-// file's [implementation_paths] rust_app template, with the app's parts
-// (rustrestgen's apps.rs). It mounts no routes of its own: the program
+// Implementations as a server's does, and calls the app's program, the
+// project's crate at the naming file's [implementation_paths] rust_app
+// template, with the app's parts (rustrestgen's apps.rs). It mounts no routes of its own: the program
 // serves every route, and the process ends when its `serve` returns.
 
 // The files of a Rust entrypoint crate.
@@ -178,22 +176,12 @@ type RustInput struct {
 	Worker *WorkerInput
 
 	// Deriver, when set, plans the entrypoint of a deriver of the one API
-	// in APIs (D74): Server is then the deriver's deployable.
+	// in APIs (D146): Server is then the deriver's deployable.
 	Deriver *DeriverInput
 
 	// App, when set, plans the entrypoint of an app of the one API in APIs
 	// (D78): Server is then the app's deployable.
 	App *AppInput
-
-	// EngineTypes are the directories of the Rust types crate of each
-	// engine database an API connects to, which holds its engine document
-	// (D58), by service.
-	EngineTypes map[string]string
-
-	// EngineProject is the project's engine crate the entrypoint's engine
-	// runs the behaviors of, nil when the core's behaviors are every
-	// behavior its engine databases compose (D58).
-	EngineProject *EngineProject
 
 	// Embedded plans the wiring of every API of an environment's one
 	// binary (D116; embedded.go): Server is then the binary's name, and
@@ -209,7 +197,7 @@ type RustServer struct {
 	Stack string
 	Name  string
 
-	// Kind is "server", "job", "worker", "runner", "deriver" or "app".
+	// Kind is "server", "job", "worker", "deriver" or "app".
 	Kind string
 
 	// Job is what a job's entrypoint runs, nil for a server and a worker
@@ -217,7 +205,7 @@ type RustServer struct {
 	Job *Job
 
 	// Deriver is what a deriver's entrypoint runs, nil for every other
-	// (D74).
+	// (D146).
 	Deriver *RustDeriver
 
 	// Worker is what a worker's entrypoint runs, nil for a server and a
@@ -226,16 +214,6 @@ type RustServer struct {
 
 	// App is what an app's entrypoint runs, nil for every other (D78).
 	App *RustApp
-
-	// Runner is what an engine's runner's entrypoint runs, nil for every
-	// other (D58).
-	Runner *RustRunner
-
-	// Engines are the engines the entrypoint opens, one per engine
-	// database it connects to (D58), and EngineProject the project's engine
-	// crate they run the behaviors of, nil for the core's.
-	Engines       []*RustEngine
-	EngineProject *EngineProject
 
 	// Package is the crate's name, and Binary the name of its one binary,
 	// the server's: the local target runs it from the Cargo target
@@ -423,27 +401,21 @@ func (w *RustWorker) HandlerVar(q rustrestgen.BehaviorQueue) string {
 	return "run_" + w.QueueVar(q)
 }
 
-// RustDeriver is the deriver a Rust deriver's entrypoint runs (D74): its
+// RustDeriver is the deriver a Rust deriver's entrypoint runs (D146): its
 // @deriver class, the field of the API's Derivers that holds it, and the
-// engine it pulls from and settles to, the API's Deps' engine, as the
+// database whose repositories it pulls and settles through, as the
 // principal Subject and Permissions name.
 type RustDeriver struct {
 	rustrestgen.DeriverInfo
 
-	// Engine is the engine of the API's engine database, which Deps holds;
-	// nil for a deriver of tables (D146).
-	Engine *RustEngine
-
-	// Database is the database whose repositories a deriver of tables
-	// pulls and settles through, the pool Deps.db holds; nil for a deriver
-	// of engine types.
+	// Database is the database whose repositories the deriver pulls and
+	// settles through, the pool Deps.db holds.
 	Database *RustDatabase
 }
 
 // DerivedPermissions are the permissions a deriver of tables holds as a
 // behavior caller: each Derived config's permission, which the core asks
-// of a pull and a settle. A table's name, which the engine's permission
-// policy asks of a deriver of engine types, is left out.
+// of a pull and a settle.
 func (d *RustDeriver) DerivedPermissions() []string {
 	var out []string
 	for _, permission := range d.Permissions {
@@ -454,16 +426,10 @@ func (d *RustDeriver) DerivedPermissions() []string {
 	return out
 }
 
-// DeriverOfTables reports whether the entrypoint is a deriver's of tables
-// (D146), which clones its pool into the API's Deps and keeps it.
-func (s *RustServer) DeriverOfTables() bool { return s.Deriver != nil && s.Deriver.Tables }
-
 // RustApp is the app a Rust app's entrypoint runs (D78): its @app class
 // and the struct of its parts, from the API crate's apps.rs; its program,
 // the crate Crate, whose library Rust source names Lib, at Dir from the
-// repository root, which main.rs uses as Alias; and the engine of the
-// API's engine database, nil without one, which main.rs waits for and
-// holds open in the variable Opened.
+// repository root, which main.rs uses as Alias.
 type RustApp struct {
 	rustrestgen.AppInfo
 
@@ -471,9 +437,6 @@ type RustApp struct {
 	Lib   string
 	Alias string
 	Dir   string
-
-	Engine *RustEngine
-	Opened string
 }
 
 // RustAPI is a served API in main.rs.
@@ -506,12 +469,9 @@ type RustAPI struct {
 	// Identity is the variable of its identity service when it
 	// authenticates with the identity runtime over the user model (D50),
 	// empty otherwise, and IdentityField the EnvConfig field its config
-	// is. Authenticator is the variable of the identity runtime's
-	// authenticator over it when the API mounts its engine's routes, which
-	// share the service (D58).
+	// is.
 	Identity      string
 	IdentityField string
-	Authenticator string
 
 	// ServiceAuthenticator is the variable of its service authenticator,
 	// and Callers the EnvConfig field it verifies callers against, when an
@@ -567,10 +527,6 @@ type RustAPI struct {
 	// builds the store of their keys.
 	Idempotency bool
 
-	// Engine is the engine Deps.engine holds, of the API's engine database
-	// (D58), nil without one.
-	Engine *RustEngine
-
 	// Calls are Deps' clients.
 	Calls []RustCall
 
@@ -598,13 +554,6 @@ type RustAPI struct {
 	// carry (D143); empty for an API whose config does not say
 	// clientVersions.
 	MinClientVersions string
-}
-
-// MountsEngine reports whether the API's server mounts the routes of its
-// engine (D58): it shares its identity service and its service
-// authenticator with them.
-func (a *RustAPI) MountsEngine() bool {
-	return a.Engine != nil && a.Engine.API == a
 }
 
 // RustCall is a client in an API's Deps.
@@ -813,8 +762,8 @@ var rustReserved = []string{
 	"handle", "message", "bucket", "gcs", "open_bucket", "field", "service", "connection",
 	"memorystore", "open_or_disabled",
 	"token", "headers",
-	// A deriver's (D74).
-	"derive", "derivers", "deriver", "answer", "derived", "item", "schema", "schemas", "principal", "engine",
+	// A deriver's (D146).
+	"derive", "derivers", "deriver", "answer", "derived", "item", "schema", "schemas", "principal",
 	"unread", "derivation_answer",
 	// An app's (D78).
 	"parts", "served", "addr",
@@ -862,9 +811,6 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		Binary:      in.Server,
 		Naming:      n,
 		RustVersion: RustVersion,
-		// The engine's behaviors are the project's when its crate holds
-		// them (D58).
-		EngineProject: in.EngineProject,
 	}
 	switch {
 	case in.Job != nil:
@@ -930,7 +876,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		o := in.APIs[0].Output
 		d := o.Deriver(in.Deriver.Name)
 		if d == nil {
-			return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which declares no such deriver", in.Stack, in.Server, in.Deriver.Name, o.SchemaName)
+			return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which declares no such deriver (D146)", in.Stack, in.Server, in.Deriver.Name, o.SchemaName)
 		}
 		s.Kind = "deriver"
 		s.Deriver = &RustDeriver{DeriverInfo: *d}
@@ -984,7 +930,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	}
 	stores := map[string]*RustMemoryStore{}
 	// A behavior worker opens the API's database alone: it builds no Deps,
-	// so it opens no client, bucket, memory store or engine (D103), unless
+	// so it opens no client, bucket or memory store (D103), unless
 	// its table's behaviors emit events, whose handler hands each to the
 	// implementation's Workers, which its Deps build (D104).
 	behaviorWorker := s.Worker != nil && s.Worker.Behavior != nil
@@ -1062,8 +1008,8 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				}
 				databases[db] = d
 				switch {
-				case o.Deps.SQLite && (s.Runner != nil || s.Deriver != nil || s.App != nil):
-					return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Rust server, job and worker open a SQLite file, and a deriver, an engine's runner and an app do not yet (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
+				case o.Deps.SQLite && (s.Deriver != nil || s.App != nil):
+					return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Rust server, job and worker open a SQLite file, and a deriver and an app do not yet (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
 				case o.Deps.SQLite:
 					d.SQLite = true
 					s.Files = append(s.Files, d)
@@ -1230,29 +1176,13 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		}
 		s.APIs = append(s.APIs, api)
 	}
-	if !behaviorWorker {
-		if err := s.planRustEngines(in, taken); err != nil {
-			return nil, err
-		}
-	}
-	switch {
-	case s.DeriverOfTables():
+	if s.Deriver != nil {
 		// A deriver of tables pulls and settles through the repositories
 		// of the API's database, on its pool (D146).
 		if s.APIs[0].Database == nil {
 			return nil, fmt.Errorf("stack %s: deriver %s of %s fills the Derived fields of %s through the repositories of its database, and %s connects to none (D146)", in.Stack, in.Server, s.APIs[0].Service, strings.Join(s.Deriver.Schemas, ", "), s.APIs[0].Service)
 		}
 		s.Deriver.Database = s.APIs[0].Database
-	case s.Deriver != nil:
-		if s.APIs[0].Engine == nil {
-			return nil, fmt.Errorf("stack %s: deriver %s of %s opens no engine, whose Derived fields it fills (D74)", in.Stack, in.Server, s.APIs[0].Service)
-		}
-		s.Deriver.Engine = s.APIs[0].Engine
-	}
-	if s.App != nil && s.APIs[0].Engine != nil {
-		// The app's parts hold the engine once it has opened (D78).
-		s.App.Engine = s.APIs[0].Engine
-		s.App.Opened = taken.take(rustStem(s.App.Engine.Service) + "_opened")
 	}
 	s.planLoopback(taken)
 	for _, a := range in.APIs {
@@ -1387,10 +1317,9 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		// An app's main.rs serves nothing itself either: its program does
 		// (D78).
 		registry = []CargoDependency{{"tokio", fmt.Sprintf(`{ version = %s, features = ["macros", "rt-multi-thread"] }`, quoteToml(rustTokioVersion))}}
-		if len(s.Engines) > 0 || s.DeriverOfTables() {
-			// engine.rs reads the engine document's JSON, and a deriver of
-			// tables passes its operations' parameters and results as JSON
-			// (D146).
+		if s.Deriver != nil {
+			// A deriver of tables passes its operations' parameters and
+			// results as JSON (D146).
 			registry = append([]CargoDependency{{"serde_json", quoteToml(rustSerdeJSONVersion)}}, registry...)
 		}
 	}
@@ -1454,13 +1383,6 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		return err
 	}
 	local := map[string]string{s.Naming.HTTPRuntimeRustCrate: runtime}
-	engines, err := s.engineDependencies(in, pathDep)
-	if err != nil {
-		return err
-	}
-	for crate, spec := range engines {
-		local[crate] = spec
-	}
 	for _, a := range in.APIs {
 		if local[a.Output.CrateName], err = pathDep(a.Dir); err != nil {
 			return err
@@ -1599,11 +1521,6 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 	if path.Base(path.Dir(scalar)) == "crates" {
 		d.Include = append(d.Include, path.Dir(path.Dir(scalar))+"/"+RustManifestFile)
 	}
-	engines, why := engineDockerIncludes(in, s, rel)
-	if why != "" {
-		return nil, why, nil
-	}
-	d.Include = append(d.Include, engines...)
 	behaviors, why := behaviorDockerIncludes(in, rel)
 	if why != "" {
 		return nil, why, nil
@@ -1759,11 +1676,11 @@ func readRustCrate(dir, scaffolded, what, by string) (RustImplementation, error)
 	return impl, nil
 }
 
-// Background reports whether the entrypoint is a job's, a worker's or an
-// engine runner's, which serves no request: it mounts no routes, listens on
-// no port, and verifies no end user or caller.
+// Background reports whether the entrypoint is a job's, a worker's or a
+// deriver's, which serves no request: it mounts no routes, listens on no
+// port, and verifies no end user or caller.
 func (s *RustServer) Background() bool {
-	return s.Job != nil || s.Worker != nil || s.Runner != nil || s.Deriver != nil
+	return s.Job != nil || s.Worker != nil || s.Deriver != nil
 }
 
 // Sections are the sections of docs/stack-model.md the entrypoint's
@@ -1774,8 +1691,6 @@ func (s *RustServer) Sections() string {
 		return "sections 8.6 and 8.7"
 	case s.Worker != nil:
 		return "sections 8.6 and 8.8"
-	case s.Runner != nil:
-		return "sections 3.1 and 8.6"
 	case s.Deriver != nil:
 		return "section 8.6"
 	case s.App != nil:
@@ -1803,9 +1718,9 @@ func (s *RustServer) AnyCORS() bool {
 }
 
 // Closes reports whether main.rs closes anything once it stops serving or
-// running: an engine, or a memory store (D75).
+// running: a memory store (D75), or the wakes its enqueues sent (D145).
 func (s *RustServer) Closes() bool {
-	return len(s.Engines) > 0 || len(s.MemoryStores) > 0 || s.SettlesWakes()
+	return len(s.MemoryStores) > 0 || s.SettlesWakes()
 }
 
 // SettlesWakes reports whether the entrypoint awaits the wakes its
@@ -1889,8 +1804,8 @@ func (s *RustServer) RuntimeUses() []string {
 // stops on.
 func (s *RustServer) backgroundUses(runtime string) []string {
 	uses := s.bucketUses(runtime)
-	if s.DeriverOfTables() {
-		// The loop of a deriver of tables (D146).
+	if s.Deriver != nil {
+		// The loop of a deriver (D146).
 		uses = append(uses, rustutil.UseLine(runtime+"::deriver", []string{"self", "DerivationAnswer", "DerivationItem", "DeriverOptions"}))
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
@@ -1900,7 +1815,7 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 		// open as a server does.
 		uses = append(uses, "use "+runtime+"::orm::sqlite::{self, Database as SqliteFile};")
 	}
-	if s.DeriverOfTables() {
+	if s.Deriver != nil {
 		// The repositories' caller and failures (D146).
 		uses = append(uses, "use "+runtime+"::orm;")
 	}
@@ -2031,9 +1946,6 @@ func (s *RustServer) CrateUses() []string {
 	for _, c := range s.Clients {
 		uses = append(uses, "use "+crateIdent(c.Crate)+" as "+c.Alias+";")
 	}
-	for _, e := range s.Engines {
-		uses = append(uses, "use "+crateIdent(e.TypesCrate)+" as "+e.TypesAlias+";")
-	}
 	if s.App != nil {
 		uses = append(uses, "use "+s.App.Lib+" as "+s.App.Alias+";")
 	}
@@ -2047,21 +1959,11 @@ func (s *RustServer) CrateUses() []string {
 // the pool of its database, which its behavior operations run on (D103).
 func (a *RustAPI) ImplementationsArgs() []string {
 	args := []string{a.Handlers}
-	// An API that mounts its engine's routes holds its identity service
-	// and its service authenticator in an Arc, which the routes' callers
-	// share (D58).
-	switch {
-	case a.Authenticator != "":
-		args = append(args, "Arc::new("+a.Authenticator+")")
-	case a.Identity != "":
+	if a.Identity != "" {
 		args = append(args, "Arc::new(IdentityAuthenticator::new(Arc::new("+a.Identity+")))")
 	}
 	if a.ServiceAuthenticator != "" {
-		authenticator := "Arc::new(" + a.ServiceAuthenticator + ")"
-		if a.MountsEngine() {
-			authenticator = "Arc::clone(&" + a.ServiceAuthenticator + ") as _"
-		}
-		args = append(args, authenticator)
+		args = append(args, "Arc::new("+a.ServiceAuthenticator+")")
 	}
 	if a.Behaviors || a.Tables || a.Graphs || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
@@ -2103,21 +2005,14 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "worker_sqlite.rs.tmpl"
 	case s.Worker != nil:
 		main = "worker.rs.tmpl"
-	case s.Runner != nil:
-		main = "runner.rs.tmpl"
-	case s.DeriverOfTables():
-		main = "table_deriver.rs.tmpl"
 	case s.Deriver != nil:
-		main = "deriver.rs.tmpl"
+		main = "table_deriver.rs.tmpl"
 	case s.App != nil:
 		main = "app_main.rs.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, RustMainFile},
 		{"Cargo.toml.tmpl", RustManifestFile},
-	}
-	if len(s.Engines) > 0 {
-		files = append(files, struct{ template, name string }{"engine.rs.tmpl", RustEngineFile})
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.rs.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.rs.tmpl", DockerIgnoreFile})
@@ -2252,9 +2147,9 @@ func (s *RustServer) ServerSpans() string {
 
 // JobRun is a job's main.rs's last expression, which runs the job's method
 // in the span of trace export (D67), as rustfmt lays it out: on one line
-// when it fits, and each argument on a line of its own otherwise. With
-// engines it is instead the statement that keeps the run in ran, so the
-// engines close before main returns it (D58).
+// when it fits, and each argument on a line of its own otherwise. When
+// main.rs closes something once the job ends it is instead the statement
+// that keeps the run in ran, so they close before main returns it.
 func (s *RustServer) JobRun() string {
 	const indent = "    "
 	lead, end := "", ""
@@ -2280,14 +2175,6 @@ func (s *RustServer) SiteCORS() string {
 		}
 		args = append(args, [2]string{"&" + a.Config + "." + a.CORS, a.Alias + "::operations::ALL"})
 		apis = append(apis, "cors::Api::new("+args[len(args)-1][0]+", "+args[len(args)-1][1]+")")
-	}
-	// The engine's routes an API mounts answer its site's CORS too (D58).
-	for _, a := range s.APIs {
-		if a.CORS == "" || !a.MountsEngine() {
-			continue
-		}
-		args = append(args, [2]string{"&" + a.Config + "." + a.CORS, rustString(a.Engine.Mount)})
-		apis = append(apis, "engine::site_cors("+args[len(args)-1][0]+", "+args[len(args)-1][1]+")")
 	}
 	const open, close = "    let app = app.layer(cors::SiteCorsLayer::new(vec![", "]));"
 	if line := open + strings.Join(apis, ", ") + close; len(line) <= rustWidth {

@@ -119,3 +119,50 @@ func TestJobWritesARuntimeRecordAndItsReads(t *testing.T) {
 	job.Databases[0].Plan = ""
 	invoke(t, nil, "job", "--job", writeJob(t, job)).expect(t, exitFailed, "has a record and no plan")
 }
+
+// TestRecordPrintsARuntimeDatabasesRecordAndItsModel: record prints the
+// record apply --record wrote (D117), and --model the model it is of, the
+// one status --model prints; it refuses a file that does not exist, which
+// it does not create, a database with no record, and one whose model has
+// moved past the record.
+func TestRecordPrintsARuntimeDatabasesRecordAndItsModel(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			dialect, db := migrate.SQLite, filepath.Join(t.TempDir(), "app.db")
+			if backend == "postgres" {
+				dialect, db = migrate.Postgres, testdb.NewPostgres(t)
+			}
+			create := readFixture(t, dialect, "01-create")
+			if backend == "sqlite" {
+				invoke(t, nil, "record", "--database-url", db).expect(t, exitFailed)
+				if _, err := os.Stat(db); err == nil {
+					t.Fatal("record created the file it was to read")
+				}
+			}
+			invoke(t, nil, "apply", "--plan", fixturePath(dialect, "01-create"), "--database-url", db).expect(t, exitOK)
+			invoke(t, nil, "record", "--database-url", db).expect(t, exitFailed, "holds no record of runtime mode")
+
+			// The second plan writes the record of its model.
+			evolve := readFixture(t, dialect, "02-evolve")
+			record := writeRecord(t, t.TempDir(), evolve.Service, evolve.To)
+			invoke(t, nil, "apply", "--plan", fixturePath(dialect, "02-evolve"), "--record", record, "--database-url", db).expect(t, exitOK)
+			printed := invoke(t, nil, "record", "--database-url", db).expect(t, exitOK)
+			got, err := migrate.ReadRecord([]byte(printed.stdout))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Service != create.Service || got.ModelHash != evolve.To || string(got.Versions) != `{"Order":1}` || string(got.Documents) != `[{"name":"`+create.Service+`"}]` {
+				t.Fatalf("record printed %+v", got)
+			}
+			model := invoke(t, nil, "record", "--model", "--database-url", db).expect(t, exitOK)
+			status := invoke(t, nil, "status", "--service", create.Service, "--model", "--database-url", db).expect(t, exitOK)
+			if model.stdout != status.stdout {
+				t.Fatalf("record --model printed\n%s\nstatus --model\n%s", model.stdout, status.stdout)
+			}
+
+			// A plan with no record leaves the record behind the model.
+			invoke(t, nil, "apply", "--plan", fixturePath(dialect, "03-audit"), "--database-url", db).expect(t, exitOK)
+			invoke(t, nil, "record", "--database-url", db).expect(t, exitFailed, "the record is of model "+evolve.To)
+		})
+	}
+}

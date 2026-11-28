@@ -67,9 +67,21 @@ func TestDepsHoldTheRuntimePieces(t *testing.T) {
 		t.Errorf("search alone: HasRuntime %v, BuildsRuntime %v, want a runtime.ts that builds nothing into Deps", search.HasRuntime(), search.BuildsRuntime())
 	}
 
+	// Over a database that lists sqlite first the pieces come from the
+	// runtime's ./d1 entry, the dispatcher's among them (#702).
+	d1 := &APIOutput{SchemaName: "work-api"}
+	if err := d1.SetDeps(DepsInfo{Database: "work-db", Dialect: SQLiteDialect, ORM: "WorkDbOrm", DatabaseTypesPackage: "@schemas/work-db-types", Notifier: &DepsNotifier{Dispatch: "NoticeWork"}, Agents: &DepsAgents{Requests: "AgentRunRequest"}, Routes: DepsRoutes{Calendar: true}}); err != nil {
+		t.Fatalf("SetDeps with sqlite: %v", err)
+	}
+	if entry := d1.RuntimeEntry(); entry != "/d1" {
+		t.Errorf("RuntimeEntry over sqlite = %s, want /d1", entry)
+	}
+	if entry := output.RuntimeEntry(); entry != "/postgres" {
+		t.Errorf("RuntimeEntry over postgres = %s, want /postgres", entry)
+	}
+
 	for name, refused := range map[string]DepsInfo{
 		"no repositories": {Database: "work-db", Notifier: &DepsNotifier{Dispatch: "NoticeWork"}},
-		"sqlite":          {Database: "work-db", Dialect: SQLiteDialect, ORM: "WorkDbOrm", DatabaseTypesPackage: "@schemas/work-db-types", Routes: DepsRoutes{Calendar: true}},
 		"no notifier":     {Database: "work-db", ORM: "WorkDbOrm", DatabaseTypesPackage: "@schemas/work-db-types", Inbound: &DepsInbound{Runs: "RunRequest"}},
 	} {
 		if err := (&APIOutput{SchemaName: "work-api"}).SetDeps(refused); err == nil {

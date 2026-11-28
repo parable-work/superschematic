@@ -373,7 +373,11 @@ export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOp
  * register admits users as identityRegistration says.
  */
 export function identityService(options: Omit<IdentityServiceOptions, 'routes' | 'registration'>): IdentityService {
-  return new IdentityService({ ...options, routes: routesOf(operationSpecs), registration: identityRegistration });
+  return new IdentityService({
+    ...options,
+    routes: routesOf(operationSpecs),
+    registration: identityRegistration,
+  });
 }
 
 /** How register admits users, as the API's @userSessions declares it (D81). */

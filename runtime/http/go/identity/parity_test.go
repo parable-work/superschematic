@@ -74,6 +74,9 @@ type effectiveConfig struct {
 	Password             struct {
 		Argon2 identity.Argon2Params `json:"argon2"`
 	} `json:"password"`
+	OAuth struct {
+		PublicBaseURL string `json:"publicBaseUrl"`
+	} `json:"oauth"`
 }
 
 type cookieFx struct {
@@ -94,6 +97,7 @@ func effective(c identity.Config) *effectiveConfig {
 		TrustedOrigins:       c.TrustedOrigins,
 	}
 	e.Password.Argon2 = c.Argon2Params()
+	e.OAuth.PublicBaseURL = c.OAuth.PublicBaseURL
 	return e
 }
 
@@ -577,6 +581,23 @@ func configCorpus(t *testing.T) []configCase {
 		{"an unknown argon2 member is refused", `{"password": {"argon2": {"saltBytes": 16}}}`, false},
 		{"a string where a number goes is refused", `{"sessionTtlSeconds": "3600"}`, false},
 		{"a fractional number of seconds is refused", `{"sessionTtlSeconds": 1.5}`, false},
+		{"an OAuth public base URL", `{"oauth": {"publicBaseUrl": "https://app.example.com/api/notes"}}`, true},
+		{"an OAuth public base URL at the origin's root", `{"oauth": {"publicBaseUrl": "https://api.example.com"}}`, true},
+		{"an OAuth public base URL with a port", `{"oauth": {"publicBaseUrl": "https://app.example.com:8443/api/notes"}}`, true},
+		{"an OAuth public base URL over http on localhost", `{"oauth": {"publicBaseUrl": "http://localhost:4000/api/notes"}}`, true},
+		{"an OAuth public base URL over http on 127.0.0.1", `{"oauth": {"publicBaseUrl": "http://127.0.0.1:4000"}}`, true},
+		{"an OAuth public base URL over http on [::1]", `{"oauth": {"publicBaseUrl": "http://[::1]:4000"}}`, true},
+		{"an empty OAuth config", `{"oauth": {}}`, true},
+		{"an OAuth public base URL over http elsewhere is refused", `{"oauth": {"publicBaseUrl": "http://app.example.com"}}`, false},
+		{"an OAuth public base URL with a trailing slash is refused", `{"oauth": {"publicBaseUrl": "https://app.example.com/api/notes/"}}`, false},
+		{"an OAuth public base URL of a bare slash is refused", `{"oauth": {"publicBaseUrl": "https://app.example.com/"}}`, false},
+		{"an OAuth public base URL with a query is refused", `{"oauth": {"publicBaseUrl": "https://app.example.com?x=1"}}`, false},
+		{"an OAuth public base URL with a fragment is refused", `{"oauth": {"publicBaseUrl": "https://app.example.com#top"}}`, false},
+		{"an OAuth public base URL with a user is refused", `{"oauth": {"publicBaseUrl": "https://me@app.example.com"}}`, false},
+		{"an OAuth public base URL without a scheme is refused", `{"oauth": {"publicBaseUrl": "app.example.com"}}`, false},
+		{"an OAuth public base URL of another scheme is refused", `{"oauth": {"publicBaseUrl": "ftp://app.example.com"}}`, false},
+		{"an unknown OAuth member is refused", `{"oauth": {"issuer": "https://app.example.com"}}`, false},
+		{"an OAuth member named in another case is refused", `{"oauth": {"publicBaseURL": "https://app.example.com"}}`, false},
 		{"a config that is not an object is refused", `[]`, false},
 		{"a null config is refused", `null`, false},
 	}

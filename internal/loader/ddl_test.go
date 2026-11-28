@@ -52,8 +52,7 @@ func TestLoadDDLFixture(t *testing.T) {
 }
 
 // TestVerifyDDLJSON: the data forms have no compiler, so the verify pass
-// refuses a method, an operator class and an engine type's index options
-// they can write.
+// refuses a method and an operator class they can write.
 func TestVerifyDDLJSON(t *testing.T) {
 	dir := writeService(t, map[string]string{
 		"schema.config.json": `{"name": "temp-db", "kind": "DB", "outputs": {}}`,

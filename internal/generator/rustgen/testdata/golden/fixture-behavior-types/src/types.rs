@@ -10,7 +10,7 @@ pub struct Batch {
     pub topic: Option<String>,
 }
 
-/// A job a worker claims from its topic's queue and holds under a lease, within a CPU budget, retried per failure class.
+/// A job a worker holds under a lease, within a CPU budget, retried per failure class.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Job {
     pub title: String,
@@ -46,7 +46,7 @@ pub struct Request {
     pub summary: Option<String>,
 }
 
-/// A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
+/// A ticket that moves through its states, waits for the tickets that block it, and keeps deadlines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ticket {
     pub title: String,

@@ -37,7 +37,7 @@ func TestCalendarFixtureLoads(t *testing.T) {
 		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
 	}
 	desk, booking := db.Types["Desk"], db.Types["Booking"]
-	if desk == nil || desk.IsEngineType() || !desk.Optimistic || booking == nil || !booking.Optimistic {
+	if desk == nil || len(desk.TypeBehaviors()) > 0 || !desk.Optimistic || booking == nil || !booking.Optimistic {
 		t.Fatalf("Desk = %s, Booking = %s", marshal(t, desk), marshal(t, booking))
 	}
 	uses := func(td *ir.TypeDef) []string {

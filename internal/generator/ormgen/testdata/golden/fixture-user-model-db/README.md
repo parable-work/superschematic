@@ -11,6 +11,10 @@ Generated at: 2026-01-02T03:04:05Z
 - `interfaces.go` -- repository/database/transaction interfaces + no-op implementations
 - `query.go` -- typed field selectors, filters, update structs, snapshot builders, and `ApplyTo`
 - `utils.go` -- shared query helpers
+- `repository_oauth_client.go` -- OAuthClient repository
+- `repository_oauth_code.go` -- OAuthCode repository
+- `repository_oauth_grant.go` -- OAuthGrant repository
+- `repository_oauth_token.go` -- OAuthToken repository
 - `repository_role.go` -- Role repository
 - `repository_session.go` -- Session repository
 - `repository_user.go` -- User repository
@@ -32,7 +36,7 @@ if err != nil {
 }
 defer db.Close()
 
-record, err := db.Role.GetOne(ctx, id, nil)
+record, err := db.OAuthClient.GetOne(ctx, id, nil)
 ```
 
 Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,

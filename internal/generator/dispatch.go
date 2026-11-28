@@ -15,7 +15,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/ormgen"
-	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/generator/pygen"
 	"github.com/parable-work/superschematic/internal/generator/pysdkgen"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -148,8 +147,6 @@ type runMemo struct {
 	apiOutputReady    bool
 	envConfig         *envgen.ConfigOutput
 	envConfigReady    bool
-	engineDocument    []byte
-	engineDocReady    bool
 }
 
 // buildEnvConfig resolves the schema's @envVars contract once per run for
@@ -226,10 +223,6 @@ func (r run) generateGoTypes() error {
 		return err
 	}
 
-	engineDocument, err := r.engineDocument()
-	if err != nil {
-		return err
-	}
 	projections, err := r.goCaptureProjections(deps)
 	if err != nil {
 		return fmt.Errorf("generator: go types for %s: %w", r.Config.Name, err)
@@ -245,7 +238,6 @@ func (r run) generateGoTypes() error {
 			ModuleClosure:     closure,
 			Naming:            r.Options.Naming,
 			Registry:          r.Registry,
-			EngineDocument:    engineDocument,
 			Projections:       projections,
 			Clock:             r.Options.Clock,
 		})
@@ -308,10 +300,6 @@ func (r run) generateTSTypes() error {
 		return err
 	}
 
-	engineDocument, err := r.engineDocument()
-	if err != nil {
-		return err
-	}
 	var output *tsgen.ModuleOutput
 	if err := r.measure("output.types-typescript.generate", func() error {
 		var err error
@@ -321,7 +309,6 @@ func (r run) generateTSTypes() error {
 			DependencyPackages: depPackages,
 			Naming:             r.Options.Naming,
 			Registry:           r.Registry,
-			EngineDocument:     engineDocument,
 			SQLite:             r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 			NoPostgres:         !r.Outputs.SQLDialect(registry.SQLDialectPostgres),
 			Actor:              r.ormActor(),
@@ -417,17 +404,12 @@ func (r run) generateRustTypes() error {
 		depCrates[name] = r.Options.Naming.RustTypesCrate(name)
 	}
 
-	engineDocument, err := r.engineDocument()
-	if err != nil {
-		return err
-	}
 	output, err := rustgen.Generate(r.Schema, rustgen.Options{
 		SchemaName:       r.Config.Name,
 		Dependencies:     deps,
 		DependencyCrates: depCrates,
 		Naming:           r.Options.Naming,
 		Registry:         r.Registry,
-		EngineDocument:   engineDocument,
 		SQLite:           r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 		Actor:            r.ormActor(),
 		Clock:            r.Options.Clock,
@@ -838,11 +820,6 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if tsDeps.Providers, err = r.typeScriptProviders(); err != nil {
 		return nil, nil, err
 	}
-	if e := apiOutput.Engine; e != nil {
-		// Deps holds the engine of the API's engine database, which a server
-		// opens in the background (D58).
-		tsDeps.Engine = &tsrestgen.DepsEngine{Database: e.Database, Namespace: e.Namespace, Package: r.Options.Naming.EngineNpmPackage}
-	}
 	// The MCP endpoint signs the confirmations of the tools that ask with
 	// the secret the API's config names, which its @envVars holds (D93).
 	confirmationKey, err := r.mcpConfirmationKeyField(output.MCP)
@@ -855,9 +832,8 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if err := output.SetDeps(tsDeps); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
-	// Deps.ts declares the derivers, typed by the database's types (D74,
-	// D146).
-	if err := output.SetDerivers(apiOutput.Engine, apiOutput.TableDerivers); err != nil {
+	// Deps.ts declares the derivers, typed by the database's types (D146).
+	if err := output.SetDerivers(apiOutput.TableDerivers); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
 	output.HasEnvConfig = envOutput != nil
@@ -1004,10 +980,9 @@ func (r run) typeScriptORM(db, dialect string) (string, error) {
 // declares the queues' messages, which the API's Workers take, and their
 // definitions, which the worker claims with and the implementation
 // enqueues with. Each worker must handle a queue of db, whose TypeScript
-// types must be generated. A deriver's methods are typed by db's engine
-// types or its tables too (D74, D146). An API with no worker and no deriver loads no database
-// here, and its implementation adds the types' dependency itself to
-// enqueue.
+// types must be generated. A deriver's methods are typed by db's tables too
+// (D146). An API with no worker and no deriver loads no database here, and
+// its implementation adds the types' dependency itself to enqueue.
 func (r run) typeScriptQueuesPackage(db string) (string, error) {
 	if len(r.Schema.Workers) == 0 && len(r.Schema.Derivers) == 0 {
 		return "", nil
@@ -1140,10 +1115,6 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine, err := r.engineDatabase(deps)
-	if err != nil {
-		return nil, err
-	}
 	tableDerivers, err := r.tableDerivers(deps)
 	if err != nil {
 		return nil, err
@@ -1171,7 +1142,6 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		IdempotencyTable:   idempotencyTable,
 		ToolInvocation:     r.Registry.ToolInvocationPolicy(),
 		RawBodyChecks:      r.Registry.RawBodyChecks(),
-		Engine:             engine,
 		TableDerivers:      tableDerivers,
 		// The catalog lists Constants' and StateRules' permission under an
 		// operation that updates a row of their table, which the core
@@ -1358,9 +1328,6 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 			return fmt.Errorf("generator: the Go server of %s holds %s in its Deps, and %s generates none; enable outputs.%s.%s in %s's config", r.Config.Name, what, service, lang, LangGo, service)
 		}
 		return nil
-	}
-	if err := refuseGoEngineDerivers(r.Schema, output.Engine); err != nil {
-		return deps, nil, err
 	}
 	if db, _, ok := r.Schema.Database(); ok {
 		if err := needs(db, "the ORM of "+db, "types", func(o *registry.Outputs) bool { return o.TypesEnabled(LangGo) }); err != nil {
@@ -1740,24 +1707,16 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// Deps.rs declares the derivers, typed by the database's Rust types:
-	// the engine database's (D74), or the database whose tables they fill
-	// (D146), one kind per API.
-	if err := refuseRustMixedDerivers(r.Schema, apiOutput.Engine, apiOutput.TableDerivers); err != nil {
-		return nil, nil, err
-	}
+	// Deps.rs declares the derivers, typed by the Rust types of the
+	// database whose tables they fill (D146).
 	fieldTypes := func(schema string) (map[string]string, error) {
-		database := rustDeps.Database
-		if apiOutput.Engine != nil {
-			database = apiOutput.Engine.Database
-		}
-		db, err := r.LoadDependency(database)
+		db, err := r.LoadDependency(rustDeps.Database)
 		if err != nil {
 			return nil, err
 		}
 		return rustgen.FieldTypes(db, schema, rustrestgen.DatabaseTypesModule+"::")
 	}
-	if err := output.SetDerivers(apiOutput.Engine, apiOutput.TableDerivers, fieldTypes); err != nil {
+	if err := output.SetDerivers(apiOutput.TableDerivers, fieldTypes); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
 	if err := output.SetDeps(rustDeps); err != nil {
@@ -1840,29 +1799,6 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 	if err := r.rustBehaviorDeps(apiDir, &deps); err != nil {
 		return deps, err
 	}
-	engine, err := r.engineDatabase(schemas)
-	if err != nil {
-		return deps, err
-	}
-	if engine != nil {
-		if r.Options.Paths.EngineRust == "" {
-			return deps, fmt.Errorf("generator: the Rust server of %s holds the engine of %s, its engine database, in its Deps (D58), whose crate the naming file's [paths] engine_rust names, and it is unset; set it to a checkout's runtime/engine/rust/engine", r.Config.Name, engine.Database)
-		}
-		path, err := naming.RelPath(apiDir, r.Options.Paths.EngineRust)
-		if err != nil {
-			return deps, fmt.Errorf("generator: the engine's crate from %s: %w", r.Config.Name, err)
-		}
-		deps.Engine = &rustrestgen.DepsEngine{Database: engine.Database, Namespace: engine.Namespace, Crate: projectengine.EngineCrate, Path: path, Policy: string(engine.Policy)}
-		// A database no Rust engine runs is the server's to refuse, not
-		// the API crate's.
-		if project, err := r.projectEngine(r.Config.Name, engine.Database); err == nil && project != nil {
-			rel, err := naming.RelPath(apiDir, project.Dir)
-			if err != nil {
-				return deps, fmt.Errorf("generator: the project's engine crate of %s from %s: %w", engine.Database, r.Config.Name, err)
-			}
-			deps.Engine.Project = &rustrestgen.DepsProject{Crate: project.Crate, Ident: project.Ident, Path: rel}
-		}
-	}
 	for _, call := range r.Schema.Calls {
 		if r.Options.DependencyConfig != nil {
 			if cfg, ok := r.Options.DependencyConfig(call.Name); ok {
@@ -1896,15 +1832,15 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 // and hold their descriptors, which the worker claims with and the
 // implementation enqueues with. Each worker must handle a queue of db,
 // whose Rust types must be generated. A deriver's methods are typed by
-// db's engine types too (D74). An API with no worker and no deriver loads
-// no database here.
+// db's tables too (D146). An API with no worker and no deriver loads no
+// database here.
 func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
 	if len(r.Schema.Workers) == 0 && len(r.Schema.Derivers) == 0 {
 		return r.rustTableTypes(db, apiDir, deps)
 	}
 	schema, err := r.LoadDependency(db)
 	if err != nil {
-		return fmt.Errorf("generator: load %s, the database of %s, whose queues its workers handle or whose engine types its derivers fill: %w", db, r.Config.Name, err)
+		return fmt.Errorf("generator: load %s, the database of %s, whose queues its workers handle or whose tables its derivers fill: %w", db, r.Config.Name, err)
 	}
 	if err := checkWorkerQueues(r.Schema, db, schema); err != nil {
 		return err
@@ -1916,7 +1852,7 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 				return fmt.Errorf("generator: schema config for %s: %w", db, err)
 			}
 			if !outputs.TypesEnabled(LangRust) && len(r.Schema.Workers) == 0 {
-				return fmt.Errorf("generator: the Rust derivers of %s fill engine types of %s, whose Rust types type their methods, and %s generates none; enable outputs.types.%s in %s's config (D74)", r.Config.Name, db, db, LangRust, db)
+				return fmt.Errorf("generator: the Rust derivers of %s fill tables of %s, whose Rust types type their methods, and %s generates none; enable outputs.types.%s in %s's config (D146)", r.Config.Name, db, db, LangRust, db)
 			}
 			if !outputs.TypesEnabled(LangRust) {
 				return fmt.Errorf("generator: the Rust workers of %s handle the queues of %s, whose Rust types declare the messages and hold the queues' descriptors, and %s generates none; enable outputs.types.%s in %s's config (D65)", r.Config.Name, db, db, LangRust, db)

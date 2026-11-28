@@ -178,6 +178,15 @@ pub struct JobRetries {
     pub exhausted: bool,
     /// Whether the instance failed with the same signature stuckAfter times in a row.
     pub stuck: bool,
+    /// When the row may run again after its last failure, in epoch milliseconds, as its class's backoff gives it; absent when it may run at once. A table's alone: an engine type keeps none.
+    #[serde(default, rename = "retryAt", skip_serializing_if = "Option::is_none")]
+    pub retry_at: Option<i64>,
+    /// When the first failure since the row's last success was recorded, in epoch milliseconds, which giveUpAfterMs counts from; absent after a success, and without giveUpAfterMs. A table's alone: an engine type keeps none.
+    #[serde(default, rename = "failingSince", skip_serializing_if = "Option::is_none")]
+    pub failing_since: Option<i64>,
+    /// The value of keyField the counts were made under, as text; absent without keyField. A table's alone: an engine type keeps none.
+    #[serde(default, rename = "keyedBy", skip_serializing_if = "Option::is_none")]
+    pub keyed_by: Option<String>,
 }
 
 /// JobRetriesClassAttempts types JobRetries.classAttempts.
@@ -446,9 +455,6 @@ pub struct TicketBehaviors {
     /// The fields of Dependencies.
     #[serde(rename = "Dependencies")]
     pub dependencies: TicketDependencies,
-    /// The fields of Links.
-    #[serde(rename = "Links")]
-    pub links: TicketLinks,
     /// The fields of Timers.
     #[serde(rename = "Timers")]
     pub timers: TicketTimers,
@@ -512,59 +518,6 @@ pub struct TicketRevisions {
 pub struct TicketDependencies {
     /// Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.
     pub blocked: bool,
-}
-
-/// TicketLinks holds the fields a Ticket's Links adds, as a read returns them: a field with no value is absent.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TicketLinks {
-    /// The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none.
-    pub targets: TicketLinksTargets,
-}
-
-/// TicketLinksTargets types TicketLinks.targets.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TicketLinksTargets {
-    /// The projects instance project points at.
-    pub project: TicketLinksTargetsProject,
-    /// The people instances reviewers points at, in the order they were linked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reviewers: Option<Vec<TicketLinksTargetsReviewersItem>>,
-    /// The documents instance spec points at.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub spec: Option<TicketLinksTargetsSpec>,
-}
-
-/// TicketLinksTargetsProject types TicketLinksTargets.project.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TicketLinksTargetsProject {
-    pub id: String,
-    /// Always "projects".
-    pub schema: String,
-}
-
-/// TicketLinksTargetsReviewersItem types an item of TicketLinksTargets.reviewers.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TicketLinksTargetsReviewersItem {
-    pub id: String,
-    /// Always "people".
-    pub schema: String,
-}
-
-/// TicketLinksTargetsSpec types TicketLinksTargets.spec.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TicketLinksTargetsSpec {
-    pub id: String,
-    /// The target's latest revision.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latest: Option<i64>,
-    /// The target's revision the link records.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revision: Option<i64>,
-    /// Always "documents".
-    pub schema: String,
-    /// Whether the target has moved past that revision.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stale: Option<bool>,
 }
 
 /// TicketTimers holds the fields a Ticket's Timers adds, as a read returns them: a field with no value is absent.

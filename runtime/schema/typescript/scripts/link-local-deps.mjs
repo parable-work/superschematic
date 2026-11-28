@@ -1,13 +1,14 @@
 // Symlink the in-repo packages this one imports into node_modules.
 //
-// superscalar and @superschematic/schema-ir are not package.json dependencies on
-// purpose. bun installs a `file:` dependency into the consumer's node_modules
-// (a copy, or per-file symlinks into the source tree, depending on platform)
-// and resolves any `file:` spec nested inside it relative to the consumer, so
-// a nested spec fails. The consumer therefore declares all three packages
-// itself. For this package's own tsc and tests the same resolution comes from
-// these symlinks; bun install leaves them alone, and bun's install into a
-// consumer drops them. superscalar resolves to the checkout
+// superscalar and @superschematic/schema-ir are optional peer dependencies on
+// purpose: optional so bun does not look for them in the registry, and not
+// dependencies, since bun installs a `file:` dependency into the consumer's
+// node_modules (a copy, or per-file symlinks into the source tree, depending
+// on platform) and resolves any `file:` spec nested inside it relative to the
+// consumer, so a nested spec fails. The consumer therefore declares all three
+// packages itself. For this package's own tsc and tests the same resolution
+// comes from these symlinks; bun install leaves them alone, and bun's install
+// into a consumer drops them. superscalar resolves to the checkout
 // scripts/superscalar-dep.sh stands up under third_party/.
 import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, relative } from "node:path";

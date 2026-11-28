@@ -3,6 +3,8 @@ import { Nullable, Validate } from "@superschematic/schema";
 import {
   Authenticated,
   HttpMethod,
+  docs,
+  mcp,
   publicRoute,
   requirePermission,
   requireService,
@@ -10,9 +12,9 @@ import {
 } from "@superschematic/api";
 import { ShopOrders } from "@acme/shop-orders";
 
-// How many units of a product the warehouse holds: shop-db's Inventory of
-// the product, kept by the engine's Stock behavior (D70), or none, for a
-// product the warehouse has never stocked. onHand is on the shelf, held
+// How many units of a product the warehouse holds: shop-db's Inventory row
+// of the product, whose Stock behavior counts them (D70, D103), or none,
+// for a product the warehouse has never stocked. onHand is on the shelf, held
 // what checkouts hold of it until they are paid for or let go, and
 // available what is left to sell. A product is low once available falls to
 // its reorderAt.
@@ -67,16 +69,38 @@ export class StockQueries {
 // Staff who hold stock.write count a product's shelf, which stocks a
 // product the warehouse never held, and set the level it is low at, and
 // book deliveries in. Each is a movement of the Inventory's Stock, with
-// its reason, which the engine keeps.
+// its reason, in its ledger, a sub-table of the row (D70). An agent counts
+// a shelf only once a person says yes, since a count can take units out of
+// sale, a judgment a person makes; booking a delivery in is a warehouse's
+// routine, recorded with its reason, which an adjustment takes back, so an
+// agent books one with no person.
 export class StockMutations extends Authenticated {
   @rest(HttpMethod.PUT, "stock/{productId}")
   @requirePermission(["stock.write"])
+  @docs({
+    title: "Count a product's shelf",
+    description: "Sets the units of a product on the shelf to a count, and the level it is low at.",
+    capability: "stock.levels.count",
+    lifecycle: "active",
+    visibility: "internal",
+    audience: "staff"
+  })
+  @mcp({ handle: "set_stock", invocationPolicy: "ask" })
   setStock(productId: Identity.UUID, input: SetStockInput): StockView {
     throw new Error("schema declaration only");
   }
 
   @rest(HttpMethod.POST, "stock/{productId}/receipts")
   @requirePermission(["stock.write"])
+  @docs({
+    title: "Book a delivery in",
+    description: "Adds the units of a delivery to a product's shelf, with its reason.",
+    capability: "stock.levels.receive",
+    lifecycle: "active",
+    visibility: "internal",
+    audience: "staff"
+  })
+  @mcp({ handle: "receive_stock", invocationPolicy: "auto" })
   receiveStock(productId: Identity.UUID, input: ReceiveStockInput): StockView {
     throw new Error("schema declaration only");
   }

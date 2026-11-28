@@ -14,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/patterndialect"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -1076,6 +1077,13 @@ func customTemplateFuncs() template.FuncMap {
 		},
 		"has_query_params": func(params []QueryParam) bool {
 			return len(params) > 0
+		},
+		// A schema pattern is RE2's syntax: the RegExp matches what RE2
+		// matches (patterndialect).
+		"js_regexp": func(pattern string) string {
+			source, flags := patterndialect.JavaScript(pattern)
+			escape := strings.NewReplacer("\\", "\\\\", "'", "\\'")
+			return "new RegExp('" + escape.Replace(source) + "', '" + flags + "')"
 		},
 		"escape_backslash": func(s string) string {
 			s = strings.ReplaceAll(s, "\\", "\\\\")

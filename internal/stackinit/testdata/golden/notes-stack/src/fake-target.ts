@@ -14,7 +14,6 @@ declare module "@superschematic/stack" {
       site: {};
       bucket: { versioning?: boolean };
       worker: { memory?: string };
-      runner: {};
       deriver: {};
       memoryStore: { nodeType?: string };
       app: { minInstances?: number; public?: boolean };

@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/parable-work/superscalar/go v1.0.0
 	github.com/parable-work/superschematic/ir v0.0.0-00010101000000-000000000000
-	gopkg.in/yaml.v3 v3.0.1
+	go.yaml.in/yaml/v3 v3.0.5
 	example.com/schemas/types/go/fixture-variant-field-db v0.0.0-00010101000000-000000000000
 )
 

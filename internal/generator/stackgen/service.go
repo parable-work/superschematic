@@ -26,10 +26,8 @@ import (
 //   - an API's jobs, each a deployable of the stack (D52);
 //   - an API's workers, each a deployable of the stack, and a DB's
 //     queues, which a worker's queue is one of (D53);
-//   - whether a DB is an engine database, a type of it composing a
-//     behavior, whose engine's runner is a deployable of the stack (D58);
 //   - an API's derivers, each a deployable of the stack, and a DB's
-//     engine types that compose Derived, which a deriver fills (D74);
+//     tables that implement Derived, which a deriver fills (D146);
 //   - an API's apps, each a deployable of the stack, with the extensions
 //     its build needs (D78);
 //   - an API's provider slots and the runtime provider packages its
@@ -117,13 +115,6 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 					svc.QueueKeys = map[string][]string{}
 				}
 				svc.QueueKeys[td.Name] = sqlutil.QueueKeyColumns(td)
-			}
-		}
-		engineTypes := codegen.EngineTypes(schema)
-		svc.Engine = len(engineTypes) > 0
-		for _, td := range engineTypes {
-			if td.ComposesDerived() {
-				svc.Derived = append(svc.Derived, td.Name)
 			}
 		}
 		svc.DerivedTables = codegen.DerivedTables(schema)

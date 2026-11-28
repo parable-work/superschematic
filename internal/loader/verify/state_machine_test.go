@@ -234,16 +234,11 @@ func TestStateMachineWithNoStartIsNotWalked(t *testing.T) {
 	wantMachineErrors(t, schema, in)
 }
 
-// A DB service's engine type has no table for a guard to watch.
-func TestStateMachineRefusesAnEngineType(t *testing.T) {
+// A table that implements a behavior stays a table, and keeps its machine.
+func TestStateMachineOnATableThatImplementsABehavior(t *testing.T) {
 	schema, in := machineSchema()
 	ticket := ticketOf(schema)
-	ticket.Behaviors = []ir.BehaviorRef{{Name: "Workflow"}}
 	ticket.StateMachines = ticket.StateMachines[:1]
-	wantMachineErrors(t, schema, in, "@stateMachine on Ticket.state: Ticket composes a behavior with @behavior, so the engine keeps its instances in tables of its own, which no guard watches; declare the machine on a table")
-
-	// A table that implements a behavior stays a table, and keeps its
-	// machine.
 	ticket.Behaviors = []ir.BehaviorRef{{Name: "Timers", Implements: true}}
 	wantMachineErrors(t, schema, in)
 }

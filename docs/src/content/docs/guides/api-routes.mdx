@@ -2824,11 +2824,9 @@ queues no worker runs: its deadlines fall due and its changes wait for
 one, and nothing that hears them runs until a worker does. An API that serves
 `@behaviorOperations(Ticket)` and declares no `@behaviorWorker(Ticket)`
 gets a warning; declare one on that API or on another over the same
-database. The worker claims on Postgres, as every worker does. A
-TypeScript one over a database that lists `sqlite` first is refused, as
-a TypeScript behavior worker claims its queues on Postgres alone; there an
-app's worker runs the `./orm/sqlite` entry's `runDeadline` and `runChange`
-over `sqliteQueue`'s claims (D186). On
+database. A TypeScript one over a database that lists `sqlite` first
+claims its queues over the SQLite file under `stack dev`, and over the
+D1 binding on Workers, each claim in the connection's turn (#702). On
 Cloudflare Workers a TypeScript one drains its table's queues at each
 firing of a Cron Trigger, and a deadline or an event due before the next
 firing wakes it through its Workflow
@@ -3107,8 +3105,8 @@ the route's 400 before the core runs (the TypeScript and Go SDKs check it
 before they send it); and one for a use whose behavior takes none, or a use the table
 lacks, is 400 `invalid_argument` from the core, class
 `PreconditionsError` (`preconditions of Job: /Retries: behavior Retries
-takes no precondition`). An engine type's routes read the token from the
-`Preconditions` header instead
+takes no precondition`). Development mode's routes read the token from
+the `Preconditions` header instead
 ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ### Their worker
@@ -3402,7 +3400,8 @@ with a path parameter in a segment's place (`account/{id}/pick` matching
 serve the table's operations from code of your own. An operation a
 behavior declares on a namespace as a whole (Comments') is not served,
 and the build warns of it, and neither is one a table leaves out
-(Dependencies' `listDependents`, D104's step 4, an engine type's alone).
+(Dependencies' `listDependents`, D104's step 4, which the engine alone
+runs).
 
 ## A version graph's operations
 

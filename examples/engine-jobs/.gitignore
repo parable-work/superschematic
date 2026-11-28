@@ -1,3 +1,3 @@
-# The database node src/main.ts and bun src/main.ts open by default.
-/jobs.db
-/jobs.db-*
+# The database README.md's example opens by hand.
+/jobs-dev.db
+/jobs-dev.db-*

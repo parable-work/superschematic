@@ -77,10 +77,6 @@ type DepsInfo struct {
 	DatabaseTypesCrate string
 	DatabaseTypesPath  string
 
-	// Engine is the engine of the API's engine database (D58), which Deps
-	// holds when the database's types compose behaviors; nil otherwise.
-	Engine *DepsEngine
-
 	// Behaviors is what the crate runs its behavior operations with
 	// (D103), when its @behaviorOperations sets serve tables of Database
 	// whose fields are behaviors: the layout of Database's tables and the
@@ -91,39 +87,6 @@ type DepsInfo struct {
 	// #622, #617, #610), which SetDeps reads from its schema: nil for a
 	// database on SQLite or with none of them.
 	Wiring *DepsWiring
-}
-
-// DepsEngine is the engine Deps holds: the engine database's, opened in
-// the background by the entrypoint, a superschematic_engine::background::
-// Background from the engine's crate, Crate, at Path relative to the API
-// crate's directory ([paths] engine_rust).
-type DepsEngine struct {
-	Database  string
-	Namespace string
-	Crate     string
-	Path      string
-
-	// Policy is the access policy's JSON (outputs.engine.policy of the
-	// database's config, "permission" unless set), and Project the
-	// project's engine crate whose behaviors the engine runs, nil for the
-	// core's: what a host that opens the engine itself reads, as the
-	// Topcoat extension's crate does.
-	Policy  string
-	Project *DepsProject
-}
-
-// DepsProject is the project's engine crate of the engine database (D58;
-// projectengine): its package name, its name in Rust source, and its
-// directory relative to the API crate's.
-type DepsProject struct {
-	Crate string
-	Ident string
-	Path  string
-}
-
-// CrateIdent is Crate as Rust source spells it.
-func (e DepsEngine) CrateIdent() string {
-	return strings.ReplaceAll(e.Crate, "-", "_")
 }
 
 // DatabaseTypesCrateIdent is DatabaseTypesCrate as Rust source spells it.
@@ -495,7 +458,7 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // API whose behavior operations check the caller's reach of a row through
 // the repositories (BehaviorsHeld, D181); empty for any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasTableDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld()) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -533,8 +496,8 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || len(o.RuntimeWorkers) > 0) && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
-	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || (deps.Engine == nil && !slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return d.Tables }))) {
-		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
+	if len(o.Derivers) > 0 && deps.DatabaseTypesCrate == "" {
+		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type, and its Deps names none", o.SchemaName)
 	}
 	if err := o.checkBehaviorDeps(&deps); err != nil {
 		return err
@@ -664,22 +627,12 @@ func (o *APIOutput) DepsUses() []string {
 	if o.HasJobs() {
 		runtime = append(runtime, "Shutdown")
 	}
-	engine := ""
-	if o.HasTableDerivers() {
-		// A deriver of tables answers the HTTP runtime's loop (D146).
+	if o.HasDerivers() {
+		// A deriver answers the HTTP runtime's loop (D146).
 		runtime = append(runtime, "deriver::{DerivationAnswer, DerivationItem}")
-	} else if o.HasDerivers() {
-		engine = rustutil.UseLine(o.Deps.Engine.CrateIdent()+"::derive", []string{"DerivationAnswer", "DerivationItem"})
-	}
-	if engine != "" && o.Deps.Engine.CrateIdent() < o.RuntimeCrateIdent {
-		uses = append(uses, engine)
-		engine = ""
 	}
 	if len(runtime) > 0 {
 		uses = append(uses, rustutil.UseLine(o.RuntimeCrateIdent, runtime))
-	}
-	if engine != "" {
-		uses = append(uses, engine)
 	}
 	return uses
 }

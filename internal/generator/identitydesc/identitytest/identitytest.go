@@ -1,7 +1,8 @@
 // Package identitytest builds, for the generator tests, a DB schema with
 // the core user model (D50) as the loader leaves it: an Account table with
 // the User trait, optionally a Role table with the UserRole trait, and the
-// Session, UserCredential and UserRoleGrant tables ir/identity.go names,
+// Session, UserCredential, UserApiKey, OAuth and UserRoleGrant tables
+// ir/identity.go names,
 // with Origin ir.OriginIdentity on each added type, field and index. The
 // fields have the shapes the loader gives a key and a relation, and the
 // scalars are hydrated from the scalar catalog as a load hydrates them.
@@ -116,6 +117,82 @@ func Schema(tb testing.TB, opts Options) *ir.Schema {
 			{Name: ir.IdentityAPIKeyLastUsedAtField, TypeRef: ir.TypeRef{Name: DateTime}},
 			{Name: ir.IdentityAPIKeyRevokedAtField, TypeRef: ir.TypeRef{Name: DateTime}},
 		},
+	})
+
+	str := func(name string, required bool) *ir.FieldDef {
+		return &ir.FieldDef{Name: name, TypeRef: ir.TypeRef{Name: "string"}, Required: required}
+	}
+	at := func(name string, required bool) *ir.FieldDef {
+		return &ir.FieldDef{Name: name, TypeRef: ir.TypeRef{Name: DateTime}, Required: required}
+	}
+	optional := func(fd *ir.FieldDef) *ir.FieldDef {
+		fd.Required = false
+		return fd
+	}
+	clientID := str(ir.IdentityOAuthClientIDField, true)
+	clientID.Unique = true
+	add(&ir.TypeDef{
+		Name: ir.IdentityOAuthClientTable,
+		Fields: []*ir.FieldDef{
+			idField(),
+			clientID,
+			str(ir.IdentityOAuthClientKindField, true),
+			str(ir.IdentityOAuthClientNameField, true),
+			str(ir.IdentityOAuthClientURIField, false),
+			{Name: ir.IdentityOAuthClientRedirectURIsField, TypeRef: ir.TypeRef{Name: "string", IsArray: true}, Required: true},
+			at(ir.IdentityOAuthClientCreatedAtField, true),
+			at(ir.IdentityOAuthClientRefreshedAtField, false),
+			at(ir.IdentityOAuthClientFreshUntilField, false),
+			at(ir.IdentityOAuthClientLastUsedAtField, false),
+		},
+	})
+	add(&ir.TypeDef{
+		Name: ir.IdentityOAuthGrantTable,
+		Fields: []*ir.FieldDef{
+			idField(),
+			relation(ir.IdentityOAuthGrantUserField, account.Name, false),
+			relation(ir.IdentityOAuthGrantClientField, ir.IdentityOAuthClientTable, false),
+			{Name: ir.IdentityOAuthGrantPermissionsField, TypeRef: ir.TypeRef{Name: "string", IsArray: true}},
+			str(ir.IdentityOAuthGrantResourceField, true),
+			at(ir.IdentityOAuthGrantCreatedAtField, true),
+			at(ir.IdentityOAuthGrantExpiresAtField, true),
+			at(ir.IdentityOAuthGrantLastUsedAtField, false),
+			at(ir.IdentityOAuthGrantRevokedAtField, false),
+		},
+		Indexes: []ir.IndexDef{{Keys: []string{ir.IdentityOAuthGrantUserField}, Name: "user"}},
+	})
+	add(&ir.TypeDef{
+		Name: ir.IdentityOAuthCodeTable,
+		Fields: []*ir.FieldDef{
+			idField(),
+			relation(ir.IdentityOAuthCodeClientField, ir.IdentityOAuthClientTable, false),
+			optional(relation(ir.IdentityOAuthCodeUserField, account.Name, false)),
+			optional(relation(ir.IdentityOAuthCodeGrantField, ir.IdentityOAuthGrantTable, false)),
+			str(ir.IdentityOAuthCodeRedirectURIField, true),
+			str(ir.IdentityOAuthCodeChallengeField, true),
+			str(ir.IdentityOAuthCodeStateField, false),
+			str(ir.IdentityOAuthCodeScopeField, false),
+			str(ir.IdentityOAuthCodeResourceField, true),
+			str(ir.IdentityOAuthCodeNonceField, true),
+			{Name: ir.IdentityOAuthCodeCodeHashField, TypeRef: ir.TypeRef{Name: SHA256}, Unique: true},
+			at(ir.IdentityOAuthCodeCreatedAtField, true),
+			at(ir.IdentityOAuthCodeExpiresAtField, true),
+			at(ir.IdentityOAuthCodeUsedAtField, false),
+		},
+	})
+	add(&ir.TypeDef{
+		Name: ir.IdentityOAuthTokenTable,
+		Fields: []*ir.FieldDef{
+			idField(),
+			relation(ir.IdentityOAuthTokenGrantField, ir.IdentityOAuthGrantTable, false),
+			str(ir.IdentityOAuthTokenKindField, true),
+			{Name: ir.IdentityOAuthTokenTokenHashField, TypeRef: ir.TypeRef{Name: SHA256}, Required: true, Unique: true},
+			at(ir.IdentityOAuthTokenCreatedAtField, true),
+			at(ir.IdentityOAuthTokenExpiresAtField, true),
+			at(ir.IdentityOAuthTokenUsedAtField, false),
+			at(ir.IdentityOAuthTokenRevokedAtField, false),
+		},
+		Indexes: []ir.IndexDef{{Keys: []string{ir.IdentityOAuthTokenGrantField}, Name: "grant"}},
 	})
 
 	if opts.Roles {

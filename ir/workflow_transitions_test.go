@@ -115,7 +115,7 @@ func TestExpandTransitionListsRefusesWhatOnlyTheShortFormGetsWrong(t *testing.T)
 }
 
 // TestOnlyATablesWorkflowExpandsItsTransitions: a use on a field or by
-// implements is written out; an engine type's @behavior, and any other
+// implements is written out; a General schema's @behavior, and any other
 // behavior, is left as it is.
 func TestOnlyATablesWorkflowExpandsItsTransitions(t *testing.T) {
 	const short = `{"states":["a","b"],"transitions":[{"from":["a"],"to":"b"}]}`
@@ -126,7 +126,7 @@ func TestOnlyATablesWorkflowExpandsItsTransitions(t *testing.T) {
 	}{
 		{"on a field", BehaviorRef{Name: "Workflow", Field: "status"}, true},
 		{"by implements", BehaviorRef{Name: "Workflow", Implements: true}, true},
-		{"an engine type's", BehaviorRef{Name: "Workflow"}, false},
+		{"by @behavior", BehaviorRef{Name: "Workflow"}, false},
 		{"another behavior", BehaviorRef{Name: "Reconcile", Field: "observed"}, false},
 	} {
 		ref := tc.ref

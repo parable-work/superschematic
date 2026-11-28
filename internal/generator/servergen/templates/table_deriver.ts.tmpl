@@ -28,10 +28,7 @@
 // {{ $api.ImplPackage }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
-import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
-{{- if .Engines }}
-import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
-{{- end }}
+import { {{ if .CloudSQL }}{{ end }}connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import { runDeriver, type DerivationAnswer, type DerivationItem, type DerivedTable } from '{{ .Naming.HTTPRuntimeNpmPackage }}/deriver';
 import { workerConcurrency } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
@@ -48,19 +45,15 @@ import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
-{{- range .Engines }}
-import { engineDocument as {{ .Document }} } from '{{ .DocumentModule }}';
-{{- end }}
 
 const logger = createLogger({ stack: {{ tsQuote .Stack }}, deriver: {{ tsQuote .Name }} });
 
 /**
  * Builds the deriver from the environment and fills its fields until signal
  * aborts, when SIGTERM or SIGINT arrives. Each pool it opens goes in pools,
- * which main ends, and so does its telemetry, which main flushes.{{ if .Engines }}
- * Each engine it opens goes in engines, which main closes.{{ end }}
+ * which main ends, and so does its telemetry, which main flushes.
  */
-async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .Engines }}, engines: { close(): void }[]{{ end }}): Promise<void> {
+async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
 {{- template "ts-background-connections" . }}
 
   // {{ $api.Service }}: its derivers, built from its Deps.
@@ -128,10 +121,6 @@ function answer(
 {{- end }}
 
 {{ template "ts-connect" . }}
-{{- if .Engines }}
-
-{{ template "ts-engine" . }}
-{{- end }}
 {{- template "ts-clients" . }}
 
 main();

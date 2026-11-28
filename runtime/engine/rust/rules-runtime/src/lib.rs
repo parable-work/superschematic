@@ -34,6 +34,13 @@
 //! holders and the rows a delete reaches are queries of the type's table,
 //! and a soft-deletable table serves its live rows alone.
 //!
+//! Development mode's General documents publish as the tables `format
+//! --to=ts` writes them as, of the DB service a publish names
+//! (`Publish::service`). [`Runtime::publish_from`] moves a development
+//! store to an empty runtime database, its rows replayed as creates
+//! through each type's rules, and [`development_documents`] reads the
+//! schemas a store's types are live at.
+//!
 //! ```no_run
 //! use serde_json::json;
 //! use superschematic_rules::Caller;
@@ -53,6 +60,7 @@ mod conn;
 mod db;
 mod query;
 mod record;
+mod replay;
 pub mod runner;
 mod store;
 pub mod values;
@@ -66,12 +74,13 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{Caller, Code, Core, Refusal};
 use superschematic_rules_adapter::Layout;
 use superschematic_rules_handler::{
-    run_due, serve, Context, Declarations, Handler, RanDue, Reading, Request,
+    run_due, serve, Context, Declarations, Handler, RanDue, Reading, Request, Store,
 };
 
 use crate::conn::{run_binary, Conn, SqliteConn};
 use crate::db::Db;
 pub use crate::record::{type_document, Record, RECORD_TABLE};
+pub use crate::replay::development_documents;
 pub use crate::runner::{
     Applied, Applying, Directory, Execution, JobDatabase, JobRunner, JobStore, Launch, PlanRunner,
     ProcessLaunch, Started,
@@ -126,13 +135,20 @@ pub struct Planned {
 }
 
 /// A publish, or the request for its plan: the database's schema documents
-/// whole, each as `format --to=json` writes it, the renames it means (as
+/// whole, each as `format --to=json` writes it, the DB service development
+/// mode's General documents publish as, the renames it means (as
 /// `--rename` takes them), the ids of the hazards it allows (as `--allow`
 /// takes them), and a plan made elsewhere, if it carries one.
+///
+/// General documents, each an instance type and its behaviors, publish as
+/// the tables `format --to=ts` writes them as (D117): `service` names
+/// their DB service, and with none it is the name they share.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Publish {
     pub documents: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub renames: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -148,6 +164,12 @@ impl Publish {
             documents,
             ..Publish::default()
         }
+    }
+
+    /// The publish of General documents as the tables of a DB service.
+    pub fn service(mut self, service: impl Into<String>) -> Self {
+        self.service = Some(service.into());
+        self
     }
 
     /// The publish with a rename it means.
@@ -418,7 +440,7 @@ impl Runtime {
     /// against the recorded model, the hazards it does not allow, and the
     /// types the handler would serve over it.
     fn check(&mut self, publish: &Publish) -> Result<Checked, Refusal> {
-        let service = record::service_of(&publish.documents)?;
+        let service = record::service_of(&publish.documents, publish.service.as_deref())?;
         let recorded = self.store.read_record()?;
         if let Some(recorded) = &recorded {
             if recorded.service != service {
@@ -553,7 +575,7 @@ impl Runtime {
             })?,
             None => Value::Null,
         };
-        let request = json!({
+        let mut request = json!({
             "version": REQUEST_VERSION,
             "dialect": self.dialect().as_str(),
             "documents": publish.documents,
@@ -561,6 +583,9 @@ impl Runtime {
             "renames": publish.renames,
             "layout": true,
         });
+        if let Some(service) = &publish.service {
+            request["service"] = Value::String(service.clone());
+        }
         let body = serde_json::to_vec(&request)
             .map_err(|error| values::internal(format!("the plan request is no JSON: {error}")))?;
         let (_, stdout, stderr) = run_binary(
@@ -703,6 +728,78 @@ impl Runtime {
         Ok(answer)
     }
 
+    /// Moves a development store to this runtime database (D117): publishes
+    /// its schemas, the ones `publish` gives or else the ones the store's
+    /// types are live at ([`development_documents`]), and then replays its
+    /// rows as creates through each type's rules, as the host's runner.
+    /// Each row carries its own fields and its id alone, and a behavior's
+    /// state starts fresh. A row comes after the rows its relations point
+    /// at. A row the runtime refuses is listed, with its refusal, and the
+    /// rest move. The answer is the publish's, with `rows`: how many were
+    /// replayed and the ones refused.
+    ///
+    /// It is refused unless the database is empty, one no publish has
+    /// reached. It reads the development store in a transaction it rolls
+    /// back.
+    pub fn publish_from<S: Store>(
+        &mut self,
+        development: &mut S,
+        publish: &Publish,
+    ) -> Result<Value, Refusal> {
+        if let Some(record) = self.store.read_record()? {
+            return Err(replay::not_empty(&record.service, &record.model_hash));
+        }
+        if let Some((service, hash)) = self.any_recorded_model()? {
+            return Err(replay::not_empty(&service, &hash));
+        }
+        let held = replay::read(development)?;
+        let mut publish = publish.clone();
+        if publish.documents.is_empty() {
+            publish.documents = replay::documents_of(&held.versions);
+        }
+        let mut answer = self.publish(&publish)?;
+        let rows = replay::ordered(&held.rows, &publish.documents, &self.declarations);
+        let runner = self.runner.clone();
+        let mut replayed = 0;
+        let mut refused = Vec::new();
+        for row in &rows {
+            let create = Request::Create {
+                type_name: row.type_name.clone(),
+                data: row.data.clone(),
+                params: Map::new(),
+            };
+            match self.request(&runner, &create) {
+                Ok(_) => replayed += 1,
+                Err(refusal) => refused.push(replay::refused(row, &refusal)),
+            }
+        }
+        if let Value::Object(members) = &mut answer {
+            members.insert(
+                "rows".into(),
+                json!({"replayed": replayed, "refused": refused}),
+            );
+        }
+        Ok(answer)
+    }
+
+    /// A model the runner recorded for any service, with its service, as a
+    /// database a deploy migrated holds one with no record of runtime
+    /// mode's; `None` when there is none.
+    fn any_recorded_model(&mut self) -> Result<Option<(String, String)>, Refusal> {
+        if !self.store.db.has_table("superschematic_schema_state")? {
+            return Ok(None);
+        }
+        let rows = self.store.db.query(
+            "SELECT service, model_hash FROM superschematic_schema_state ORDER BY service",
+            &[],
+        )?;
+        Ok(rows.into_iter().find_map(|row| {
+            let hash = row.get("model_hash").and_then(Value::as_str)?.to_owned();
+            let service = row.get("service").and_then(Value::as_str)?.to_owned();
+            (!hash.is_empty()).then_some((service, hash))
+        }))
+    }
+
     /// Waits for a job to land a publish: polls the model the database
     /// records until it is the plan's `to` with no plan in progress and the
     /// record is this publish's, or the execution reports a failure, or the
@@ -758,7 +855,7 @@ fn shown(hash: &str) -> String {
 fn publish_of(request: &Value) -> Result<Publish, Refusal> {
     serde_json::from_value(request.clone()).map_err(|error| {
         Refusal::invalid_argument(format!(
-            "not a publish: {error}; want documents, and renames, allow and planned if any"
+            "not a publish: {error}; want documents, and service, renames, allow and planned if any"
         ))
     })
 }
@@ -773,8 +870,12 @@ pub fn tools() -> Vec<Value> {
         "properties": {
             "documents": {
                 "type": "array",
-                "description": "Every schema document of the database's DB service, each as format --to=json writes it.",
+                "description": "Every schema document of the database's DB service, each as format --to=json writes it, or development mode's General documents, which publish as its tables.",
                 "items": {"type": "object"}
+            },
+            "service": {
+                "type": "string",
+                "description": "The DB service General documents publish as the tables of; with none, the name they share."
             },
             "renames": {
                 "type": "array",

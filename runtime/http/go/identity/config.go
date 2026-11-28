@@ -62,6 +62,22 @@ type Config struct {
 	TrustedOrigins []string `json:"trustedOrigins"`
 	// Password configures the password hash.
 	Password PasswordConfig `json:"password"`
+	// OAuth configures the OAuth authorization server of an API with
+	// @userSessions({ oauth }) (#695). A server without it ignores it.
+	OAuth OAuthConfig `json:"oauth"`
+}
+
+// OAuthConfig is the deployment's part of the OAuth authorization server
+// (#695); the schema's @userSessions({ oauth }) gives the rest.
+type OAuthConfig struct {
+	// PublicBaseURL is the URL the API is reached at from outside,
+	// scheme://host[:port][/path] with no trailing slash, query or
+	// fragment: the site's origin and the API's path under it, which the
+	// stack fills in. The protected resource is its MCP endpoint and the
+	// issuer is it, so a client sees the URL the person typed, not the one
+	// the server sees behind the site's proxy. Empty means the request's
+	// own. It is https, or http on a loopback host.
+	PublicBaseURL string `json:"publicBaseUrl,omitempty"`
 }
 
 // CookieConfig is the session cookie's configuration.
@@ -170,6 +186,12 @@ func (c Config) Validate() error {
 	for i, origin := range c.TrustedOrigins {
 		if err := checkOrigin(origin); err != nil {
 			add("trustedOrigins[%d]: %v", i, err)
+		}
+	}
+
+	if base := c.OAuth.PublicBaseURL; base != "" {
+		if err := checkPublicBaseURL(base); err != nil {
+			add("oauth.publicBaseUrl: %v", err)
 		}
 	}
 
@@ -323,6 +345,38 @@ func checkOrigin(origin string) error {
 		return fmt.Errorf("%q has a path, query or fragment, which an origin never does", origin)
 	}
 	return nil
+}
+
+// checkPublicBaseURL refuses a public base URL that is not
+// scheme://host[:port][/path] with no trailing slash, user, query or
+// fragment, or that is http on a host other than localhost, 127.0.0.1 and
+// [::1]: an authorization server's issuer is https (RFC 8414 section 2),
+// and a loopback one serves a client on the person's own machine.
+func checkPublicBaseURL(base string) error {
+	u, err := url.Parse(base)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%q is not a URL: %v", base, err)
+	case u.Host == "" || u.Opaque != "":
+		return fmt.Errorf("%q is not scheme://host[:port][/path]", base)
+	case u.User != nil:
+		return fmt.Errorf("%q has a user", base)
+	case u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(base, "?#"):
+		return fmt.Errorf("%q has a query or fragment", base)
+	case strings.HasSuffix(u.Path, "/"):
+		return fmt.Errorf("%q ends with a slash", base)
+	case u.Scheme == "https":
+	case u.Scheme == "http" && isLoopbackHost(u.Hostname()):
+	default:
+		return fmt.Errorf("%q is not https, or http on localhost, 127.0.0.1 or [::1]", base)
+	}
+	return nil
+}
+
+// isLoopbackHost reports whether host, a URL's hostname without brackets,
+// names the machine itself.
+func isLoopbackHost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // isCookieName reports whether name is an RFC 6265 cookie name: a token of

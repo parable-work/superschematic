@@ -22,6 +22,11 @@ pub struct Descriptor {
     /// (D114): its store has no API keys.
     #[serde(default, rename = "apiKey")]
     pub api_key: Option<DescriptorApiKey>,
+    /// Absent in a descriptor written before the OAuth tables (#695). The
+    /// Rust server serves no OAuth yet; it reads the member so a
+    /// descriptor that has it parses.
+    #[serde(default)]
+    pub oauth: Option<DescriptorOAuth>,
     /// Absent when the schema has no `UserRole` table, and `role_grant`
     /// with it.
     #[serde(default)]
@@ -119,6 +124,85 @@ pub struct ApiKeyColumns {
     pub revoked_at: String,
 }
 
+/// The four tables of an OAuth authorization server (#695).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DescriptorOAuth {
+    pub client: OAuthTable<OAuthClientColumns>,
+    pub grant: OAuthTable<OAuthGrantColumns>,
+    pub code: OAuthTable<OAuthCodeColumns>,
+    pub token: OAuthTable<OAuthTokenColumns>,
+}
+
+/// One OAuth table and its columns.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OAuthTable<C> {
+    pub table: String,
+    pub columns: C,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OAuthClientColumns {
+    pub id: String,
+    pub client_id: String,
+    pub kind: String,
+    pub name: String,
+    pub uri: String,
+    pub redirect_uris: String,
+    pub created_at: String,
+    pub refreshed_at: String,
+    pub fresh_until: String,
+    pub last_used_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OAuthGrantColumns {
+    pub id: String,
+    pub user: String,
+    pub client: String,
+    pub permissions: String,
+    pub resource: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub last_used_at: String,
+    pub revoked_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OAuthCodeColumns {
+    pub id: String,
+    pub client: String,
+    pub user: String,
+    pub grant: String,
+    pub redirect_uri: String,
+    pub code_challenge: String,
+    pub state: String,
+    pub scope: String,
+    pub resource: String,
+    pub nonce: String,
+    pub code_hash: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub used_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OAuthTokenColumns {
+    pub id: String,
+    pub grant: String,
+    pub kind: String,
+    pub token_hash: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub used_at: String,
+    pub revoked_at: String,
+}
+
 /// The table with the `UserRole` trait.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -161,8 +245,8 @@ impl Descriptor {
     /// Reads an identity descriptor. It refuses any version but 1, unknown
     /// members, an empty name, a role table without its grant table or the
     /// other way round, and a name holding a NUL, which no quoting carries.
-    /// A descriptor without `apiKey` is one written before D114, and is
-    /// read as it was.
+    /// A descriptor without `apiKey` is one written before D114, and one
+    /// without `oauth` one written before #695; each is read as it was.
     pub fn parse(json: &str) -> Result<Descriptor, StoreError> {
         let descriptor: Descriptor =
             serde_json::from_str(json).map_err(|err| StoreError::Descriptor(err.to_string()))?;
@@ -232,6 +316,62 @@ impl Descriptor {
                 ("apiKey.columns.expiresAt", &k.columns.expires_at),
                 ("apiKey.columns.lastUsedAt", &k.columns.last_used_at),
                 ("apiKey.columns.revokedAt", &k.columns.revoked_at),
+            ]);
+        }
+        if let Some(o) = &self.oauth {
+            let (c, g, k, t) = (&o.client, &o.grant, &o.code, &o.token);
+            names.extend([
+                ("oauth.client.table", c.table.as_str()),
+                ("oauth.client.columns.id", &c.columns.id),
+                ("oauth.client.columns.clientId", &c.columns.client_id),
+                ("oauth.client.columns.kind", &c.columns.kind),
+                ("oauth.client.columns.name", &c.columns.name),
+                ("oauth.client.columns.uri", &c.columns.uri),
+                (
+                    "oauth.client.columns.redirectUris",
+                    &c.columns.redirect_uris,
+                ),
+                ("oauth.client.columns.createdAt", &c.columns.created_at),
+                ("oauth.client.columns.refreshedAt", &c.columns.refreshed_at),
+                ("oauth.client.columns.freshUntil", &c.columns.fresh_until),
+                ("oauth.client.columns.lastUsedAt", &c.columns.last_used_at),
+                ("oauth.grant.table", &g.table),
+                ("oauth.grant.columns.id", &g.columns.id),
+                ("oauth.grant.columns.user", &g.columns.user),
+                ("oauth.grant.columns.client", &g.columns.client),
+                ("oauth.grant.columns.permissions", &g.columns.permissions),
+                ("oauth.grant.columns.resource", &g.columns.resource),
+                ("oauth.grant.columns.createdAt", &g.columns.created_at),
+                ("oauth.grant.columns.expiresAt", &g.columns.expires_at),
+                ("oauth.grant.columns.lastUsedAt", &g.columns.last_used_at),
+                ("oauth.grant.columns.revokedAt", &g.columns.revoked_at),
+                ("oauth.code.table", &k.table),
+                ("oauth.code.columns.id", &k.columns.id),
+                ("oauth.code.columns.client", &k.columns.client),
+                ("oauth.code.columns.user", &k.columns.user),
+                ("oauth.code.columns.grant", &k.columns.grant),
+                ("oauth.code.columns.redirectUri", &k.columns.redirect_uri),
+                (
+                    "oauth.code.columns.codeChallenge",
+                    &k.columns.code_challenge,
+                ),
+                ("oauth.code.columns.state", &k.columns.state),
+                ("oauth.code.columns.scope", &k.columns.scope),
+                ("oauth.code.columns.resource", &k.columns.resource),
+                ("oauth.code.columns.nonce", &k.columns.nonce),
+                ("oauth.code.columns.codeHash", &k.columns.code_hash),
+                ("oauth.code.columns.createdAt", &k.columns.created_at),
+                ("oauth.code.columns.expiresAt", &k.columns.expires_at),
+                ("oauth.code.columns.usedAt", &k.columns.used_at),
+                ("oauth.token.table", &t.table),
+                ("oauth.token.columns.id", &t.columns.id),
+                ("oauth.token.columns.grant", &t.columns.grant),
+                ("oauth.token.columns.kind", &t.columns.kind),
+                ("oauth.token.columns.tokenHash", &t.columns.token_hash),
+                ("oauth.token.columns.createdAt", &t.columns.created_at),
+                ("oauth.token.columns.expiresAt", &t.columns.expires_at),
+                ("oauth.token.columns.usedAt", &t.columns.used_at),
+                ("oauth.token.columns.revokedAt", &t.columns.revoked_at),
             ]);
         }
         if let (Some(r), Some(g)) = (&self.role, &self.role_grant) {

@@ -71,7 +71,7 @@ func checkAudience(schema *ir.Schema, in Input, td *ir.TypeDef, bases map[string
 	case bases[td.Name]:
 		fail("%s is a base class, which has no table of its own; declare the audience on each table that extends it", td.Name)
 		return
-	case td.Queue != nil || td.JsonField || td.GraphMember != nil || codegen.IsEngineType(td):
+	case td.Queue != nil || td.JsonField || td.GraphMember != nil:
 		fail("%s is no table the generated repositories read with statements of their own; an audience is built for a plain table", td.Name)
 		return
 	}

@@ -12,7 +12,6 @@ import { behavior } from "@superschematic/schema";
   ],
   outcomes: { expired: "failure", cancelled: "neutral" },
 })
-@behavior("Links", { links: { counter: { schema: "CollectionPoint" } } })
 @behavior("Holds", {
   holds: {
     lines: { each: { field: "lines", target: "inventoryId" }, schema: "Inventory", quantity: { field: "quantity" } },

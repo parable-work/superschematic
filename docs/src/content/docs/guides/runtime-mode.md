@@ -81,6 +81,24 @@ mode. Its rows live in its table: a field is a column, a relation a
 foreign key, a behavior's fields columns of the table, and its
 collections sub-tables beside it.
 
+Development mode's General documents publish as they are, each an
+instance type and its behaviors. They publish as the tables `format
+--to=ts` writes them as: each instance type a table, keyed by `id` where
+it marks no key, its Workflow the field `status: Workflow<{ ... }>`, and
+its other behaviors ones the table implements
+([General documents](/superschematic/reference/migrations/#general-documents)).
+The documents become one DB service's: `Publish::service` names it, else
+it is the name they share. So `examples/engine-notes`' schema publishes as
+the service `notes`, and `engine-jobs`' three as the service you name:
+
+```rust
+runtime.publish(&Publish::of(documents).service("jobs-db"))?;
+```
+
+The record keeps the documents as published, and the handler reads them
+as development mode does, so a type's fields, uses and operations are the
+same in both modes.
+
 ## A publish is a migration
 
 A publish does five things:
@@ -271,10 +289,70 @@ state tables beside them. Runtime mode adds one table of its own:
 | `superschematic_migrations` | the runner's: the log of each plan's steps |
 | `superschematic_runtime` | the documents of the last publish, the layout document the planner wrote for them, each type's version and the model they belong to, which the runner writes with the plan's last step |
 
+`superschematic_runtime` stays when the database moves to compiled mode
+(see below). No compiled server reads it, and no plan of a build drops it,
+since it is not in a build's model. It says which publish the tables came
+from, and `superschematic-migrate record` still prints it.
+
 A behavior's queues are the build's too. A table whose writes its
 behaviors hear has a change trigger, which writes each write to its
 change queue. The host runs the change queue and the deadlines due after
 each request, or when you call `run_due` with `Drain::WhenAsked`.
+
+## Moving between modes
+
+A project moves one way, development to runtime to compiled, and its
+schemas move unchanged.
+
+### From development mode, with its rows
+
+A development store moves with a publish of its schemas to an empty
+runtime database, whose first plan starts from an empty database.
+`Runtime::publish_from` takes the store, any development store:
+`superschematic-rules-dev`'s `SqliteStore` over a file, which the
+TypeScript library writes too, or its `PgStore`. `superschematic-dev move`
+runs it from the command line
+([Moving to runtime mode](/superschematic/guides/development-mode/#moving-to-runtime-mode)).
+
+```rust
+let mut dev = superschematic_rules_dev::SqliteStore::open("dev.db", &Declarations::ported())?;
+let moved = runtime.publish_from(&mut dev, &Publish::default().service("jobs-db"))?;
+// moved["rows"] is {"replayed": 12, "refused": [{"type": "Job", "id": "...", "code": "invalid_instance", "message": "..."}]}
+```
+
+1. It refuses a runtime database a publish has reached.
+2. It publishes the schemas the publish gives, or else the ones the
+   store's types are live at, each document once.
+3. It replays each row as a create through its type's rules, as the
+   host's runner, after the rows its relations point at. A row carries its
+   own fields and its id alone: a behavior's state starts fresh.
+4. It lists each row the runtime refused with its refusal, and the rest
+   move. The answer is the publish's, with `rows`.
+
+The store is read in a transaction that is rolled back, and is left as it
+was. A create that makes rows, as Blueprint's stamps a job per step, makes
+them again when its row replays, beside the rows it made in development
+mode. A publish of the store's schemas with no rows is
+`publish(&Publish::of(development_documents(&mut dev)?))`.
+
+### To compiled mode
+
+Runtime to compiled moves no rows. `superschematic migrate export` writes
+the DB service a build takes the database over with: its
+`schema.config.ts`, its schema files in TypeScript, as the tables `format
+--to=ts` writes, and `model.json`, the model the database recorded
+([Export a runtime database](/superschematic/reference/migrations/#export-a-runtime-database)):
+
+```bash
+superschematic migrate export --database-url runtime.db --out schemas/services/jobs-db
+superschematic migrate plan schemas/services/jobs-db --dialect sqlite --from schemas/services/jobs-db/model.json
+```
+
+The build's first plan, from the recorded model, is empty unless the
+compiler changed, and the generated servers take the tables over as they
+are. The export reads the database through the runner's `record`
+command, since the compiler holds no database driver. Clients move to the
+generated routes.
 
 ## What is left
 
@@ -289,5 +367,10 @@ each request, or when you call `run_due` with `Drain::WhenAsked`.
   ([From TypeScript](/superschematic/guides/development-mode/#from-typescript))
   serves development mode alone, with no table store, record or publish.
   The Go and Python libraries are later steps of both modes.
-- Moving between modes: development to runtime with rows, and runtime to
-  compiled by the recorded model.
+- A move of rows into a database that holds rows, or of a behavior's
+  state; a row of a cycle of relations, which is refused; and rows a
+  create makes again beside the ones it made in development mode.
+- A lowered General document's configs that name its Workflow by a
+  qualified field (a Reactions change of `Workflow.status`) are not
+  rewritten to its field, and a `@display` that labels a Workflow's
+  states is refused on the lowered table.

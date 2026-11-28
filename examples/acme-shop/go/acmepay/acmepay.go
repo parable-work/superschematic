@@ -16,7 +16,7 @@
 // it, signed as a card provider signs: the header Acmepay-Signature holds
 // t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">. So an adapter
 // that records the answer and the webhook that brings the same event
-// record one event, which the engine applies once per (provider, eventId).
+// record one event, which Payments applies once per (provider, eventId).
 //
 // Each POST takes an Idempotency-Key: the same key returns what the first
 // request did, so an adapter that retries a call, or a second adapter that
@@ -81,8 +81,8 @@ const (
 
 // Object is what an event is about, as the webhook carries it: an intent
 // or a refund. Reference and Attempt are what the shop sent when it made
-// it: its own reference (the checkout's id) and the engine's attempt;
-// Refund is the engine's refund a refund pays.
+// it: its own reference (the checkout's id) and Payments' attempt;
+// Refund is Payments' refund a refund pays.
 type Object struct {
 	ID            string `json:"id"`
 	Object        string `json:"object"`

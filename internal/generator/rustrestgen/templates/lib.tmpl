@@ -58,16 +58,10 @@ pub const IDEMPOTENCY_TABLE: runtime::idempotency::Table = {{ .IdempotencyTableL
 /// behavior operations check the caller's reach of a row through (D156, D181){{ end }}.
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- else if .HasDerivers }}
-{{- if .HasTableDerivers }}
 
 /// The Rust types of {{ .Deps.Database }}, the API's database: the tables whose
 /// derived fields its derivers fill, which type their methods, and the
 /// repositories its derivers pull and settle through (D146).
-{{- else }}
-
-/// The Rust types of {{ .Deps.Database }}, the API's database: the engine types
-/// whose derived fields its derivers fill, which type their methods (D74).
-{{- end }}
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- end }}
 

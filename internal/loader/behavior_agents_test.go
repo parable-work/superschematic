@@ -63,7 +63,7 @@ func TestAgentsFixturesLoad(t *testing.T) {
 		"Workspace": {"Budget:Budget"},
 	} {
 		td := db.Types[name]
-		if td == nil || td.IsEngineType() || !td.Optimistic {
+		if td == nil || len(td.TypeBehaviors()) > 0 || !td.Optimistic {
 			t.Fatalf("%s = %s", name, marshal(t, td))
 		}
 		if got := usesOf(td); !slices.Equal(got, want) {
@@ -288,7 +288,7 @@ func TestAgentsFromTheDataForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, implemented := range map[string]int{"Job": 2, "Session": 1, "Account": 1, "Workspace": 1} {
-		if got := schema.Types[name]; got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != implemented || got.IsEngineType() {
+		if got := schema.Types[name]; got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != implemented || len(got.TypeBehaviors()) > 0 {
 			t.Errorf("%s = %s", name, marshal(t, got))
 		}
 	}

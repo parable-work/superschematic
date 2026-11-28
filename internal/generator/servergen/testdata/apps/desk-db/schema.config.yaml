@@ -1,0 +1,9 @@
+# The app fixture's database (D78): customers and agents, beside the user
+# model's tables (D50), whose members desk-app-api's users are.
+name: desk-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+    rust: { enabled: true }

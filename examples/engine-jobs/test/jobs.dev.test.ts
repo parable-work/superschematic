@@ -1,19 +1,18 @@
-// The job runner end to end on development mode (D117), as
-// test/jobs.test.ts runs it on the engine: @superschematic/rules-handler
-// serves schemas/dev over a SQLite database in memory (bun:sqlite under
-// Bun, node:sqlite under Node.js), on a clock the test moves, and the test
-// drives its routes through dev.http as the callers of src/auth.ts, under
-// the same policy written as data (src/dev.ts). It holds what the engine
-// holds where development mode answers alike: a worker claims the most
-// urgent job of its topic and finishes it, a held job is its holder's
-// alone, an operator's cancel reaches the holder as a directive and fails
-// the job, a worker that stops beating is missed and loses its job to
-// another, whose new token fences the old one, and a batch stamps a job per
-// step (Blueprint on the core, D149), each claimed in its order, a
-// transient failure retried, until the runner's Reactions settle the batch.
-// A claim is the declared read of the queued jobs and Lease's acquire
-// (D104), and the search is a list's text filter. src/dev.ts lists what
-// differs.
+// The job runner end to end on development mode (D117):
+// @superschematic/rules-handler serves schemas/dev over a SQLite database
+// in memory (bun:sqlite under Bun, node:sqlite under Node.js), on a clock
+// the test moves, and the test drives its routes through dev.http as the
+// callers of src/dev.ts, each by its bearer token, under the policy written
+// as data: a worker claims the most urgent job of its topic and finishes
+// it, a held job is its holder's alone, an operator's cancel reaches the
+// holder as a directive and fails the job, a worker that stops beating is
+// missed and loses its job to another, whose new token fences the old one,
+// and a batch stamps a job per step (Blueprint on the core, D149), each
+// claimed in its order, a transient failure retried, until the runner's
+// Reactions settle the batch. A claim is the declared read of the queued
+// jobs and Lease's acquire (D104), and the search is a list's text filter,
+// since D103 folds Queue and Search into schema features. src/dev.ts says
+// how each is built.
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 
@@ -99,7 +98,7 @@ test('a worker claims the most urgent job of its topic, works it and finishes it
 
   const done = await job(operator, catalog);
   assert.deepEqual(
-    [done.title, done.topic, done.priority, done.workflowStatus, done.leaseActive, done.leaseToken, done.leaseEnded],
+    [done.title, done.topic, done.priority, done.status, done.leaseActive, done.leaseToken, done.leaseEnded],
     ['Reindex the catalog', 'search', 9, 'done', false, 2, { reason: 'release', at: 1_000_000 }]
   );
   // A free lease has no holder, and a job no batch stamped no batch.
@@ -110,19 +109,26 @@ test('a worker claims the most urgent job of its topic, works it and finishes it
     [done.retriesTotal, done.retriesClassAttempts, done.retriesExhausted, done.dependenciesBlocked],
     [0, { cancelled: 0, invalid: 0, transient: 0 }, false, false]
   );
-  assert.equal((await job(operator, nightly)).workflowStatus, 'queued');
+  assert.equal((await job(operator, nightly)).status, 'queued');
   // The worker beat its Worker row before it claimed.
   const presence = await operator.call('GET', '/schemas/Worker/instances/worker-1');
-  assert.deepEqual([presence.body.workflowStatus, presence.body.presenceDeadline], ['active', iso(1_015_000)]);
+  assert.deepEqual([presence.body.status, presence.body.presenceDeadline], ['active', iso(1_015_000)]);
 
-  // The engine's Search indexed a job's title and result; development mode
-  // filters a field's text, matched anywhere, case aside, with no weights
-  // and no ranking (searchText waits for D62's search fields).
+  // A list filters a field's text, matched anywhere, case aside, with no
+  // weights and no ranking (searchText waits for D62's search fields).
   const hits = await operator.call('GET', '/schemas/Job/instances?filter[title][contains]=CATALOG');
   assert.deepEqual(
     hits.body.items.map((hit: { id: string }) => hit.id),
     [catalog]
   );
+});
+
+test('a request with no bearer token, or one the example does not know, is 401', async () => {
+  const { dev } = await start();
+  for (const headers of [{}, { authorization: 'Bearer nobody-token' }] as Record<string, string>[]) {
+    const response = await dev.http(new Request('http://jobs.dev/namespaces/default/schemas/Job/instances', { headers }));
+    assert.equal(response.status, 401);
+  }
 });
 
 test('a held job belongs to its holder alone', async () => {
@@ -142,7 +148,7 @@ test('a held job belongs to its holder alone', async () => {
   assert.deepEqual([finished.status, finished.body.details?.behavior, finished.body.details?.vetoCode], [409, 'Lease', 'held_by_another']);
 
   await finish(worker1, held!, 'Sent', 1);
-  assert.equal((await job(operator, digest)).workflowStatus, 'done');
+  assert.equal((await job(operator, digest)).status, 'done');
 });
 
 test('an operator cancels a running job: the holder hears the directive and fails the job', async () => {
@@ -165,7 +171,7 @@ test('an operator cancels a running job: the holder hears the directive and fail
   assert.deepEqual([recorded.body.exhausted, recorded.body.classAttempts.cancelled], [true, 1]);
   const failed = await job(operator, crawl);
   assert.deepEqual(
-    [failed.workflowStatus, failed.leaseHolder, failed.leaseEnded?.reason, failed.retriesExhausted],
+    [failed.status, failed.leaseHolder, failed.leaseEnded?.reason, failed.retriesExhausted],
     ['failed', undefined, 'release', true]
   );
 });
@@ -185,10 +191,10 @@ test('a worker that stops beating is missed and loses its job to another, and it
   await beat(worker2);
   dev.runDue();
   const missing = await operator.call('GET', '/schemas/Worker/instances/worker-1');
-  assert.deepEqual([missing.body.workflowStatus, missing.body.presenceReleased], ['missing', { Job: [crawl] }]);
+  assert.deepEqual([missing.body.status, missing.body.presenceReleased], ['missing', { Job: [crawl] }]);
   const queued = await job(operator, crawl);
   assert.deepEqual(
-    [queued.workflowStatus, queued.leaseToken, queued.leaseActive, queued.leaseExpiries, queued.leaseEnded],
+    [queued.status, queued.leaseToken, queued.leaseActive, queued.leaseExpiries, queued.leaseEnded],
     ['queued', 2, false, 1, { reason: 'holder', at: 1_016_000 }]
   );
 
@@ -203,11 +209,11 @@ test('a worker that stops beating is missed and loses its job to another, and it
   // The job stays worker-2's, and worker-1 wrote nothing to it.
   await finish(worker2, second!, 'Crawled', 5);
   const done = await job(operator, crawl);
-  assert.deepEqual([done.workflowStatus, done.budgetMeters.cpuSeconds.used], ['done', 5]);
+  assert.deepEqual([done.status, done.budgetMeters.cpuSeconds.used], ['done', 5]);
 
   // A beat brings worker-1 back.
   await beat(worker1);
-  assert.equal((await operator.call('GET', '/schemas/Worker/instances/worker-1')).body.workflowStatus, 'active');
+  assert.equal((await operator.call('GET', '/schemas/Worker/instances/worker-1')).body.status, 'active');
 });
 
 test('a batch stamps a job per step, runs them in order, retries a transient failure, and settles when they finish', async () => {
@@ -227,7 +233,7 @@ test('a batch stamps a job per step, runs them in order, retries a transient fai
   );
   const stamped = await Promise.all(children.map((child) => job(operator, child.id)));
   assert.deepEqual(
-    stamped.map((row) => [row.step, row.title, row.topic, row.batchId, row.workflowStatus, row.dependenciesBlocked]),
+    stamped.map((row) => [row.step, row.title, row.topic, row.batchId, row.status, row.dependenciesBlocked]),
     [
       ['fetch', 'Fetch the sources', 'search', nightly, 'queued', false],
       ['index', 'Index what was fetched', 'search', nightly, 'queued', true],
@@ -261,10 +267,10 @@ test('a batch stamps a job per step, runs them in order, retries a transient fai
   // The rollup counts the steps at each read; the runner's Reactions
   // settle the batch once every step succeeded.
   let read = await batch(nightly);
-  assert.deepEqual([read.workflowStatus, read.rollupsValues], ['running', { steps: { done: 3 } }]);
+  assert.deepEqual([read.status, read.rollupsValues], ['running', { steps: { done: 3 } }]);
   dev.runDue();
   read = await batch(nightly);
-  assert.equal(read.workflowStatus, 'done');
+  assert.equal(read.status, 'done');
   const indexed = await job(operator, children[1]!.id);
   assert.deepEqual(indexed.retriesClassAttempts, { cancelled: 0, invalid: 0, transient: 1 });
 
@@ -278,5 +284,5 @@ test('a batch stamps a job per step, runs them in order, retries a transient fai
   assert.equal(await claim(worker2, 'mail'), null);
   dev.runDue();
   read = await batch(broken);
-  assert.deepEqual([read.workflowStatus, read.rollupsValues], ['failed', { steps: { failed: 1, queued: 2 } }]);
+  assert.deepEqual([read.status, read.rollupsValues], ['failed', { steps: { failed: 1, queued: 2 } }]);
 });

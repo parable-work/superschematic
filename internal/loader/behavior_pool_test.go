@@ -47,7 +47,7 @@ func TestPoolFixturesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	account := db.Types["Account"]
-	if account == nil || account.IsEngineType() || !account.Optimistic {
+	if account == nil || len(account.TypeBehaviors()) > 0 || !account.Optimistic {
 		t.Fatalf("Account = %s", marshal(t, account))
 	}
 	var uses []string
@@ -274,7 +274,7 @@ func TestPoolFromTheDataForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := schema.Types["Account"]
-	if got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != 2 || got.IsEngineType() {
+	if got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != 2 || len(got.TypeBehaviors()) > 0 {
 		t.Fatalf("Account = %s", marshal(t, got))
 	}
 	for i, ref := range got.ImplementsBehaviors() {

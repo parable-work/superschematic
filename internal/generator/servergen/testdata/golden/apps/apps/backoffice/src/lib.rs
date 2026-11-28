@@ -17,7 +17,7 @@ use schemas_desk_app_api_api::apps::BackofficeParts;
 const NOT_IMPLEMENTED: &str = "app Backoffice of desk-app-api does not serve yet: write its serve\n";
 
 /// Serves the app on `parts.addr` until it stops, with the API's Deps and
-/// implementations, and its engine, in `parts`. Return when the process
+/// implementations, in `parts`. Return when the process
 /// should exit: an error fails it.
 ///
 /// It serves nothing yet: it listens on `parts.addr` and answers every
