@@ -124,12 +124,19 @@ fn the_config_is_checked() {
             json!({"anchors": ["calendar"], "relative": {"via": "c", "type": "C", "field": "d"}}),
             "does not list relative",
         ),
+        // The declaration types a lead time as Temporal.Period, whose
+        // pattern takes no sign and no other text; what the pattern takes
+        // and no span is, the core's own reading refuses.
         (
             json!({"anchors": ["calendar"], "opensBefore": "-P1D"}),
-            "negative",
+            "/opensBefore: must match pattern",
         ),
         (
             json!({"anchors": ["calendar"], "remindBefore": "soon"}),
+            "/remindBefore: must match pattern",
+        ),
+        (
+            json!({"anchors": ["calendar"], "overdueAfter": "P1DT"}),
             "ISO 8601",
         ),
         (

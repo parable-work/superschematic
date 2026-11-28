@@ -70,6 +70,10 @@
         "languagePrimitive": "string",
         "name": "Embedding.Vector"
       },
+      "File.MediaType": {
+        "languagePrimitive": "string",
+        "name": "File.MediaType"
+      },
       "File.SizeBytes": {
         "languagePrimitive": "string",
         "name": "File.SizeBytes"
@@ -117,6 +121,10 @@
       "Generic.Text": {
         "languagePrimitive": "string",
         "name": "Generic.Text"
+      },
+      "Geo.CountryCode": {
+        "languagePrimitive": "string",
+        "name": "Geo.CountryCode"
       },
       "Geo.Location": {
         "languagePrimitive": "string",
@@ -195,6 +203,10 @@
         "languagePrimitive": "string",
         "name": "Network.IpAddress"
       },
+      "Network.Port": {
+        "languagePrimitive": "string",
+        "name": "Network.Port"
+      },
       "Network.Uri": {
         "languagePrimitive": "string",
         "name": "Network.Uri"
@@ -231,6 +243,10 @@
         "languagePrimitive": "string",
         "name": "Temporal.Hours"
       },
+      "Temporal.LocalDateTime": {
+        "languagePrimitive": "string",
+        "name": "Temporal.LocalDateTime"
+      },
       "Temporal.Milliseconds": {
         "languagePrimitive": "string",
         "name": "Temporal.Milliseconds"
@@ -242,6 +258,10 @@
       "Temporal.Month": {
         "languagePrimitive": "string",
         "name": "Temporal.Month"
+      },
+      "Temporal.Period": {
+        "languagePrimitive": "string",
+        "name": "Temporal.Period"
       },
       "Temporal.Quarter": {
         "languagePrimitive": "string",
@@ -651,6 +671,12 @@
             }
           },
           {
+            "name": "catalogFileMediaType",
+            "typeRef": {
+              "name": "File.MediaType"
+            }
+          },
+          {
             "name": "catalogFileSizeBytes",
             "typeRef": {
               "name": "File.SizeBytes"
@@ -723,6 +749,12 @@
             }
           },
           {
+            "name": "catalogGeoCountryCode",
+            "typeRef": {
+              "name": "Geo.CountryCode"
+            }
+          },
+          {
             "name": "catalogGeoLocation",
             "typeRef": {
               "name": "Geo.Location"
@@ -783,6 +815,12 @@
             }
           },
           {
+            "name": "catalogNetworkPort",
+            "typeRef": {
+              "name": "Network.Port"
+            }
+          },
+          {
             "name": "catalogNetworkUri",
             "typeRef": {
               "name": "Network.Uri"
@@ -837,6 +875,12 @@
             }
           },
           {
+            "name": "catalogTemporalLocalDateTime",
+            "typeRef": {
+              "name": "Temporal.LocalDateTime"
+            }
+          },
+          {
             "name": "catalogTemporalMilliseconds",
             "typeRef": {
               "name": "Temporal.Milliseconds"
@@ -852,6 +896,12 @@
             "name": "catalogTemporalMonth",
             "typeRef": {
               "name": "Temporal.Month"
+            }
+          },
+          {
+            "name": "catalogTemporalPeriod",
+            "typeRef": {
+              "name": "Temporal.Period"
             }
           },
           {
@@ -1295,6 +1345,15 @@
             ],
             "x-superschematic-scalar": "Embedding.Vector"
           },
+          "catalogFileMediaType": {
+            "description": "IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8)",
+            "maxLength": 255,
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-superschematic-scalar": "File.MediaType"
+          },
           "catalogFileSizeBytes": {
             "description": "File size in bytes (non-negative, BIGINT-backed)",
             "maximum": 9007199254740991,
@@ -1409,6 +1468,17 @@
             ],
             "x-superschematic-scalar": "Generic.Text"
           },
+          "catalogGeoCountryCode": {
+            "description": "Officially assigned ISO 3166-1 alpha-2 country code (e.g., US, DE, JP)",
+            "maxLength": 2,
+            "minLength": 2,
+            "pattern": "^[A-Z]{2}$",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-superschematic-scalar": "Geo.CountryCode"
+          },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
             "type": [
@@ -1507,6 +1577,16 @@
             ],
             "x-superschematic-scalar": "Network.IpAddress"
           },
+          "catalogNetworkPort": {
+            "description": "TCP or UDP port number, 1 through 65535",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ],
+            "x-superschematic-scalar": "Network.Port"
+          },
           "catalogNetworkUri": {
             "description": "RFC 3986 URI for connection strings and non-HTTP resources",
             "format": "uri",
@@ -1598,6 +1678,15 @@
             ],
             "x-superschematic-scalar": "Temporal.Hours"
           },
+          "catalogTemporalLocalDateTime": {
+            "description": "Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset.",
+            "maxLength": 40,
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-superschematic-scalar": "Temporal.LocalDateTime"
+          },
           "catalogTemporalMilliseconds": {
             "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
             "maximum": 9007199254740991,
@@ -1626,6 +1715,17 @@
               "null"
             ],
             "x-superschematic-scalar": "Temporal.Month"
+          },
+          "catalogTemporalPeriod": {
+            "description": "ISO 8601 duration: an amount of calendar time in years, months, weeks, days, hours, minutes and seconds (e.g., P2D, P1M, PT30M)",
+            "maxLength": 64,
+            "minLength": 3,
+            "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-superschematic-scalar": "Temporal.Period"
           },
           "catalogTemporalQuarter": {
             "description": "Calendar quarter (Q1-Q4)",
@@ -2114,7 +2214,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:02356c5e2b7c4f7f2c0fdff50440717b13acd5e957b2c2bd5d8ac486172eadde"
+      "inputSchemaDigest": "sha256:e48df722cdb24cf8e4387dfbd87c07819e87512aae6e84beab245aa15e0d4a0c"
     },
     {
       "name": "a distribution's keys",
@@ -2500,6 +2600,15 @@
             ],
             "x-acme-scalar": "Embedding.Vector"
           },
+          "catalogFileMediaType": {
+            "description": "IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8)",
+            "maxLength": 255,
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-acme-scalar": "File.MediaType"
+          },
           "catalogFileSizeBytes": {
             "description": "File size in bytes (non-negative, BIGINT-backed)",
             "maximum": 9007199254740991,
@@ -2614,6 +2723,17 @@
             ],
             "x-acme-scalar": "Generic.Text"
           },
+          "catalogGeoCountryCode": {
+            "description": "Officially assigned ISO 3166-1 alpha-2 country code (e.g., US, DE, JP)",
+            "maxLength": 2,
+            "minLength": 2,
+            "pattern": "^[A-Z]{2}$",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-acme-scalar": "Geo.CountryCode"
+          },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
             "type": [
@@ -2712,6 +2832,16 @@
             ],
             "x-acme-scalar": "Network.IpAddress"
           },
+          "catalogNetworkPort": {
+            "description": "TCP or UDP port number, 1 through 65535",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ],
+            "x-acme-scalar": "Network.Port"
+          },
           "catalogNetworkUri": {
             "description": "RFC 3986 URI for connection strings and non-HTTP resources",
             "format": "uri",
@@ -2803,6 +2933,15 @@
             ],
             "x-acme-scalar": "Temporal.Hours"
           },
+          "catalogTemporalLocalDateTime": {
+            "description": "Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset.",
+            "maxLength": 40,
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-acme-scalar": "Temporal.LocalDateTime"
+          },
           "catalogTemporalMilliseconds": {
             "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
             "maximum": 9007199254740991,
@@ -2831,6 +2970,17 @@
               "null"
             ],
             "x-acme-scalar": "Temporal.Month"
+          },
+          "catalogTemporalPeriod": {
+            "description": "ISO 8601 duration: an amount of calendar time in years, months, weeks, days, hours, minutes and seconds (e.g., P2D, P1M, PT30M)",
+            "maxLength": 64,
+            "minLength": 3,
+            "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-acme-scalar": "Temporal.Period"
           },
           "catalogTemporalQuarter": {
             "description": "Calendar quarter (Q1-Q4)",
@@ -3321,7 +3471,7 @@
         "x-acme-arguments": 1,
         "x-acme-source": "a \u003cb\u003e \u0026 c"
       },
-      "inputSchemaDigest": "sha256:566cefc0e8249839f9ea4d4ec9bb7b9ab236199c0a6b31dfc0b3e663c1752dd7"
+      "inputSchemaDigest": "sha256:4551bcbdc4b97371e8e9064657f4059be98fd07c41b0c13da78e0f9926f08232"
     },
     {
       "name": "no keys",
@@ -3682,6 +3832,14 @@
               "null"
             ]
           },
+          "catalogFileMediaType": {
+            "description": "IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8)",
+            "maxLength": 255,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "catalogFileSizeBytes": {
             "description": "File size in bytes (non-negative, BIGINT-backed)",
             "maximum": 9007199254740991,
@@ -3784,6 +3942,16 @@
               "null"
             ]
           },
+          "catalogGeoCountryCode": {
+            "description": "Officially assigned ISO 3166-1 alpha-2 country code (e.g., US, DE, JP)",
+            "maxLength": 2,
+            "minLength": 2,
+            "pattern": "^[A-Z]{2}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "catalogGeoLocation": {
             "description": "Geographic location with latitude and longitude",
             "type": [
@@ -3872,6 +4040,15 @@
               "null"
             ]
           },
+          "catalogNetworkPort": {
+            "description": "TCP or UDP port number, 1 through 65535",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "catalogNetworkUri": {
             "description": "RFC 3986 URI for connection strings and non-HTTP resources",
             "format": "uri",
@@ -3954,6 +4131,14 @@
               "null"
             ]
           },
+          "catalogTemporalLocalDateTime": {
+            "description": "Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset.",
+            "maxLength": 40,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "catalogTemporalMilliseconds": {
             "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
             "maximum": 9007199254740991,
@@ -3975,6 +4160,16 @@
           "catalogTemporalMonth": {
             "description": "Calendar month, normalized to two-digit numeric (01-12). Accepts '2', '02', 'Feb', 'February' (case-insensitive).",
             "maxLength": 9,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalogTemporalPeriod": {
+            "description": "ISO 8601 duration: an amount of calendar time in years, months, weeks, days, hours, minutes and seconds (e.g., P2D, P1M, PT30M)",
+            "maxLength": 64,
+            "minLength": 3,
+            "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
             "type": [
               "string",
               "null"
@@ -4441,7 +4636,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:036152c515ac0a26c720b4cfd5beb5efefa199a454d54140305cee7f82760efd"
+      "inputSchemaDigest": "sha256:93abb9c7953f6203db6b934ec205ffff4c76622e5e23162fdcafe2bea26070c0"
     }
   ],
   "defaults": {

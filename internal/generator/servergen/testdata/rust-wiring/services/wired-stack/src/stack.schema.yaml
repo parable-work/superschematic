@@ -1,0 +1,26 @@
+# fixture-wired-api on the local target (#620, #622): its server, a worker
+# deployable per worker of a runtime part's queue, which runs it through
+# the part, and its behavior workers, the runs' deadlines and the tasks'
+# schedules.
+kind: Stack
+types:
+  Wired:
+    name: Wired
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-wired-api, kind: API }
+      expose:
+        - service: { name: fixture-wired-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local
+      settings:
+        - of: { service: { name: fixture-wired-api, kind: API } }
+          env:
+            SANDBOX: { value: local-sandbox }
+            MODEL: { value: stub-model }
+            SMS: { value: sms-relay-a }
+            SMS_URL: { value: "http://127.0.0.1:4310" }

@@ -75,17 +75,17 @@ interface RecurrenceConfig {
    * with none it opens when the occurrence before it falls due, the first
    * when it is planned.
    */
-  opensBefore?: JsonSchema<string, { minLength: 2 }>;
+  opensBefore?: Temporal.Period;
   /**
    * How long before its due an occurrence reminds, an ISO 8601 duration
    * (P3D): the deadline remind.
    */
-  remindBefore?: JsonSchema<string, { minLength: 2 }>;
+  remindBefore?: Temporal.Period;
   /**
    * How long after its due an open occurrence is missed, an ISO 8601 duration
    * (P1D); at its due when absent.
    */
-  overdueAfter?: JsonSchema<string, { minLength: 2 }>;
+  overdueAfter?: Temporal.Period;
   /**
    * The permission complete and listOccurrences need; any caller when absent.
    */

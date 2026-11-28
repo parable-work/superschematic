@@ -1073,7 +1073,10 @@ array, a tuple an array of exactly its elements, `Record<K, V>` an object
 of `V`, a union of literals an `enum`, `T | null` the type of `T` with
 `"null"` beside it, and another union a `oneOf`. `Integer`, `Const<V>`,
 `OneOf<U>` and `Open<T>` say what TypeScript's types do not, and
-`JsonSchema<T, K>` adds the keywords the literal type `K` holds.
+`JsonSchema<T, K>` adds the keywords the literal type `K` holds. A
+superscalar scalar (`Temporal.Period`) is its JSON type with the bounds
+and the pattern its definition declares, and its name under
+`x-superschematic-scalar`, the keyword a tool's schema names a scalar by.
 
 ### What the declaration states
 

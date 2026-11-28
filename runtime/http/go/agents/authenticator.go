@@ -73,21 +73,26 @@ func (a *Agents) Authenticator(authority access.GrantAuthority, inner func(http.
 				other.ServeHTTP(w, r)
 				return
 			}
-			operation, gate := a.operationOf(r, opts)
-			args, err := argsOf(r)
-			if err != nil {
-				refusal(w, 400, "invalid_body", "the body is no JSON object")
-				return
-			}
-			gated, err := a.Gate(ctx, *principal, operation, args, gate)
-			if err != nil {
-				status, body := a.failure(err)
-				writeJSON(w, status, body)
-				return
-			}
-			if !gated.Run {
-				writeJSON(w, gated.Status, map[string]any{"type": "about:blank", "title": gated.Code, "status": gated.Status, "code": gated.Code, "detail": gated.Detail, "approval": gated.Approval})
-				return
+			// The API's MCP endpoint holds each tool's call by the tool's
+			// @autonomy (MCPCallGate), so neither its own request nor a call's
+			// request to the tool's route is held here again.
+			if !gatedElsewhere(r) {
+				operation, gate := a.operationOf(r, opts)
+				args, err := argsOf(r)
+				if err != nil {
+					refusal(w, 400, "invalid_body", "the body is no JSON object")
+					return
+				}
+				gated, err := a.Gate(ctx, *principal, operation, args, gate)
+				if err != nil {
+					status, body := a.failure(err)
+					writeJSON(w, status, body)
+					return
+				}
+				if !gated.Run {
+					writeJSON(w, gated.Status, map[string]any{"type": "about:blank", "title": gated.Code, "status": gated.Status, "code": gated.Code, "detail": gated.Detail, "approval": gated.Approval})
+					return
+				}
 			}
 			called := session.ContextWithCaller(r.Context(), principal.Principal.Principal)
 			called = session.ContextWithRoles(called, []session.Role{{Name: "agent-run", Permissions: principal.Permissions}})

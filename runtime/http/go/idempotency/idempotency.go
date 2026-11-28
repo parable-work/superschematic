@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/runtime/http/go/internal/sqldialect"
+	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
 	"github.com/parable-work/superschematic/runtime/http/go/response"
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
@@ -409,6 +410,12 @@ func Middleware(opts Options) func(http.Handler) http.Handler {
 	keep := max(ttl, inFlight)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A route's check (D98) keeps no key: the key is the run's, and
+			// a check that kept it would answer the run what it answered.
+			if requestctx.IsRouteCheck(r.Context()) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			keys, sent := r.Header[KeyHeader]
 			if !sent {
 				if opts.Required {
