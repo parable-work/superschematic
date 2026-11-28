@@ -18,7 +18,9 @@ takes one path, which decides who sent it and what it may reach.
 | `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage; a generated TypeScript server that builds it into its `Deps` and mounts each relay's inbound route ([below](#take-what-comes-in)) | the same in a generated Go or Rust server |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
-| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
+| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | a triage page in Topcoat |
+| a held message settled onto a party from triage, its address entered by hand or verified by a code (TypeScript, [below](#settle-a-held-message-onto-a-party)) | the same in Go and Rust |
+| a messaging bridge's inbound, with a key that can only relay messages (`examples/runtime-providers`'s `chat-bridge`) | the bridge as a Go or Rust provider module |
 | messages as rows, with their files and the rows they are about | |
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
@@ -107,6 +109,42 @@ The office reads triage and settles it with `parties.triage`:
 `inbound.triage(principal)` and `inbound.settle(principal, message)`.
 `inbound.timeline(principal, party)` lists a party's messages on every
 channel.
+
+### Settle a held message onto a party
+
+A message from an address no one holds can be a party's: a contractor
+texting from a new phone. `settleOnto` adds the sender's address as the
+party's identity, and files the message as if it had come from the party
+(#606):
+
+```ts
+await inbound.settleOnto(staff, message, { party: { table: "Contact", key }, trust: "entered" });
+```
+
+| `trust` | What happens |
+| --- | --- |
+| `entered` | The address is the party's at once, entered by hand: the lowest trust, so a run on its messages asks before every write. The message is filed now. |
+| `verified` | A code goes to the address, and the message waits (`verifying`). When the address answers it, the message is filed at the trust of a verified address. |
+
+Filed means as the path files a party's message: the party's
+conversation on the channel, a reference to the party's row, and with an
+active grant a run request and triage closed; with none, the party's
+timeline and triage still open. The settler holds `parties.triage` and
+reads the party's row, as a sender does. An address that is a user's is
+refused: a user shares an address with no one.
+
+### A messaging bridge
+
+A messaging network's inbound side can be a bridge: a process that
+connects outward, to the network and to the app, so its host needs no
+open port. `examples/runtime-providers`'s `chat-bridge` is one. The app
+sends through the network's API. The bridge's loop (`runBridge`) posts
+each message the network received to `POST /webhooks/<slot>/inbound`
+with the slot's relay key, which the adapter checks. The API resolves
+that key to the provider's own principal (`extensionAuthenticator`),
+whose role is `messages.relay`, so it can relay messages and nothing
+else. A sender is a handle, which a channel identity of kind `handle`
+names, and its message takes the same path as a text's.
 
 ## Act on a run request
 

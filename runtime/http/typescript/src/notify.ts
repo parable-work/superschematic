@@ -1238,7 +1238,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
           if (await checkCode(identity, text, 'verify')) {
             const id = await record(orm, { ...base, identity: identity.id, principal: identity.principal, verb: 'verify', outcome: 'done' });
             await echo(input, address, 'This address is confirmed.', String(identity.principal));
-            return { outcome: 'verified', ...(id ? { reply: id } : {}), verb: 'verify', principal: { kind: identity.principalKind as RecipientRef['kind'], id: String(identity.principal) } };
+            return { outcome: 'verified', ...(id ? { reply: id } : {}), verb: 'verify', principal: { kind: identity.principalKind as RecipientRef['kind'], id: String(identity.principal), ...(identity.principalTable ? { table: String(identity.principalTable) } : {}) } };
           }
         }
       }

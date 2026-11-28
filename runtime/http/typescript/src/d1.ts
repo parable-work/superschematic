@@ -186,6 +186,7 @@ export {
   type InboundDisposition,
   type InboundOptions,
   type InboundOutcome,
+  type SettleOnto,
   type MessageRow,
   type ReceivedMessage,
   type RunRequest,
