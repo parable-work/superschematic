@@ -98,6 +98,12 @@ type SearchTrigger struct {
 
 	Queue SearchQueue
 
+	// Environment is a table whose index rows are copied into the
+	// environment's index (outputs.sql.search.environment, #740): a delete,
+	// a soft delete, a change of key and every change of the row enqueue
+	// it too, so its worker copies what changed.
+	Environment bool
+
 	FunctionName, TriggerName string
 }
 
@@ -115,6 +121,12 @@ type SearchChildTrigger struct {
 	Watched []string
 
 	Queue SearchQueue
+
+	// Grant marks the trigger of the @accessGrants table of a database
+	// whose index rows are copied into the environment's index (#740):
+	// Row is the grants table's type, and RowColumn its key, so a write
+	// of a grant enqueues the grant for its reach to be copied again.
+	Grant bool
 
 	FunctionName, TriggerName string
 }
@@ -189,6 +201,7 @@ func buildSearchables(schema *ir.Schema, tableTypes []*ir.TypeDef, tables []Tabl
 			IndexAudience: indexColumns[ir.SearchAudienceField],
 			IndexAgents:   indexColumns[ir.SearchAgentsField],
 			Queue:         queue,
+			Environment:   schema.SearchesEnvironment(),
 			FunctionName:  table.Name + searchSuffix,
 			TriggerName:   "trg_" + table.Name + searchSuffix,
 		}
@@ -271,6 +284,41 @@ func buildSearchables(schema *ir.Schema, tableTypes []*ir.TypeDef, tables []Tabl
 			children = append(children, c)
 		}
 	}
+	if grants := schema.AccessGrantsTable(); grants != nil && schema.SearchesEnvironment() {
+		// A grant's write enqueues it on the first declaration's queue
+		// (#740), whose worker copies its reach again.
+		table := byType[grants.Name]
+		if table == nil || table.PrimaryKey == "" {
+			return nil, nil, fmt.Errorf("sqlgen: @accessGrants %s has no table with one key", grants.Name)
+		}
+		queue, err := queueOf(searchables[0].Searchable.Queue)
+		if err != nil {
+			return nil, nil, err
+		}
+		c := SearchChildTrigger{
+			Origin:       grants.Name,
+			Row:          grants.Name,
+			Table:        table.Name,
+			QuotedTable:  table.QuotedName,
+			RowColumn:    sqlutil.QuoteIdentifier(table.PrimaryKey),
+			Queue:        queue,
+			Grant:        true,
+			FunctionName: table.Name + searchSuffix,
+			TriggerName:  "trg_" + table.Name + searchSuffix,
+		}
+		for _, field := range []string{ir.AccessGrantHolderField, ir.AccessGrantHolderKindField, ir.AccessGrantRoleField, ir.AccessGrantTargetTypeField, ir.AccessGrantTargetIDField,
+			ir.AccessGrantStartsAtField, ir.AccessGrantEndsAtField, ir.AccessGrantEndsWhenFieldField, ir.AccessGrantEndsWhenStateField, ir.AccessGrantRevokedAtField} {
+			w, err := column(grants.Name, field)
+			if err != nil {
+				return nil, nil, err
+			}
+			c.Watched = append(c.Watched, w)
+		}
+		if err := tooLong(grants, c.TriggerName); err != nil {
+			return nil, nil, err
+		}
+		children = append(children, c)
+	}
 	slices.SortStableFunc(triggers, func(a, b SearchTrigger) int { return strings.Compare(a.Table, b.Table) })
 	slices.SortStableFunc(children, func(a, b SearchChildTrigger) int { return strings.Compare(a.Table, b.Table) })
 	return triggers, children, nil
@@ -309,10 +357,25 @@ func (t SearchTrigger) FunctionSQL() string {
 		return fmt.Sprintf("%s = %s AND %s = %s.%s::text", t.IndexTable, sqlutil.QuoteLiteral(t.Origin), t.IndexKey, row, t.Key)
 	}
 	fmt.Fprintf(&b, "BEGIN\n  -- The search index row of a row of %s (D155): deleted with the row,\n  -- its access copied in the writer's transaction, and the row enqueued\n  -- for its text to be indexed again when that changed.\n", t.Origin)
-	fmt.Fprintf(&b, "  IF TG_OP = 'DELETE' THEN\n    DELETE FROM %s WHERE %s;\n    RETURN NULL;\n  END IF;\n", t.Index, where("OLD"))
-	fmt.Fprintf(&b, "  IF TG_OP = 'UPDATE' AND OLD.%s IS DISTINCT FROM NEW.%s THEN\n    DELETE FROM %s WHERE %s;\n  END IF;\n", t.Key, t.Key, t.Index, where("OLD"))
+	if t.Environment {
+		b.WriteString("  -- Its index row is copied into the environment's index (#740): a\n  -- delete, a soft delete, a change of key and every change of the row\n  -- enqueue it too, for its worker to copy what changed.\n")
+	}
+	// gone enqueues, for the environment's copy, a row whose index row a
+	// branch deleted.
+	gone := func(row, indent string) string {
+		if !t.Environment {
+			return ""
+		}
+		return t.Queue.enqueue(t.Origin, row+"."+t.Key, indent)
+	}
+	fmt.Fprintf(&b, "  IF TG_OP = 'DELETE' THEN\n    DELETE FROM %s WHERE %s;\n%s    RETURN NULL;\n  END IF;\n", t.Index, where("OLD"), gone("OLD", "    "))
+	fmt.Fprintf(&b, "  IF TG_OP = 'UPDATE' AND OLD.%s IS DISTINCT FROM NEW.%s THEN\n    DELETE FROM %s WHERE %s;\n%s  END IF;\n", t.Key, t.Key, t.Index, where("OLD"), gone("OLD", "    "))
 	if t.DeletedAt != "" {
-		fmt.Fprintf(&b, "  IF NEW.%s IS NOT NULL THEN\n    DELETE FROM %s WHERE %s;\n    RETURN NULL;\n  END IF;\n", t.DeletedAt, t.Index, where("NEW"))
+		soft := ""
+		if t.Environment {
+			soft = fmt.Sprintf("    IF TG_OP = 'INSERT' OR OLD.%s IS NULL THEN\n%s    END IF;\n", t.DeletedAt, gone("NEW", "      "))
+		}
+		fmt.Fprintf(&b, "  IF NEW.%s IS NOT NULL THEN\n    DELETE FROM %s WHERE %s;\n%s    RETURN NULL;\n  END IF;\n", t.DeletedAt, t.Index, where("NEW"), soft)
 	}
 	if t.Effective != "" {
 		fmt.Fprintf(&b, "  UPDATE %s SET %s = NEW.%s, %s = NEW.%s\n    WHERE %s\n      AND (%s IS DISTINCT FROM NEW.%s OR %s IS DISTINCT FROM NEW.%s);\n",
@@ -327,6 +390,9 @@ func (t SearchTrigger) FunctionSQL() string {
 		olds[i], news[i] = "OLD."+c, "NEW."+c
 	}
 	changed = append(changed, fmt.Sprintf("ROW(%s) IS DISTINCT FROM ROW(%s)", strings.Join(olds, ", "), strings.Join(news, ", ")))
+	if t.Environment {
+		changed = []string{"TG_OP = 'INSERT'", "ROW(OLD.*) IS DISTINCT FROM ROW(NEW.*)"}
+	}
 	fmt.Fprintf(&b, "  IF %s THEN\n", strings.Join(changed, "\n     OR "))
 	b.WriteString(t.Queue.enqueue(t.Origin, "NEW."+t.Key, "    "))
 	b.WriteString("  END IF;\n  RETURN NULL;\nEND;\n")
@@ -345,7 +411,11 @@ func (c SearchChildTrigger) Trigger() Trigger {
 // to enqueued on an insert, a delete, and an update of the text.
 func (c SearchChildTrigger) FunctionSQL() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "BEGIN\n  -- The row of %s whose text the write of %s changed (D155),\n  -- enqueued for its index row to be built again.\n", c.Row, c.Origin)
+	if c.Grant {
+		fmt.Fprintf(&b, "BEGIN\n  -- The grant a write of %s changed (#740), enqueued for its reach\n  -- to be copied into the environment's index again.\n", c.Origin)
+	} else {
+		fmt.Fprintf(&b, "BEGIN\n  -- The row of %s whose text the write of %s changed (D155),\n  -- enqueued for its index row to be built again.\n", c.Row, c.Origin)
+	}
 	fmt.Fprintf(&b, "  IF TG_OP = 'DELETE' THEN\n%s    RETURN NULL;\n  END IF;\n", c.Queue.enqueue(c.Row, "OLD."+c.RowColumn, "    "))
 	olds, news := make([]string, len(c.Watched)), make([]string, len(c.Watched))
 	for i, w := range c.Watched {

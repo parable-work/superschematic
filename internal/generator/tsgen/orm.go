@@ -106,6 +106,13 @@ type ORMInfo struct {
 	References  string
 	Attachments string
 
+	// EnvironmentSearch is the environment's search index the database
+	// holds (outputs.sql.search.environmentIndex, #740), as JSON, which
+	// orm.ts exports as environmentSearch for the runtime's
+	// searchEnvironment and indexEnvironmentSearch; "" for a database
+	// without it.
+	EnvironmentSearch string
+
 	// Postgres is whether the DB service lists the postgres dialect: orm.ts
 	// then holds the definitions on Postgres and createOrm over a pool;
 	// without it, its types alone (D182).
@@ -749,6 +756,9 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		members[table.Type] = table.Member
 	}
 	if out.References, out.Attachments, err = rowFeaturesOf(schema, tables, members); err != nil {
+		return nil, err
+	}
+	if out.EnvironmentSearch, err = environmentSearchOf(schema, tables); err != nil {
 		return nil, err
 	}
 	return out, nil

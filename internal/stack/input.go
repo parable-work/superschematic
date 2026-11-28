@@ -188,6 +188,13 @@ type Service struct {
 	// (D146).
 	DerivedTables []string
 
+	// Searchable reports that a DB service has a @searchable table (D155);
+	// SearchEnvironment that it sets outputs.sql.search.environment, so its
+	// worker copies its index rows into the environment's index; and
+	// EnvironmentIndex that it sets outputs.sql.search.environmentIndex, so
+	// it holds that index, which a stack's search names (#740).
+	Searchable, SearchEnvironment, EnvironmentIndex bool
+
 	// Vectors reports that a DB service has a vector(n) column, an
 	// Embedding.Vector with dimensions, whose DDL enables pgvector's vector
 	// extension (D84).

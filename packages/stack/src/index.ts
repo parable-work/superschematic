@@ -406,7 +406,8 @@ export type ImageElement<E> = E extends { readonly of: infer H }
  * not, and each API it calls must be exposed (D55), unless the site's
  * origin serves it (`origins`, D91). An app is exposed beside its API's
  * handle, `{ of: ShopStock, app: "Backoffice" }` (D78). `images` lists
- * what the stack adds to its deployables' images (D144).
+ * what the stack adds to its deployables' images (D144). `search` names
+ * the database that holds the environment's search index (#740).
  */
 export function stack<
   const X extends readonly unknown[] = readonly [],
@@ -426,6 +427,14 @@ export function stack<
    * `{ of: ShopOrders, worker: "PrintInvoices", extend: "docker/invoices/Dockerfile" }`.
    */
   readonly images?: M & { readonly [I in keyof M]: Exact<ImageElement<M[I]>, M[I]> };
+  /**
+   * The search database (#740): the DB service whose config sets
+   * `outputs.sql.search.environmentIndex`, which holds the search index of
+   * the environment's databases. Each database of the stack with a
+   * `@searchable` table sets `outputs.sql.search.environment`, and its
+   * worker copies its index rows there.
+   */
+  readonly search?: ServiceHandle<"DB">;
 }): ClassDecorator {
   return noop;
 }

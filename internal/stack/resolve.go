@@ -483,6 +483,10 @@ func (r *resolver) collectMembers() {
 			add(ref.Name)
 		}
 	}
+	// The search database joins the stack (#740).
+	if ref := r.stack.Search; ref != nil && r.checkRef("search", *ref, ir.SchemaKindDB) {
+		add(ref.Name)
+	}
 	for _, decl := range r.stack.Deployables {
 		if decl == nil {
 			continue
@@ -1294,6 +1298,7 @@ func (r *resolver) output() *ir.ResolvedEnvironment {
 		Provisioner: r.target.Provisioner,
 		Parameters:  slices.Clone(r.env.parameters),
 		Domain:      r.env.domain,
+		Search:      r.resolveSearch(),
 		Deployables: []*ir.ResolvedDeployable{},
 		Resources:   &ir.ResourceGraph{Parameters: slices.Clone(r.env.parameters), Resources: []*ir.Resource{}},
 	}

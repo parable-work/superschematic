@@ -355,6 +355,13 @@ type TypeDef struct {
 	// SQLite its FTS5 table removes diacritics.
 	SearchFolds bool `json:"searchFolds,omitempty" yaml:"searchFolds,omitempty" jsonschema:"-"`
 
+	// SearchEnvironment marks a search index whose rows are copied into
+	// the environment's index (outputs.sql.search.environment, #740): its
+	// tables' triggers enqueue every write of a row, its grants table's
+	// trigger enqueues every write of a grant, and its raw SQL makes
+	// [SearchEnvironmentSequence].
+	SearchEnvironment bool `json:"searchEnvironment,omitempty" yaml:"searchEnvironment,omitempty" jsonschema:"-"`
+
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).
 	// Nil for every other type. See [QueryDef].

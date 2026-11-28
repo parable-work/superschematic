@@ -564,6 +564,12 @@ export type {{.Name}}Tx = OrmTx<{{.Name}}Repositories{{with .RowFeatureMembers}}
 export const {{.RulesConst}}: RulesLayout = {{.RulesLayout}};
 {{- end}}
 
+{{- if .EnvironmentSearch}}
+
+/** The environment's search index {{$.SchemaName}} holds (#740), which the runtime's searchEnvironment ranks and indexEnvironmentSearch writes. */
+export const environmentSearch = {{.EnvironmentSearch}} as const;
+{{- end}}
+
 /** The tables of {{$.SchemaName}} and the clauses their statements are written with. */
 export const {{.Const}}: OrmDefinition = {
   clauses: {

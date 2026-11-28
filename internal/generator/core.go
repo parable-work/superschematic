@@ -45,7 +45,7 @@ var sqlOutputSchema = json.RawMessage(`{
 		"search": {
 			"type": "object",
 			"additionalProperties": false,
-			"properties": {"foldDiacritics": {"type": "boolean"}}
+			"properties": {"foldDiacritics": {"type": "boolean"}, "environment": {"type": "boolean"}, "environmentIndex": {"type": "boolean"}}
 		}
 	}
 }`)

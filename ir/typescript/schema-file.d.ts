@@ -920,6 +920,7 @@ export interface StackDecl {
   expose?: DeployableRef[];
   images?: DeployableImage[];
   origins?: Origin[];
+  search?: ServiceRef;
 }
 
 export interface StateMachine {

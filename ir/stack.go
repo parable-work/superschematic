@@ -211,6 +211,12 @@ type Stack struct {
 	// settings change them.
 	Images []*DeployableImage `json:"images,omitempty" yaml:"images,omitempty"`
 
+	// Search names the search database (#740): the DB service whose
+	// environment index (outputs.sql.search.environmentIndex) every
+	// environment's search across its databases reads. Nil keeps each
+	// database's own index.
+	Search *ServiceRef `json:"search,omitempty" yaml:"search,omitempty"`
+
 	// Deployables are the declared deployables: those that differ from the
 	// defaults of section 3.2. StackOf gives them in name order.
 	Deployables []*DeployableDecl `json:"deployables,omitempty" yaml:"deployables,omitempty"`
@@ -427,6 +433,9 @@ type StackDecl struct {
 
 	// Images are what the stack adds to its deployables' images (D144).
 	Images []*DeployableImage `json:"images,omitempty" yaml:"images,omitempty"`
+
+	// Search names the search database (#740).
+	Search *ServiceRef `json:"search,omitempty" yaml:"search,omitempty"`
 }
 
 // ServerDecl is the declaration of an `@server` class: a declared server
@@ -494,6 +503,7 @@ func StackOf(schema *Schema) *Stack {
 				Expose:  td.Stack.Expose,
 				Origins: td.Stack.Origins,
 				Images:  td.Stack.Images,
+				Search:  td.Stack.Search,
 			}
 		}
 		if td.Server != nil {
