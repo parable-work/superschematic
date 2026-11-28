@@ -292,7 +292,7 @@ func (q SearchQueue) enqueue(origin, key, indent string) string {
 	if conflict != "" && !strings.HasPrefix(conflict, " ") && !strings.HasPrefix(conflict, "\n") {
 		conflict = " " + conflict
 	}
-	return fmt.Sprintf("%sINSERT INTO %s (%s)\n%sVALUES (%s, %s::text)%s;\n", indent, q.Table, strings.Join(q.Columns, ", "), indent, stringLiteral(origin), key, conflict)
+	return fmt.Sprintf("%sINSERT INTO %s (%s)\n%sVALUES (%s, %s::text)%s;\n", indent, q.Table, strings.Join(q.Columns, ", "), indent, sqlutil.QuoteLiteral(origin), key, conflict)
 }
 
 // Trigger is the row trigger that keeps the table's index rows.
@@ -306,7 +306,7 @@ func (t SearchTrigger) Trigger() Trigger {
 func (t SearchTrigger) FunctionSQL() string {
 	var b strings.Builder
 	where := func(row string) string {
-		return fmt.Sprintf("%s = %s AND %s = %s.%s::text", t.IndexTable, stringLiteral(t.Origin), t.IndexKey, row, t.Key)
+		return fmt.Sprintf("%s = %s AND %s = %s.%s::text", t.IndexTable, sqlutil.QuoteLiteral(t.Origin), t.IndexKey, row, t.Key)
 	}
 	fmt.Fprintf(&b, "BEGIN\n  -- The search index row of a row of %s (D155): deleted with the row,\n  -- its access copied in the writer's transaction, and the row enqueued\n  -- for its text to be indexed again when that changed.\n", t.Origin)
 	fmt.Fprintf(&b, "  IF TG_OP = 'DELETE' THEN\n    DELETE FROM %s WHERE %s;\n    RETURN NULL;\n  END IF;\n", t.Index, where("OLD"))

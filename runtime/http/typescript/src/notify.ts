@@ -7,12 +7,12 @@ import { quietSecondsAt } from './quiet-hours.js';
 import { createReplyInterpreter, referenceInText } from './reply-interpreter.js';
 import type { AgentTool } from './agents.js';
 import { createLogger, type Logger } from './logger.js';
-import type { EventDefinition } from './orm.js';
+import type { EventDefinition, PlainRepository } from './orm.js';
 import type { ChannelAdapter, DeliveryState, InboundMessage, WebhookRequest } from './providers/channel.js';
 import type { Providers } from './providers/registry.js';
 import type { QueueDefinition } from './queue-core.js';
 import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
-import { sha256 } from './sha256.js';
+import { sha256Hex } from './sha256.js';
 import { idKey } from './uuid.js';
 import type { WorkerQueue } from './worker.js';
 
@@ -342,16 +342,7 @@ export interface Notifier {
 
 type Values = Record<string, unknown>;
 
-interface RepositoryShape {
-  readonly def: { readonly name: string; readonly key: string; readonly notifier?: string; readonly access?: string; readonly events?: readonly EventDefinition[]; readonly relations?: readonly { readonly field: string; readonly column: string; readonly target: string }[] };
-  findOne(filter: Values, options?: Values): Promise<Values | null>;
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-  createOne(input: Values): Promise<Values>;
-  updateOne(id: unknown, update: Values): Promise<Values>;
-  updateMany(filter: Values, update: Values): Promise<number>;
-  deleteOne(id: unknown): Promise<void>;
-  deleteMany(filter: Values): Promise<number>;
-}
+type RepositoryShape = Pick<PlainRepository, 'def' | 'findOne' | 'findMany' | 'createOne' | 'updateOne' | 'updateMany' | 'deleteOne' | 'deleteMany'>;
 
 /** The states of a delivery that has not ended, which an acknowledgement ends. */
 const OPEN_DELIVERY_STATES = ['queued', 'sent', 'delivered'];
@@ -389,13 +380,9 @@ export function normaliseAddress(kind: string, address: string): string {
 
 const DEFAULT_ADDRESS_KINDS: Readonly<Record<string, 'email' | 'phone' | 'handle'>> = { email: 'email', sms: 'phone', voice: 'phone' };
 
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
 /** The SHA-256 of a code, in hex, as the channel identities hold it: the code trimmed and in upper case. */
 export function codeHash(code: string): string {
-  return hex(sha256(new TextEncoder().encode(code.trim().toUpperCase())));
+  return sha256Hex(code.trim().toUpperCase());
 }
 
 function randomCode(): string {

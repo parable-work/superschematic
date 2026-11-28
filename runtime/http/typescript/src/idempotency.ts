@@ -1,5 +1,6 @@
 import type { SqlDatabase, SqlValue } from './d1.js';
 import { HttpProblem } from './problem.js';
+import { subtleSha256Hex } from './sha256.js';
 import { postgresPlaceholders, quoteIdentifier as quote } from './sql-text.js';
 
 /*
@@ -62,14 +63,6 @@ export function isIdempotencyKey(key: string): boolean {
   return /^[ -~]{1,255}$/u.test(key);
 }
 
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)));
-}
-
 function concat(parts: readonly Uint8Array[]): Uint8Array {
   const whole = new Uint8Array(parts.reduce((size, part) => size + part.byteLength, 0));
   let offset = 0;
@@ -93,7 +86,7 @@ export function idempotencyLookup(operation: string, principal: string, key: str
     const bytes = encoder.encode(text);
     parts.push(encoder.encode(`${bytes.byteLength}:`), bytes);
   }
-  return sha256Hex(concat(parts));
+  return subtleSha256Hex(concat(parts));
 }
 
 /**
@@ -102,7 +95,7 @@ export function idempotencyLookup(operation: string, principal: string, key: str
  * feed, and its body's bytes.
  */
 export function idempotencyRequestHash(method: string, pathAndQuery: string, body: Uint8Array): Promise<string> {
-  return sha256Hex(concat([new TextEncoder().encode(`${method.toUpperCase()}\n${pathAndQuery}\n`), body]));
+  return subtleSha256Hex(concat([new TextEncoder().encode(`${method.toUpperCase()}\n${pathAndQuery}\n`), body]));
 }
 
 /** One request under a key, as begin takes it. Times are milliseconds since the epoch. */

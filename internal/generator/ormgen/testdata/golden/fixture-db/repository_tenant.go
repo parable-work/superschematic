@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -556,142 +555,10 @@ func (r *TenantRepository) GetOne(ctx context.Context, id types.IdentityUUID, op
 	}
 
 	// Hydrate relationship foreign keys into nested objects from typed field selections.
-	if opts != nil && opts.Fields.UsersNested != nil {
-		childFields := *opts.Fields.UsersNested
-		if childFields.IsZero() {
-			childFields = TenantUserFields{Id: true}
+	if opts != nil {
+		if err := r.hydrateHasMany(ctx, []*types.Tenant{result}, opts.Fields); err != nil {
+			return nil, err
 		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			"Tenant",
-			"Tenant",
-			"Users",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
-
-		// Get repository for related type
-		var repo *TenantUserRepository
-		if r.tx != nil {
-			txDB := r.txDB
-			if txDB == nil {
-				txDB = r.db
-			}
-			repo = &TenantUserRepository{tx: r.tx, txDB: txDB}
-		} else if r.db != nil {
-			repo = r.db.TenantUser
-		} else if r.txDB != nil {
-			repo = r.txDB.TenantUser
-		} else {
-			return nil, fmt.Errorf("no database connection available for users hydration")
-		}
-
-		resultID, ok := tenantUUIDValue(result.Id)
-		if !ok {
-			return nil, fmt.Errorf("missing id for Tenant.users hydration")
-		}
-
-		childFilter := &TenantUserFilter{}
-		childFilterValue := reflect.ValueOf(childFilter).Elem()
-		filterFieldCandidates := []string{
-			"TenantID",
-			"TenantID",
-			"UsersID",
-		}
-		var selectedFilterField string
-		filterSet := false
-		for _, candidate := range filterFieldCandidates {
-			field := childFilterValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() {
-				continue
-			}
-			field.Set(reflect.ValueOf(&UUIDFilter{
-				In: []types.IdentityUUID{resultID},
-			}))
-			selectedFilterField = candidate
-			filterSet = true
-			break
-		}
-		if !filterSet {
-			return nil, fmt.Errorf("failed to locate hasMany FK filter for Tenant.users")
-		}
-
-		// The other recursion point: these children hydrate their own relations.
-		// This block only runs on an explicit nested selection, so the cycle half
-		// of the guard does not apply and only the depth cap can refuse it.
-		children := []*types.TenantUser{}
-		if hydrationCtx, allowed := enterRelationHydration(ctx, "Tenant", "users", "TenantUser", false); allowed {
-			fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &TenantUserFindOptions{
-				Fields: childFields,
-				Limit:  1000000,
-			})
-			if findErr != nil {
-				return nil, fmt.Errorf("failed to fetch users: %w", findErr)
-			}
-			children = fetched
-		}
-
-		parentFieldCandidates := []string{
-			"Tenant",
-			strings.TrimSuffix(selectedFilterField, "ID"),
-			"Tenant",
-			"Users",
-		}
-		related := make([]types.TenantUser, 0, len(children))
-		for _, child := range children {
-			if child == nil {
-				continue
-			}
-			childValue := reflect.ValueOf(child)
-			if childValue.Kind() == reflect.Ptr {
-				if childValue.IsNil() {
-					continue
-				}
-				childValue = childValue.Elem()
-			}
-			if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-				continue
-			}
-
-			matchesParent := false
-			for _, candidate := range parentFieldCandidates {
-				parentField := childValue.FieldByName(candidate)
-				if !parentField.IsValid() {
-					continue
-				}
-				if parentField.Kind() == reflect.Ptr {
-					if parentField.IsNil() {
-						continue
-					}
-					parentField = parentField.Elem()
-				}
-				if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-					continue
-				}
-				idField := parentField.FieldByName("Id")
-				if !idField.IsValid() || !idField.CanInterface() {
-					continue
-				}
-				parentID, ok := tenantUUIDValue(idField.Interface())
-				if !ok {
-					continue
-				}
-				if parentID == resultID {
-					matchesParent = true
-					break
-				}
-			}
-			if matchesParent {
-				related = append(related, *child)
-			}
-		}
-		result.Users = related
 	}
 
 	return result, nil
@@ -1003,6 +870,9 @@ func (r *TenantRepository) FindOne(ctx context.Context, filter *TenantFilter, op
 	}
 
 	// Hydrate relationship foreign keys into nested objects from typed field selections.
+	if err := r.hydrateHasMany(ctx, []*types.Tenant{result}, opts.Fields); err != nil {
+		return nil, err
+	}
 
 	return result, nil
 }
@@ -1223,25 +1093,27 @@ func (r *TenantRepository) findRows(ctx context.Context, method, query string, a
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
+	if err := r.hydrateHasMany(ctx, results, fields); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// hydrateHasMany loads the @hasMany relations fields selects into results:
+// for each, one read of the target's rows whose relation back to this
+// table, the one sqlutil.ToMany names (D90), points at any of results,
+// grouped by that relation's key. A result whose key no row points at gets
+// an empty list, as the TypeScript repositories' include gives it. GetOne,
+// FindOne and findRows load the relations through it.
+func (r *TenantRepository) hydrateHasMany(ctx context.Context, results []*types.Tenant, fields TenantFields) error {
 	if fields.UsersNested != nil {
 		childFields := *fields.UsersNested
 		if childFields.IsZero() {
 			childFields = TenantUserFields{Id: true}
 		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			"Tenant",
-			"Tenant",
-			"Users",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
+		// The relation back groups the rows by their parent's key.
+		childFields.Tenant = true
 
 		parentIDSet := make(map[types.IdentityUUID]bool, len(results))
 		parentIDs := make([]types.IdentityUUID, 0, len(results))
@@ -1249,15 +1121,12 @@ func (r *TenantRepository) findRows(ctx context.Context, method, query string, a
 			if result == nil {
 				continue
 			}
-			resultID, ok := tenantUUIDValue(result.Id)
-			if !ok {
-				continue
-			}
-			if !parentIDSet[resultID] {
+			if resultID, ok := tenantUUIDValue(result.Id); ok && !parentIDSet[resultID] {
 				parentIDSet[resultID] = true
 				parentIDs = append(parentIDs, resultID)
 			}
 		}
+		childrenByParentID := make(map[types.IdentityUUID][]types.TenantUser, len(parentIDs))
 		if len(parentIDs) > 0 {
 			// Get repository for related type
 			var repo *TenantUserRepository
@@ -1272,120 +1141,44 @@ func (r *TenantRepository) findRows(ctx context.Context, method, query string, a
 			} else if r.txDB != nil {
 				repo = r.txDB.TenantUser
 			} else {
-				return nil, fmt.Errorf("no database connection available for users hydration")
-			}
-
-			childFilter := &TenantUserFilter{}
-			childFilterValue := reflect.ValueOf(childFilter).Elem()
-			filterFieldCandidates := []string{
-				"TenantID",
-				"TenantID",
-				"UsersID",
-			}
-			var selectedFilterField string
-			filterSet := false
-			for _, candidate := range filterFieldCandidates {
-				field := childFilterValue.FieldByName(candidate)
-				if !field.IsValid() || !field.CanSet() {
-					continue
-				}
-				field.Set(reflect.ValueOf(&UUIDFilter{
-					In: parentIDs,
-				}))
-				selectedFilterField = candidate
-				filterSet = true
-				break
-			}
-			if !filterSet {
-				return nil, fmt.Errorf("failed to locate hasMany FK filter for Tenant.users")
+				return fmt.Errorf("no database connection available for users hydration")
 			}
 
 			// The other recursion point: these children hydrate their own relations.
 			// This block only runs on an explicit nested selection, so the cycle half
 			// of the guard does not apply and only the depth cap can refuse it.
-			children := []*types.TenantUser{}
 			if hydrationCtx, allowed := enterRelationHydration(ctx, "Tenant", "users", "TenantUser", false); allowed {
-				fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &TenantUserFindOptions{
+				children, err := repo.findRelated(hydrationCtx, &TenantUserFilter{TenantID: &UUIDFilter{In: parentIDs}}, &TenantUserFindOptions{
 					Fields: childFields,
 					Limit:  1000000,
 				})
-				if findErr != nil {
-					return nil, fmt.Errorf("failed to batch fetch users: %w", findErr)
+				if err != nil {
+					return fmt.Errorf("failed to fetch users: %w", err)
 				}
-				children = fetched
+				for _, child := range children {
+					if child == nil {
+						continue
+					}
+					if parentID, ok := tenantUUIDValue(child.Tenant.Id); ok {
+						childrenByParentID[parentID] = append(childrenByParentID[parentID], *child)
+					}
+				}
 			}
-
-			parentFieldCandidates := []string{
-				"Tenant",
-				strings.TrimSuffix(selectedFilterField, "ID"),
-				"Tenant",
-				"Users",
+		}
+		for _, result := range results {
+			if result == nil {
+				continue
 			}
-			childrenByParentID := make(map[types.IdentityUUID][]types.TenantUser, len(parentIDs))
-			for _, child := range children {
-				if child == nil {
-					continue
+			if resultID, ok := tenantUUIDValue(result.Id); ok {
+				related := childrenByParentID[resultID]
+				if related == nil {
+					related = []types.TenantUser{}
 				}
-				childValue := reflect.ValueOf(child)
-				if childValue.Kind() == reflect.Ptr {
-					if childValue.IsNil() {
-						continue
-					}
-					childValue = childValue.Elem()
-				}
-				if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-					continue
-				}
-
-				var parentID types.IdentityUUID
-				foundParent := false
-				for _, candidate := range parentFieldCandidates {
-					parentField := childValue.FieldByName(candidate)
-					if !parentField.IsValid() {
-						continue
-					}
-					if parentField.Kind() == reflect.Ptr {
-						if parentField.IsNil() {
-							continue
-						}
-						parentField = parentField.Elem()
-					}
-					if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-						continue
-					}
-					idField := parentField.FieldByName("Id")
-					if !idField.IsValid() || !idField.CanInterface() {
-						continue
-					}
-					id, ok := tenantUUIDValue(idField.Interface())
-					if !ok {
-						continue
-					}
-					parentID = id
-					foundParent = true
-					break
-				}
-				if !foundParent {
-					continue
-				}
-
-				childrenByParentID[parentID] = append(childrenByParentID[parentID], *child)
-			}
-
-			for _, result := range results {
-				if result == nil {
-					continue
-				}
-				resultID, ok := tenantUUIDValue(result.Id)
-				if !ok {
-					continue
-				}
-				result.Users = childrenByParentID[resultID]
+				result.Users = related
 			}
 		}
 	}
-
-	return results, nil
+	return nil
 }
 
 // FindPage reads a page of the Tenant rows filter finds (D60, amended), in

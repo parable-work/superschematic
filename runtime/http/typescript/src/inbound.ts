@@ -3,6 +3,7 @@ import { covers } from './auth.js';
 import { activeGrants } from './access.js';
 import type { Bucket } from './bucket.js';
 import { createLogger, type Logger } from './logger.js';
+import type { PlainRepository } from './orm.js';
 import { normaliseAddress, sameId, type ChannelIdentityRow, type Notifier, type ReplyOutcome } from './notify.js';
 import { identityLapsed, partyPrincipal, partyTablesOf, sameUUID, type PartyRef } from './parties.js';
 import type { ChannelAdapter, InboundAttachment, InboundAuthentication, InboundMessage, WebhookRequest } from './providers/channel.js';
@@ -10,7 +11,7 @@ import type { Providers } from './providers/registry.js';
 import type { QueueDefinition } from './queue-core.js';
 import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
 import type { Attachment, Attachments, RowRef } from './rowfeatures.js';
-import { sha256 } from './sha256.js';
+import { sha256Hex } from './sha256.js';
 import type { WorkerQueue } from './worker.js';
 
 /*
@@ -230,14 +231,7 @@ export class InboundError extends Error {
 
 type Values = Record<string, unknown>;
 
-interface RepositoryShape {
-  readonly def: { readonly name: string; readonly key: string; readonly notifier?: string; readonly conversations?: string; readonly party?: { readonly title?: string } };
-  findOne(filter: Values, options?: Values): Promise<Values | null>;
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-  createOne(input: Values): Promise<Values>;
-  updateOne(id: unknown, update: Values): Promise<Values>;
-  updateMany(filter: Values, update: Values): Promise<number>;
-}
+type RepositoryShape = Pick<PlainRepository, 'def' | 'findOne' | 'findMany' | 'createOne' | 'updateOne' | 'updateMany'>;
 
 function repositoriesOf(orm: object): [string, RepositoryShape][] {
   return Object.entries(orm).filter((entry): entry is [string, RepositoryShape] => {
@@ -267,10 +261,6 @@ export function emailAuthenticated(authentication: InboundAuthentication | undef
 function authenticationText(authentication: InboundAuthentication | undefined): string {
   if (!authentication) return 'the adapter reported no authentication';
   return `dmarc=${authentication.dmarc ?? 'none'} spf=${authentication.spf ?? 'none'} dkim=${authentication.dkim ?? 'none'}`;
-}
-
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 const CODE = /^[0-9A-Za-z]{4,12}$/u;
@@ -365,7 +355,7 @@ export function createInbound(options: InboundOptions): Inbound {
     for (const file of files) {
       try {
         const begun = await attachments.begin(
-          { to: { table: messageType, key: message }, name: file.name, mediaType: file.mediaType, size: file.bytes.length, sha256: hex(sha256(file.bytes)) },
+          { to: { table: messageType, key: message }, name: file.name, mediaType: file.mediaType, size: file.bytes.length, sha256: sha256Hex(file.bytes) },
           { bucket: options.bucket }
         );
         await options.bucket.put(begun.attachment.objectKey, file.bytes, { contentType: file.mediaType });

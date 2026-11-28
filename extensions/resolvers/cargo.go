@@ -3,7 +3,8 @@ package resolvers
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/BurntSushi/toml"
 
@@ -86,17 +87,6 @@ func table(m map[string]any, keys ...string) map[string]any {
 	return m
 }
 
-// sortedKeys returns a table's keys in order, so a resolution reads a
-// manifest the same way on every run.
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // crate takes the crate at dir, which the manifest named from points at.
 func (c *cargoResolution) crate(dir, from string) error {
 	name := file(dir, "Cargo.toml")
@@ -138,7 +128,7 @@ func (c *cargoResolution) crate(dir, from string) error {
 	// The dependency tables, the crate's and each target's.
 	tables := []map[string]any{m}
 	targets := table(m, "target")
-	for _, key := range sortedKeys(targets) {
+	for _, key := range slices.Sorted(maps.Keys(targets)) {
 		if t, ok := targets[key].(map[string]any); ok {
 			tables = append(tables, t)
 		}
@@ -146,7 +136,7 @@ func (c *cargoResolution) crate(dir, from string) error {
 	for _, t := range tables {
 		for _, kind := range []string{"dependencies", "dev-dependencies", "build-dependencies"} {
 			deps := table(t, kind)
-			for _, dep := range sortedKeys(deps) {
+			for _, dep := range slices.Sorted(maps.Keys(deps)) {
 				spec, ok := deps[dep].(map[string]any)
 				if !ok {
 					continue
@@ -192,13 +182,13 @@ func (c *cargoResolution) patches(dir string, m map[string]any) error {
 	from := file(dir, "Cargo.toml")
 	sources := []map[string]any{table(m, "replace")}
 	patch := table(m, "patch")
-	for _, registryName := range sortedKeys(patch) {
+	for _, registryName := range slices.Sorted(maps.Keys(patch)) {
 		if t, ok := patch[registryName].(map[string]any); ok {
 			sources = append(sources, t)
 		}
 	}
 	for _, source := range sources {
-		for _, dep := range sortedKeys(source) {
+		for _, dep := range slices.Sorted(maps.Keys(source)) {
 			spec, ok := source[dep].(map[string]any)
 			if !ok {
 				continue

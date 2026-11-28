@@ -110,3 +110,36 @@ func TestValidOpclass(t *testing.T) {
 		}
 	}
 }
+
+// TestUnquote: a quoted literal or identifier unquotes to what it holds,
+// each doubled quote inside made one, which strings.Trim did not do, and
+// QuoteLiteral's output round-trips.
+func TestUnquote(t *testing.T) {
+	for in, want := range map[string]string{
+		`'it''s'`:  `it's`,
+		`''`:       ``,
+		`''''`:     `'`,
+		`'plain'`:  `plain`,
+		`"a""b"`:   `a"b`,
+		`"order"`:  `order`,
+		`""`:       ``,
+		`name`:     `name`,
+		`"`:        `"`,
+		`'`:        `'`,
+		`"mixed'`:  `"mixed'`,
+		``:         ``,
+		`'a"b'`:    `a"b`,
+		`"it's"`:   `it's`,
+		`x'y'`:     `x'y'`,
+		`'unended`: `'unended`,
+	} {
+		if got := Unquote(in); got != want {
+			t.Errorf("Unquote(%s) = %s, want %s", in, got, want)
+		}
+	}
+	for _, s := range []string{"", "it's", "''", "a'b'c", `"`} {
+		if got := Unquote(QuoteLiteral(s)); got != s {
+			t.Errorf("Unquote(QuoteLiteral(%q)) = %q", s, got)
+		}
+	}
+}

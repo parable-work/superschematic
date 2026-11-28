@@ -1883,15 +1883,9 @@ pub fn epoch_millis(text: &str) -> Option<i64> {
         }
         _ => return None,
     };
-    // Howard Hinnant's `days_from_civil`.
-    let shifted = if month <= 2 { year - 1 } else { year };
-    let era = shifted.div_euclid(400);
-    let yoe = shifted.rem_euclid(400);
-    let mp = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second - offset;
+    let seconds =
+        crate::civil::to_days(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second
+            - offset;
     Some(seconds * 1000 + millis)
 }
 

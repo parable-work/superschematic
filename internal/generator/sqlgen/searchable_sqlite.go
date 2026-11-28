@@ -99,7 +99,7 @@ func SearchFTS(index string, quote func(string) string, fold bool) (up, down []s
 		"DROP TABLE IF EXISTS " + fts,
 	}
 	up = append(append([]string(nil), down...),
-		fmt.Sprintf("CREATE VIRTUAL TABLE %s USING fts5(%s, tokenize = %s)", fts, strings.Join(columns, ", "), stringLiteral(tokenizer)),
+		fmt.Sprintf("CREATE VIRTUAL TABLE %s USING fts5(%s, tokenize = %s)", fts, strings.Join(columns, ", "), sqlutil.QuoteLiteral(tokenizer)),
 		fmt.Sprintf("CREATE TRIGGER %s AFTER INSERT ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words (D186).\n%sEND", name("insert"), table, insert("NEW")),
 		fmt.Sprintf("CREATE TRIGGER %s AFTER UPDATE OF title, body, comments, files, source_table, source_key ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words, written again (D186).\n%s%sEND", name("update"), table, remove("OLD"), insert("NEW")),
 		fmt.Sprintf("CREATE TRIGGER %s AFTER DELETE ON %s FOR EACH ROW\nBEGIN\n  -- An index row's words, deleted with it (D186).\n%sEND", name("delete"), table, remove("OLD")),
@@ -116,13 +116,13 @@ func SearchFTS(index string, quote func(string) string, fold bool) (up, down []s
 func (q SearchQueue) sqliteEnqueue(quote func(string) string, origin, key string, when []string) string {
 	columns := make([]string, len(q.Columns))
 	for i, c := range q.Columns {
-		columns[i] = quote(unquoted(c))
+		columns[i] = quote(sqlutil.Unquote(c))
 	}
 	where := "1"
 	if len(when) > 0 {
 		where = strings.Join(when, "\n    AND ")
 	}
-	s := fmt.Sprintf("  INSERT INTO %s (%s)\n    SELECT %s, CAST(%s AS TEXT) WHERE %s", quote(unquoted(q.Table)), strings.Join(columns, ", "), stringLiteral(origin), key, where)
+	s := fmt.Sprintf("  INSERT INTO %s (%s)\n    SELECT %s, CAST(%s AS TEXT) WHERE %s", quote(sqlutil.Unquote(q.Table)), strings.Join(columns, ", "), sqlutil.QuoteLiteral(origin), key, where)
 	if q.SQLiteConflict != "" {
 		s += "\n    " + q.SQLiteConflict
 	}
@@ -133,10 +133,10 @@ func (q SearchQueue) sqliteEnqueue(quote func(string) string, origin, key string
 // insert, update and delete of a row. quote quotes an identifier as the
 // SQLite dialect does.
 func (t SearchTrigger) SQLiteTriggers(quote func(string) string) []SQLiteTrigger {
-	q := func(s string) string { return quote(unquoted(s)) }
+	q := func(s string) string { return quote(sqlutil.Unquote(s)) }
 	table, index, key := quote(t.Table), q(t.Index), q(t.Key)
 	where := func(row string) string {
-		return fmt.Sprintf("%s = %s AND %s = CAST(%s.%s AS TEXT)", q(t.IndexTable), stringLiteral(t.Origin), q(t.IndexKey), row, key)
+		return fmt.Sprintf("%s = %s AND %s = CAST(%s.%s AS TEXT)", q(t.IndexTable), sqlutil.QuoteLiteral(t.Origin), q(t.IndexKey), row, key)
 	}
 	comment := fmt.Sprintf("  -- The search index row of a row of %s (D155, D186).\n", t.Origin)
 
@@ -187,7 +187,7 @@ func (t SearchTrigger) SQLiteTriggers(quote func(string) string) []SQLiteTrigger
 // each insert, update and delete. quote quotes an identifier as the SQLite
 // dialect does.
 func (c SearchChildTrigger) SQLiteTriggers(quote func(string) string) []SQLiteTrigger {
-	q := func(s string) string { return quote(unquoted(s)) }
+	q := func(s string) string { return quote(sqlutil.Unquote(s)) }
 	table, row := quote(c.Table), q(c.RowColumn)
 	comment := fmt.Sprintf("  -- The row of %s whose text the write of %s changed (D155, D186).\n", c.Row, c.Origin)
 	trigger := func(event, body string) SQLiteTrigger {

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/format"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -317,7 +319,7 @@ func (m *model) finish() error {
 		return nil
 	}
 	fields := map[string]string{}
-	for _, owner := range sortedKeys(m.byOwner) {
+	for _, owner := range slices.Sorted(maps.Keys(m.byOwner)) {
 		g := m.byOwner[owner]
 		if other, ok := fields[g.field]; ok {
 			return fmt.Errorf("bindings: %s and %s are both field %s of Environment", other, g.describe(), g.field)
@@ -333,7 +335,7 @@ func (m *model) finish() error {
 				inGroup["Address"] = "its address"
 			}
 		}
-		for _, id := range sortedKeys(g.byID) {
+		for _, id := range slices.Sorted(maps.Keys(g.byID)) {
 			mem := g.byID[id]
 			if other, ok := inGroup[mem.field]; ok {
 				return fmt.Errorf("bindings: in %s, node %s and %s are both field %s", g.describe(), id, other, mem.field)
@@ -345,13 +347,13 @@ func (m *model) finish() error {
 		m.groups = append(m.groups, g)
 	}
 	sort.Slice(m.groups, func(i, j int) bool { return m.groups[i].field < m.groups[j].field })
-	for _, id := range sortedKeys(m.nodes) {
+	for _, id := range slices.Sorted(maps.Keys(m.nodes)) {
 		n := m.nodes[id]
 		if err := claim(n.typ, "node "+id); err != nil {
 			return err
 		}
 		inNode := map[string]string{}
-		for _, name := range sortedKeys(n.byName) {
+		for _, name := range slices.Sorted(maps.Keys(n.byName)) {
 			out := n.byName[name]
 			if other, ok := inNode[out.field]; ok {
 				return fmt.Errorf("bindings: outputs %s and %s of node %s are both field %s", other, name, id, out.field)
@@ -476,7 +478,7 @@ func (m *model) types(b *bytes.Buffer, scalar string, fieldType func(kind) strin
 		}
 		b.WriteString("}\n\n")
 	}
-	for _, id := range sortedKeys(m.nodes) {
+	for _, id := range slices.Sorted(maps.Keys(m.nodes)) {
 		n := m.nodes[id]
 		writeComment(b, "", fmt.Sprintf("%s holds the outputs of node %s.", n.typ, n.id))
 		fmt.Fprintf(b, "type %s struct {\n", n.typ)
@@ -613,7 +615,7 @@ func anyLiteral(v any) string {
 		return "float64(" + strconv.FormatFloat(v, 'g', -1, 64) + ")"
 	case map[string]any:
 		var parts []string
-		for _, key := range sortedKeys(v) {
+		for _, key := range slices.Sorted(maps.Keys(v)) {
 			parts = append(parts, strconv.Quote(key)+": "+anyLiteral(v[key]))
 		}
 		return "map[string]any{" + strings.Join(parts, ", ") + "}"
@@ -647,7 +649,7 @@ func (m *model) pulumi() []byte {
 	for _, env := range m.envs {
 		m.reader(&b, env.Resolved)
 	}
-	for _, id := range sortedKeys(m.nodes) {
+	for _, id := range slices.Sorted(maps.Keys(m.nodes)) {
 		n := m.nodes[id]
 		fmt.Fprintf(&b, "func read%s(ref *pulumi.StackReference) %s {\n\treturn %s{\n", n.typ, n.typ, n.typ)
 		for _, out := range n.outputs {
@@ -808,13 +810,4 @@ func writeComment(b *bytes.Buffer, indent, text string) {
 		line += word
 	}
 	fmt.Fprintf(b, "%s// %s\n", indent, line)
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

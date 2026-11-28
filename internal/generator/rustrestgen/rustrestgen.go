@@ -1367,9 +1367,9 @@ func templateFuncs() template.FuncMap {
 	})
 }
 
-// rustString renders a Rust string literal.
+// rustString renders a Rust string literal (rustutil.Quote).
 func rustString(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s) + `"`
+	return rustutil.Quote(s)
 }
 
 // SetReplacePaths computes dependency path fields for generated Cargo.toml.

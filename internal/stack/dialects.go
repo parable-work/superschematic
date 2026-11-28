@@ -1,6 +1,9 @@
 package stack
 
 import (
+	"maps"
+	"slices"
+
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -25,7 +28,7 @@ import (
 //
 // It runs after deriveEdges, on each sql edge.
 func (r *resolver) checkDatabaseDialects() {
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		e := r.edges[id]
 		if e.res.Kind != ir.EdgeSQL || e.to == nil || e.to.res.Dialect == "" {
 			continue

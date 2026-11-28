@@ -1,6 +1,10 @@
 package ir
 
-import "fmt"
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
 
 // FindArrayOfArrays returns the first place the schema declares an array
 // of arrays (T[][]), as "Type.field", "Type.field(arg)", "Set.op" for an
@@ -16,7 +20,7 @@ func (s *Schema) FindArrayOfArrays() (where string, found bool) {
 		return "", false
 	}
 	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
-		for _, name := range sortedStringMapKeys(types) {
+		for _, name := range slices.Sorted(maps.Keys(types)) {
 			if where, found := typeArrayOfArrays(types[name]); found {
 				return where, true
 			}

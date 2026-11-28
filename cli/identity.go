@@ -120,7 +120,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.role, "role", "admin", "the name of the role the administrator holds")
 	cmd.Flags().StringArrayVar(&flags.permissions, "permission", nil, "a permission the role carries, such as identity or orders.read (repeatable; at least one)")
 	cmd.Flags().StringVar(&flags.config, "config", "", "an identity config JSON file whose password.argon2 sets the hash's cost (default the runtime's)")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <db-service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <db-service-dir>/../../superschematic.toml)")
 	_ = cmd.MarkFlagRequired("login")
 	_ = cmd.MarkFlagRequired("permission")
 	return cmd
@@ -238,39 +238,27 @@ func writeDescriptor(d identitydesc.Descriptor, schema string) (string, error) {
 // loadIdentityService loads the DB service at servicePath as build loads
 // one service, and returns it with its schemas root.
 func loadIdentityService(cmd *cobra.Command, a *app, flags *identityBootstrapFlags, servicePath string) (*ir.Schema, string, error) {
-	absService, err := filepath.Abs(servicePath)
-	if err != nil {
-		return nil, "", fmt.Errorf("resolving service path: %w", err)
-	}
-	if info, err := os.Stat(absService); err != nil || !info.IsDir() {
-		return nil, "", fmt.Errorf("service directory not found: %s", servicePath)
-	}
-	schemasRoot := filepath.Dir(filepath.Dir(absService))
-	names, err := resolveNaming(flags.namingPath, schemasRoot)
+	svc, err := a.openService(servicePath, flags.namingPath)
 	if err != nil {
 		return nil, "", err
 	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return nil, "", err
-	}
-	if targetImportsSiblingSentinels(absService, reg) || configImportsSentinels(absService, names) {
-		if err := buildplan.EnsureSentinels(filepath.Dir(absService), reg, cmd.ErrOrStderr()); err != nil {
+	if targetImportsSiblingSentinels(svc.dir, svc.reg) || configImportsSentinels(svc.dir, svc.names) {
+		if err := buildplan.EnsureSentinels(filepath.Dir(svc.dir), svc.reg, cmd.ErrOrStderr()); err != nil {
 			return nil, "", err
 		}
 	}
-	opts := []loader.Option{loader.WithNaming(names), loader.WithRegistry(reg)}
+	opts := []loader.Option{loader.WithNaming(svc.names), loader.WithRegistry(svc.reg)}
 	loadDependency := memoizedSchemas(func(name string) (*ir.Schema, error) {
-		return loader.LoadService(filepath.Join(absService, "..", name), opts...)
+		return loader.LoadService(filepath.Join(svc.dir, "..", name), opts...)
 	})
-	schema, err := loader.LoadService(absService, append(opts, loader.WithDependencyLoader(loadDependency))...)
+	schema, err := loader.LoadService(svc.dir, append(opts, loader.WithDependencyLoader(loadDependency))...)
 	if err != nil {
 		return nil, "", err
 	}
 	if schema.Kind != ir.SchemaKindDB {
 		return nil, "", fmt.Errorf("identity bootstrap: %s is of kind %s; bootstrap takes the DB service whose schema has the User trait", schema.Name, schema.Kind)
 	}
-	return schema, schemasRoot, nil
+	return schema, svc.schemasRoot, nil
 }
 
 // authDBCatalogs reads the permission catalogs the build wrote under the

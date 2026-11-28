@@ -1,42 +1,22 @@
 package tsutil
 
 import (
-	"strings"
 	"text/template"
-	"unicode"
+
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 )
 
-// titleCase converts the first letter of a string to uppercase.
-func titleCase(s string) string {
-	if s == "" {
-		return s
-	}
-	runes := []rune(s)
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
-}
-
-// BaseTemplateFuncs returns the base set of template functions for TypeScript generation
-// Generators can add their own custom functions by merging with this map
+// BaseTemplateFuncs returns the template functions of the TypeScript
+// generators: codegen's, none of which it overrides, so a name means the
+// same in every generator's templates, and the TypeScript ones.
+// joinCamelCase is ToCamelCase and toClassName ToClassName, the names the
+// TypeScript SDK gives its members and classes; toCamelCase stays
+// codegen.ToCamelCase. Generators can add their own functions by merging
+// with this map.
 func BaseTemplateFuncs() template.FuncMap {
-	return template.FuncMap{
-		// String manipulation
-		"lower":     strings.ToLower,
-		"upper":     strings.ToUpper,
-		"title":     titleCase,
-		"trimSpace": strings.TrimSpace,
-		"join":      func(strs []string, sep string) string { return strings.Join(strs, sep) },
-		"hasPrefix": strings.HasPrefix,
-		"hasSuffix": strings.HasSuffix,
-		"replace":   strings.ReplaceAll,
-
-		// Case conversion
-		"toCamelCase": ToCamelCase,
-		"toClassName": ToClassName,
-		"toSnakeCase": ToSnakeCase,
-
-		// TypeScript-specific
-		"escapeString":      EscapeString,
+	return codegen.MergeTemplateFuncs(codegen.BaseTemplateFuncs(), template.FuncMap{
+		"joinCamelCase":     ToCamelCase,
+		"toClassName":       ToClassName,
 		"typescriptVersion": func() string { return TypeScriptVersion },
-	}
+	})
 }

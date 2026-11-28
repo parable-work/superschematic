@@ -51,27 +51,8 @@ func pythonFieldDefaultExpr(field codegen.FieldInfo, enumLookup codegen.EnumLook
 	return "", false
 }
 
-// pythonQuote produces a double-quoted Python string literal with control
-// characters, quotes, and backslashes escaped.
+// pythonQuote produces a double-quoted Python string literal
+// (pythonEscape).
 func pythonQuote(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
+	return `"` + pythonEscape(s) + `"`
 }

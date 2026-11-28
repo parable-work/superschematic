@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -24,7 +25,7 @@ import (
 // deployable. It then refuses a deployable whose API uses a feature that
 // needs a runtime interface no slot of the API fills (checkCoverage).
 func (r *resolver) resolveProviders() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if !d.res.Kind.RunsCode() || d.res.Kind == ir.DeployableSite {
 			continue
@@ -40,7 +41,7 @@ func (r *resolver) resolveProviders() {
 				continue
 			}
 			var filled []string
-			for _, slot := range sortedKeys(svc.ProviderSlots) {
+			for _, slot := range slices.Sorted(maps.Keys(svc.ProviderSlots)) {
 				p, ok := r.slotProvider(d, svc, slot, bindings)
 				if !ok {
 					continue
@@ -127,7 +128,7 @@ func (r *resolver) unreadProviderSetting(d *deployable, field string) bool {
 		if svc == nil || svc.Kind != ir.SchemaKindAPI {
 			continue
 		}
-		for _, slot := range sortedKeys(svc.ProviderSlots) {
+		for _, slot := range slices.Sorted(maps.Keys(svc.ProviderSlots)) {
 			named, known := r.slotValue(d, slot)
 			for _, p := range svc.Providers {
 				if p == nil || p.Implements != svc.ProviderSlots[slot] {
@@ -180,7 +181,7 @@ func (r *resolver) checkCoverage(d *deployable, svc *Service, filled []string) {
 		}
 		contract, _ := ir.RuntimeContractOf(use.Interface)
 		var slots []string
-		for _, slot := range sortedKeys(svc.ProviderSlots) {
+		for _, slot := range slices.Sorted(maps.Keys(svc.ProviderSlots)) {
 			if svc.ProviderSlots[slot] == use.Interface {
 				slots = append(slots, slot)
 			}

@@ -2,6 +2,7 @@ import { ObjectNotFoundError, type Bucket } from './bucket.js';
 import { createLogger, type Logger } from './logger.js';
 import { readsMediaType, type FileProcessor, type PreviewOptions } from './providers/files.js';
 import type { Providers } from './providers/registry.js';
+import { readCapped } from './read-capped.js';
 import { previewObjectOf, type Attachments } from './rowfeatures.js';
 
 /*
@@ -137,24 +138,7 @@ async function readObject(bucket: Bucket, name: string, maxBytes: number): Promi
     await read.body.cancel().catch(() => undefined);
     throw new Unprocessable(`object ${name} holds ${read.object.size} bytes, more than the ${maxBytes} a pass reads`);
   }
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  const reader = read.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new Unprocessable(`object ${name} holds more than the ${maxBytes} bytes a pass reads`);
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.byteLength;
-  }
-  return out;
+  const bytes = await readCapped(read.body, maxBytes);
+  if (!bytes) throw new Unprocessable(`object ${name} holds more than the ${maxBytes} bytes a pass reads`);
+  return bytes;
 }

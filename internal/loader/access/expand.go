@@ -14,6 +14,7 @@ package access
 import (
 	"slices"
 
+	"github.com/parable-work/superschematic/internal/loader/fielddef"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -177,25 +178,25 @@ func fillAudienceQueue(schema *ir.Schema, queue string) {
 // fillGrants fills an @accessGrants class's fields: one row per grant.
 func fillGrants(td *ir.TypeDef) {
 	td.Fields = []*ir.FieldDef{
-		keyField(),
-		required(ir.AccessGrantHolderField, uuidScalar, "The principal the grant lets reach rows: a party's or an agent run's id."),
-		required(ir.AccessGrantHolderKindField, "string", "The kind of that principal: party or agent."),
-		required(ir.AccessGrantRoleField, "string", "The name of the role, a row of the UserRole table, whose permissions the holder acts with and whose reaches say which rows beside the target it reaches."),
-		required(ir.AccessGrantTargetTypeField, "string", "The table of the target row, by its type's name."),
-		required(ir.AccessGrantTargetIDField, uuidScalar, "The target row's key."),
-		required(ir.AccessGrantStartsAtField, dateTimeScalar, "When the grant starts."),
-		optional(ir.AccessGrantEndsAtField, dateTimeScalar, "When the grant ends; null for no date."),
-		optional(ir.AccessGrantEndsWhenFieldField, "string", "The target's field whose state ends the grant; null for no such end."),
-		optional(ir.AccessGrantEndsWhenStateField, "string", "The state of that field that ends the grant."),
-		optional(ir.AccessGrantRevokedAtField, dateTimeScalar, "When the grant was revoked."),
+		fielddef.Key(),
+		fielddef.Required(ir.AccessGrantHolderField, uuidScalar, "The principal the grant lets reach rows: a party's or an agent run's id."),
+		fielddef.Required(ir.AccessGrantHolderKindField, "string", "The kind of that principal: party or agent."),
+		fielddef.Required(ir.AccessGrantRoleField, "string", "The name of the role, a row of the UserRole table, whose permissions the holder acts with and whose reaches say which rows beside the target it reaches."),
+		fielddef.Required(ir.AccessGrantTargetTypeField, "string", "The table of the target row, by its type's name."),
+		fielddef.Required(ir.AccessGrantTargetIDField, uuidScalar, "The target row's key."),
+		fielddef.Required(ir.AccessGrantStartsAtField, dateTimeScalar, "When the grant starts."),
+		fielddef.Optional(ir.AccessGrantEndsAtField, dateTimeScalar, "When the grant ends; null for no date."),
+		fielddef.Optional(ir.AccessGrantEndsWhenFieldField, "string", "The target's field whose state ends the grant; null for no such end."),
+		fielddef.Optional(ir.AccessGrantEndsWhenStateField, "string", "The state of that field that ends the grant."),
+		fielddef.Optional(ir.AccessGrantRevokedAtField, dateTimeScalar, "When the grant was revoked."),
 		{
 			Name:    ir.AccessGrantTokenHashField,
 			Comment: "The SHA-256 of the token the holder presents, which only the holder has; null for a grant resolved another way.",
 			TypeRef: ir.TypeRef{Name: sha256Scalar},
 			Unique:  true,
 		},
-		required(ir.AccessGrantCreatedAtField, dateTimeScalar, ""),
-		optional(ir.AccessGrantCreatedByField, uuidScalar, "Who made the grant."),
+		fielddef.Required(ir.AccessGrantCreatedAtField, dateTimeScalar, ""),
+		fielddef.Optional(ir.AccessGrantCreatedByField, uuidScalar, "Who made the grant."),
 	}
 	for _, fd := range td.Fields {
 		fd.Origin = ir.OriginAccess
@@ -210,17 +211,17 @@ func fillGrants(td *ir.TypeDef) {
 // records.
 func fillLog(td *ir.TypeDef) {
 	td.Fields = []*ir.FieldDef{
-		keyField(),
-		required(ir.AccessLogAtField, dateTimeScalar, "When the access happened."),
-		required(ir.AccessLogKindField, "string", "What happened: reveal, agentRead, keyCall or grantCall."),
-		optional(ir.AccessLogPrincipalField, "string", "The subject of the principal that acted."),
-		optional(ir.AccessLogPrincipalKindField, "string", "Its kind: user, party or agent."),
-		optional(ir.AccessLogActingForField, "string", "The subject the principal acted for; null when it acted for itself."),
-		optional(ir.AccessLogCredentialField, "string", "The API key's or the grant's id the call came with; null for a session."),
-		optional(ir.AccessLogOperationField, "string", "The operation the call ran."),
-		optional(ir.AccessLogTargetTypeField, "string", "The table of the row read."),
-		optional(ir.AccessLogTargetIDField, "string", "The key of the row read."),
-		optional(ir.AccessLogFieldField, "string", "The field revealed."),
+		fielddef.Key(),
+		fielddef.Required(ir.AccessLogAtField, dateTimeScalar, "When the access happened."),
+		fielddef.Required(ir.AccessLogKindField, "string", "What happened: reveal, agentRead, keyCall or grantCall."),
+		fielddef.Optional(ir.AccessLogPrincipalField, "string", "The subject of the principal that acted."),
+		fielddef.Optional(ir.AccessLogPrincipalKindField, "string", "Its kind: user, party or agent."),
+		fielddef.Optional(ir.AccessLogActingForField, "string", "The subject the principal acted for; null when it acted for itself."),
+		fielddef.Optional(ir.AccessLogCredentialField, "string", "The API key's or the grant's id the call came with; null for a session."),
+		fielddef.Optional(ir.AccessLogOperationField, "string", "The operation the call ran."),
+		fielddef.Optional(ir.AccessLogTargetTypeField, "string", "The table of the row read."),
+		fielddef.Optional(ir.AccessLogTargetIDField, "string", "The key of the row read."),
+		fielddef.Optional(ir.AccessLogFieldField, "string", "The field revealed."),
 	}
 	for _, fd := range td.Fields {
 		fd.Origin = ir.OriginAccess
@@ -229,18 +230,6 @@ func fillLog(td *ir.TypeDef) {
 		ir.IndexDef{Keys: []string{ir.AccessLogAtField}, Name: "at", Origin: ir.OriginAccess},
 		ir.IndexDef{Keys: []string{ir.AccessLogPrincipalField, ir.AccessLogAtField}, Name: "principal", Origin: ir.OriginAccess},
 	)
-}
-
-func keyField() *ir.FieldDef {
-	return &ir.FieldDef{Name: "id", TypeRef: ir.TypeRef{Name: uuidScalar}, Required: true, Key: true, AutoGenerated: true}
-}
-
-func required(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}, Required: true}
-}
-
-func optional(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}}
 }
 
 func hasField(td *ir.TypeDef, name string) bool {

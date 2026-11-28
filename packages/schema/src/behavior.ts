@@ -107,22 +107,45 @@ export interface WorkflowTransition {
 
 /** Comments' config; every member is optional. */
 export interface CommentsConfig {
-  /** The longest body a post or an edit may give, in code points, 1 to 40000; 40000 when absent. */
+  /** The longest body a post, an edit or a finish may give, and the longest draft appendDraft builds, in code points, 1 to 40000; 40000 when absent. */
   readonly maxBodyLength?: number;
   /** How long after posting its author may edit a message, in milliseconds, at least 1000; no limit when absent. A caller holding moderatePermission is not held to it. */
   readonly editWindowMs?: number;
-  /** The block kinds a post or an edit may give; every kind when absent, none when empty. */
+  /** How long a composing message's author may append nothing before the engine's runner interrupts it, in milliseconds, 5000 to 3600000; 60000 when absent. */
+  readonly composeTimeoutMs?: number;
+  /** The most composing messages one subject may have on an instance at once, 1 to 50; begin refuses another. 5 when absent. */
+  readonly maxDrafts?: number;
+  /** The block kinds a post, an edit or a finish may give; every kind when absent, none when empty. */
   readonly blocks?: readonly CommentsBlockKind[];
-  /** The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges. */
+  /** What an attachment block may describe. The engine keeps a file's description, never its bytes: the deployment stores and serves the file. */
+  readonly attachments?: {
+    /** The largest file an attachment block may describe, in bytes, at least 1; no limit when absent. */
+    readonly maxBytes?: number;
+    /** The media types an attachment may have, each type/subtype or type/* in lower case; any when absent. */
+    readonly mediaTypes?: readonly string[];
+    /** The URI schemes an attachment's uri may use, in lower case; https alone when absent. Schemes that run code or carry the bytes themselves are refused. */
+    readonly schemes?: readonly string[];
+  };
+  /** The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, move the anchor of a code block on another's message, and purge. Absent, only a message's author edits, deletes or interrupts it, and nobody purges. */
   readonly moderatePermission?: string;
   /** The permission a caller needs to pin and unpin. Absent, any caller the policy lets write may. */
   readonly pinPermission?: string;
   /** The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does. */
   readonly resolvePermission?: string;
+  /** The permission that lets a caller move the anchor of a code block on another's message with moveAnchor. Absent, only the message's author and a caller holding moderatePermission may. */
+  readonly anchorPermission?: string;
+  /** The permission a notifier or an agent dispatcher needs to claim and settle the deliveries of this type's messages. Absent, nobody claims them, and they serve only the inbox. */
+  readonly deliverPermission?: string;
+  /** How many times a delivery is claimed before a failure, or a claim that lapses, drops it, 1 to 20; 5 when absent. */
+  readonly maxAttempts?: number;
+  /** How long after its first failure a delivery is due again, in milliseconds, 1000 to 3600000, doubled after each later failure up to an hour; 30000 when absent. */
+  readonly retryBackoffMs?: number;
+  /** How long a delivery is kept from when it was made, in milliseconds, a day to a year, whatever its state but a live claim; 30 days when absent. */
+  readonly deliveryRetentionMs?: number;
 }
 
-/** A kind of block a Comments message may hold: a reference to another instance, or an action card. */
-export type CommentsBlockKind = "ref" | "action";
+/** A kind of block a Comments message may hold: a reference to another instance, an action card, code, or an attachment. */
+export type CommentsBlockKind = "ref" | "action" | "code" | "attachment";
 
 /** Revisions' config. */
 export interface RevisionsConfig {

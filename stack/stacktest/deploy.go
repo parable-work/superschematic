@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -486,7 +487,7 @@ func (s *FakeSites) Fetch(_ context.Context, run registry.Run, site, digest, des
 func (s *FakeSites) Files(site, digest string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return sortedNames(s.files[site+"@"+digest])
+	return slices.Sorted(maps.Keys(s.files[site+"@"+digest]))
 }
 
 // Config returns the config last written for a site under digest.
@@ -574,7 +575,7 @@ func (b *FakeBundles) Fetch(_ context.Context, run registry.Run, deployable, dig
 func (b *FakeBundles) Files(deployable, digest string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return sortedNames(b.files[deployable+"@"+digest])
+	return slices.Sorted(maps.Keys(b.files[deployable+"@"+digest]))
 }
 
 // FakePreDestroy readies nothing for a destroy (D64): it records each run
@@ -646,16 +647,6 @@ func writeFiles(dest string, files map[string]storedFile) error {
 		}
 	}
 	return nil
-}
-
-// sortedNames returns the names of files, sorted.
-func sortedNames(files map[string]storedFile) []string {
-	var names []string
-	for name := range files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // archiveEntries lists a gzipped tarball's entries.

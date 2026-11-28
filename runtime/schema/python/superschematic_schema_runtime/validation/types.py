@@ -7,7 +7,7 @@ Python uses snake_case attributes; the JSON Schema source uses camelCase
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
 
 TypeKind = Literal["object", "input"]
@@ -250,7 +250,9 @@ class Schema:
     mutations: OperationSet | None = None
 
 
-SchemaInput = Schema | dict[str, Any] | str | bytes
+# typing.Union, not `|`: this alias is evaluated at import, and a `|` over
+# classes is Python 3.10's (requires-python is 3.9).
+SchemaInput = Union[Schema, dict[str, Any], str, bytes]
 
 
 __all__ = [

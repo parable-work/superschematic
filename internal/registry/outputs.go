@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	validator "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 )
 
 // Target languages accepted in the outputs block (the TargetLanguage enum in
@@ -438,11 +438,7 @@ func (r *Registry) validateOutputSections(sections map[string]json.RawMessage) e
 		if !ok || spec.compiledOutput == nil {
 			continue
 		}
-		instance, err := validator.UnmarshalJSON(bytes.NewReader(section))
-		if err != nil {
-			return fmt.Errorf("outputs.%s: %w", spec.OutputKey, err)
-		}
-		if err := spec.compiledOutput.Validate(instance); err != nil {
+		if err := jsonschemas.Validate(spec.compiledOutput, section); err != nil {
 			return fmt.Errorf("outputs.%s: %w", spec.OutputKey, err)
 		}
 	}

@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -70,7 +72,7 @@ func audienceOf(typeName string, args []any) (*ir.AudienceDef, error) {
 	if !ok {
 		return nil, ArgErrorf(0, "@audience on %s takes an options object: %s", typeName, shape)
 	}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		if key == "queue" {
 			queue, err := classOrName(obj[key])
 			if err != nil {

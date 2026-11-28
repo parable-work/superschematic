@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"maps"
 	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -24,7 +25,7 @@ import (
 // the platform's NoIdentity reason. It runs once every deployable is
 // placed.
 func (r *resolver) checkIdentityDatabases() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.platform.NoIdentity == "" || len(d.platform.IdentityDatabases) == 0 {
 			continue
@@ -88,22 +89,22 @@ func (r *resolver) identityFields(d *deployable) map[string]string {
 // config field, an edge's derived field or a callers field takes, by its
 // name or a name it begins with and an underscore, either way round.
 func (r *resolver) checkIdentityFields(d *deployable, identity, callers map[string]string, derived map[string]*edge) {
-	for _, name := range sortedKeys(identity) {
+	for _, name := range slices.Sorted(maps.Keys(identity)) {
 		api := identity[name]
 		claims := func(other string) bool {
 			return ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name)
 		}
-		for _, fieldName := range sortedKeys(d.fields) {
+		for _, fieldName := range slices.Sorted(maps.Keys(d.fields)) {
 			if f := d.fields[fieldName]; claims(f.name) {
 				r.fail(CodeFieldCollision, "%s %s: config field %s of %s collides with %s, the identity config field of %s", d.res.Kind, d.res.Name, f.name, f.declaring, name, api)
 			}
 		}
-		for _, other := range sortedKeys(derived) {
+		for _, other := range slices.Sorted(maps.Keys(derived)) {
 			if claims(other) {
 				r.fail(CodeFieldCollision, "%s %s: %s, the field edge %s derives, collides with %s, the identity config field of %s", d.res.Kind, d.res.Name, other, derived[other].res.ID, name, api)
 			}
 		}
-		for _, other := range sortedKeys(callers) {
+		for _, other := range slices.Sorted(maps.Keys(callers)) {
 			if claims(other) {
 				r.fail(CodeFieldCollision, "%s %s: %s, the callers field of %s, collides with %s, the identity config field of %s", d.res.Kind, d.res.Name, other, callers[other], name, api)
 			}
@@ -116,7 +117,7 @@ func (r *resolver) checkIdentityFields(d *deployable, identity, callers map[stri
 // identity config as a default literal, otherwise not at all.
 func (r *resolver) identityBindings(d *deployable, identity map[string]string) []*ir.Binding {
 	var out []*ir.Binding
-	for _, name := range sortedKeys(identity) {
+	for _, name := range slices.Sorted(maps.Keys(identity)) {
 		f := &field{name: name, declaring: "the identity config of " + identity[name]}
 		if def := d.platform.IdentityConfig; def != "" {
 			f.def = &def

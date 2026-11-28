@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -58,7 +60,7 @@ func searchableOf(typeName string, args []any) (*ir.SearchableDef, error) {
 		}
 		return &b, nil
 	}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		value := obj[key]
 		var err error
 		switch key {

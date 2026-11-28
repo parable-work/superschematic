@@ -1,5 +1,6 @@
 import type { GrantReach, Principal } from './auth.js';
 import { activeGrants, grantEnded, permissionsOf, reachesOf, rolesByName, type GrantRow } from './access.js';
+import type { PlainRepository } from './orm.js';
 import { uuidValue } from './uuid.js';
 
 /*
@@ -32,11 +33,7 @@ export interface PartyRef {
 
 type Values = Record<string, unknown>;
 
-interface RepositoryShape {
-  readonly def?: { readonly name?: string; readonly key?: string; readonly access?: string; readonly party?: { readonly title?: string } };
-  findOne(filter: Values): Promise<Values | null>;
-  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
-}
+type RepositoryShape = Pick<PlainRepository, 'def' | 'findOne' | 'findMany'>;
 
 function repositoriesOf(orm: object): [string, RepositoryShape][] {
   return Object.entries(orm).filter((entry): entry is [string, RepositoryShape] => {

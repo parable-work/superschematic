@@ -1,5 +1,6 @@
 import type { OperationServiceCallers, RequestContext } from './operation.js';
 import { serviceForbidden, serviceUnauthorized, serviceUnavailable } from './problem.js';
+import { readCapped } from './read-capped.js';
 import { sha256 } from './sha256.js';
 
 /*
@@ -493,27 +494,8 @@ export async function fetchKeySet(url: string, headers: Record<string, string> =
     await response.body?.cancel();
     throw tooLarge();
   }
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  if (response.body) {
-    const reader = response.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_KEY_SET_BYTES) {
-        await reader.cancel();
-        throw tooLarge();
-      }
-      chunks.push(value);
-    }
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const bytes = await readCapped(response.body, MAX_KEY_SET_BYTES);
+  if (!bytes) throw tooLarge();
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 

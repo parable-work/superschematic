@@ -1279,27 +1279,10 @@ fn render(symbol: &Symbol, bound: &Bound, whole: bool) -> Value {
 }
 
 /// An instant in epoch milliseconds as JavaScript's `toISOString` writes
-/// it: `YYYY-MM-DDTHH:MM:SS.mmmZ`.
+/// it: `YYYY-MM-DDTHH:MM:SS.mmmZ`, a year outside 0 to 9999 as a sign and
+/// six digits.
 pub fn iso_of(ms: i64) -> String {
-    let days = ms.div_euclid(86_400_000);
-    let of_day = ms.rem_euclid(86_400_000);
-    // Howard Hinnant's civil_from_days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        of_day / 3_600_000,
-        of_day / 60_000 % 60,
-        of_day / 1000 % 60,
-        of_day % 1000
-    )
+    superschematic_engine::civil::iso(ms)
 }
 
 /// An instant in epoch milliseconds as the version graph's canonical
@@ -1307,7 +1290,8 @@ pub fn iso_of(ms: i64) -> String {
 /// without trailing zeros and left out when zero.
 pub fn canonical_iso_of(ms: i64) -> String {
     let iso = iso_of(ms);
-    let (whole, fraction) = iso.split_at(19);
+    // `.mmmZ` ends every text iso_of writes.
+    let (whole, fraction) = iso.split_at(iso.len() - 5);
     let digits = fraction.trim_start_matches('.').trim_end_matches('Z');
     let digits = digits.trim_end_matches('0');
     if digits.is_empty() {
@@ -1344,14 +1328,7 @@ pub fn ms_of_iso(text: &str) -> Option<i64> {
         _ => return None,
     };
     let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
-    // Howard Hinnant's days_from_civil.
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = y.div_euclid(400);
-    let yoe = y.rem_euclid(400);
-    let mp = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
+    let days = superschematic_engine::civil::to_days(year, month, day);
     let ms = days * 86_400_000 + hour * 3_600_000 + minute * 60_000 + second * 1000 + milli;
     (iso_of(ms) == text || canonical_iso_of(ms) == text).then_some(ms)
 }

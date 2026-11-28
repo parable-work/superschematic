@@ -150,6 +150,24 @@ func TestValidateType_RequiredEmptyString(t *testing.T) {
 	assert.Equal(t, []ValidationError{{Validator: "required", Message: "required field"}}, errs.GetFieldErrors("name"))
 }
 
+// A required String or ID holding "" reports that it is required, and none
+// of its rules: the TS, Rust and Python validators stop there too.
+func TestValidateType_RequiredEmptyBuiltinStringSkipsItsRules(t *testing.T) {
+	minLength := 3
+	s := ir.NewSchema("test", ir.SchemaKindGeneral)
+	s.Types["Account"] = &ir.TypeDef{
+		Name: "Account",
+		Fields: []*ir.FieldDef{
+			{Name: "handle", TypeRef: ir.TypeRef{Name: "String"}, Required: true,
+				ValueRules: ir.ValueRules{ValidateMinLength: &minLength, ValidatePattern: "^[a-z]+$"}},
+		},
+	}
+
+	errs := New(s).ValidateType("Account", map[string]any{"handle": ""})
+
+	assert.Equal(t, []ValidationError{{Validator: "required", Message: "required field"}}, errs.GetFieldErrors("handle"))
+}
+
 func TestValidateType_MaxLength(t *testing.T) {
 	schema := testSchema()
 	v := New(schema)

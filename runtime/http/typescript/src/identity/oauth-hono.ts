@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Context, Env, Hono } from 'hono';
 import { mountManualOperation, type RouterRuntimeOptions } from '../hono.js';
 import type { OperationSpec } from '../operation.js';
+import { readCapped } from '../read-capped.js';
 import { requestHost } from './crossorigin.js';
 import { bearerChallenge, discoveryPaths, publicBaseOf, OAUTH_AUTHORIZE_PATH, OAUTH_CONSENT_PATH, OAUTH_REGISTER_PATH, OAUTH_REVOKE_PATH, OAUTH_TOKEN_PATH } from './oauth-protocol.js';
 import type { OAuthAnswer, OAuthServer } from './oauth.js';
@@ -72,29 +73,17 @@ function oauthError(status: number, error: string, description: string, headers:
   return json({ status, body: { error, error_description: description } }, headers);
 }
 
-async function readCapped(request: Request): Promise<string | undefined> {
-  if (!request.body) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks));
+/** The request's body as text, or undefined past MAX_BODY_BYTES. */
+async function readText(request: Request): Promise<string | undefined> {
+  const bytes = await readCapped(request.body, MAX_BODY_BYTES);
+  return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
 }
 
 /** A form-encoded body's parameters; undefined for a body of another type, or one too large. */
 async function formOf(request: Request): Promise<URLSearchParams | undefined> {
   const type = (request.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
   if (type !== 'application/x-www-form-urlencoded') return undefined;
-  const text = await readCapped(request);
+  const text = await readText(request);
   return text === undefined ? undefined : new URLSearchParams(text);
 }
 
@@ -201,7 +190,7 @@ export function mountOAuthRoutes<E extends Env = Env>(app: Hono<E>, service: Ide
     mount(routeSpec('register', 'POST', OAUTH_REGISTER_PATH, OAUTH_REGISTER_RATE_LIMIT), async c => {
       const type = (c.req.header('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
       if (type !== 'application/json') return oauthError(400, 'invalid_client_metadata', 'The registration is a JSON body.');
-      const text = await readCapped(c.req.raw);
+      const text = await readText(c.req.raw);
       if (text === undefined) return oauthError(400, 'invalid_client_metadata', 'The registration is larger than 16 KB.');
       let body: unknown;
       try {

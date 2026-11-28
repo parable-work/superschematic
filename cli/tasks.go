@@ -63,7 +63,7 @@ Examples:
 		},
 	}
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the committed task file is not what would be written")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml)")
 	cmd.AddCommand(newTasksPlanCmd(a))
 	cmd.AddCommand(newTasksInputsCmd(a))
 	cmd.AddCommand(newTasksReachCmd(a))
@@ -83,23 +83,11 @@ type tasksService struct {
 
 // openTasksService loads the Tasks service at servicePath.
 func openTasksService(a *app, servicePath, namingPath, command string) (*tasksService, error) {
-	absService, err := filepath.Abs(servicePath)
-	if err != nil {
-		return nil, fmt.Errorf("resolving service path: %w", err)
-	}
-	if info, err := os.Stat(absService); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("service directory not found: %s", servicePath)
-	}
-	schemasRoot := filepath.Dir(filepath.Dir(absService))
-	names, err := resolveNaming(namingPath, schemasRoot)
+	svc, err := a.openService(servicePath, namingPath)
 	if err != nil {
 		return nil, err
 	}
-	reg, err := a.resolveRegistry(names)
-	if err != nil {
-		return nil, err
-	}
-	version, err := openSchemaVersion(filepath.Dir(absService), names, reg)
+	version, err := openSchemaVersion(filepath.Dir(svc.dir), svc.names, svc.reg)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +96,7 @@ func openTasksService(a *app, servicePath, namingPath, command string) (*tasksSe
 		version.close()
 		return nil, err
 	}
-	if opened.service, err = version.serviceAt(absService); err != nil {
+	if opened.service, err = version.serviceAt(svc.dir); err != nil {
 		return fail(err)
 	}
 	if opened.service.Config.Kind != ir.SchemaKindTasks {
@@ -119,7 +107,7 @@ func openTasksService(a *app, servicePath, namingPath, command string) (*tasksSe
 		return fail(err)
 	}
 	opened.schema = schema
-	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
+	outputs, err := registry.ParseOutputs(cfg.Outputs, svc.reg)
 	if err != nil {
 		return fail(err)
 	}
@@ -131,7 +119,7 @@ func openTasksService(a *app, servicePath, namingPath, command string) (*tasksSe
 			return fail(fmt.Errorf("%s: %s: %w", command, opened.service.Name, err))
 		}
 	}
-	if opened.gitRoot, err = tasksgen.GitRoot(absService); err != nil {
+	if opened.gitRoot, err = tasksgen.GitRoot(svc.dir); err != nil {
 		return fail(err)
 	}
 	return opened, nil
@@ -276,7 +264,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.file, "file", "", "the task file's path from the repository root, as the Tasks service's outputs.tasks.install names it (required)")
 	cmd.Flags().StringVar(&flags.base, "base", "", "the commit the plan's commit lands on")
 	cmd.Flags().StringVar(&flags.repo, "repo", ".", "a directory of the repository")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: the defaults)")
+	addNamingFlag(cmd, &flags.namingPath, "(default: the defaults)")
 	cmd.Flags().BoolVar(&flags.sandbox, "sandbox", false, "hold the process to a resolver's rules while it resolves: no program, no socket, no file (Linux on amd64 or arm64)")
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "write what the plan cost, by resolver kind, to standard error")
 	return cmd
@@ -432,7 +420,7 @@ Example:
 			return runTasksInputs(cmd, a, flags, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <service-dir>/../../superschematic.toml)")
 	return cmd
 }
 

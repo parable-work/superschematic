@@ -16,7 +16,7 @@ export GOTOOLCHAIN := go$(GO_VERSION)
 # here uses that toolchain, whatever rustup's default is, unless
 # RUSTUP_TOOLCHAIN already names one: cargo's own, and maturin's when uv
 # builds the Python binding. The two archive scripts set it to RUST_VERSION
-# regardless (scripts/superscalar-dep.sh says why).
+# regardless (scripts/lib/archive.sh says why).
 export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 
 # The Go binding of superscalar is cgo against a static archive that
@@ -53,7 +53,8 @@ CORE_BIN := bin/superschematic-core
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
-        go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
+        go-goldens catalog-check schema-file-types schema-file-types-check behavior-config-types behavior-config-types-check \
+        behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust \
         engine-rust-soak engine-archive engine-go engine-link-check rules-archive \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
@@ -123,7 +124,7 @@ go-lint:
 # run from the Go module that holds it, with an hour each: with the
 # TypeScript gates on, extensions/topcoat's alone outrun go test's ten
 # minutes.
-go-goldens: schema-file-types
+go-goldens: schema-file-types behavior-config-types
 	@for p in $$(grep -rl 'flag.Bool("update"' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
 		p=./$${p#./}; m=$$p; while [ ! -f $$m/go.mod ]; do m=$$(dirname $$m); done; \
 		(cd $$m && go test -count=1 -timeout 60m .$${p#$$m} -update) || exit 1; done
@@ -144,6 +145,17 @@ schema-file-types:
 
 schema-file-types-check:
 	go run ./internal/tools/schemafiletypes -check
+
+# packages/schema/src/behavior-config-schemas.ts, each engine behavior's
+# configSchema as a TypeScript type, is written from the core's behavior
+# declarations (internal/registry/behaviors), and behavior-config.typecheck.ts
+# holds behavior.ts's config types to it. CI fails when the committed file
+# differs.
+behavior-config-types:
+	go run ./internal/tools/behaviorconfigtypes
+
+behavior-config-types-check:
+	go run ./internal/tools/behaviorconfigtypes -check
 
 # The gcp target's pinned provider schemas (extensions/gcp/schemas) are
 # extracted from the pulumi-gcp release extensions/gcp/schemas/pulumi-gcp.json
@@ -204,6 +216,7 @@ behaviors:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/rules --out $(RULES_RUST_DECLARATIONS)
+	go run ./internal/tools/behaviorconfigtypes
 
 behaviors-check:
 	go run ./internal/tools/behaviorclasses -check
@@ -229,14 +242,15 @@ ts:
 	examples/engine-jobs/scripts/check.sh
 	examples/runtime-providers/scripts/check.sh
 
-# The version-graph core's Python binding: cargo test runs the binding's own
+# The schema runtime's tests run under the default Python and under 3.9, the
+# floor its pyproject.toml declares. The version-graph core's Python binding: cargo test runs the binding's own
 # unit tests, uv builds the PyO3 extension with maturin into the package's
 # environment, then pytest runs every core vector through it and the
 # engine's tests that need no database, under the default Python and under
 # 3.9, the floor its pyproject.toml declares. The Postgres tests skip here;
 # versiongraph-scenarios-python runs them.
 python:
-	cd runtime/schema/python && uv run pytest -q
+	cd runtime/schema/python && uv run pytest -q && uv run --python 3.9 --isolated pytest -q
 	cd runtime/versiongraph/python && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo test && uv run pytest -q && uv run --python 3.9 --isolated pytest -q
 
@@ -570,7 +584,7 @@ versions:
 	python3 scripts/bump_version.py check
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: go-test catalog-check schema-file-types-check behaviors-check ts python rust engine-rust engine-go engine-link-check cli-smoke example-migrations versions
+test: go-test catalog-check schema-file-types-check behavior-config-types-check behaviors-check ts python rust engine-rust engine-go engine-link-check cli-smoke example-migrations versions
 
 lint: go-vet go-fmt-check go-lint scrub
 

@@ -259,7 +259,7 @@ func (t AudienceTrigger) BackfillSQL() string {
 // resolved columns.
 func (t AudienceTrigger) FunctionSQL() string {
 	var b strings.Builder
-	using := fmt.Sprintf("USING ERRCODE = 'check_violation', CONSTRAINT = %s;", stringLiteral(t.FunctionName))
+	using := fmt.Sprintf("USING ERRCODE = 'check_violation', CONSTRAINT = %s;", sqlutil.QuoteLiteral(t.FunctionName))
 	audiences := []string{ir.AudienceEveryone, ir.AudiencePrivate, ir.AudienceNamed}
 	if t.Parent != "" {
 		audiences = append(audiences, ir.AudienceInherit)
@@ -267,9 +267,9 @@ func (t AudienceTrigger) FunctionSQL() string {
 	b.WriteString("DECLARE\n  parent_audience UUID[];\n  parent_agents TEXT;\n  has_parent BOOLEAN := FALSE;\n  own UUID[];\n")
 	fmt.Fprintf(&b, "BEGIN\n  -- The @audience of %s (D156): the row's audience resolved into\n  -- %s and %s, whatever writes the row.\n", t.Origin, t.Effective, t.EffectiveAgents)
 	fmt.Fprintf(&b, "  IF NEW.%s IS NULL OR NEW.%s NOT IN (%s) THEN\n    RAISE EXCEPTION '%s.%s is none of %s: %%', NEW.%s\n      %s\n  END IF;\n",
-		t.Audience, t.Audience, literals(audiences), raiseFormat(t.Table), raiseFormat(unquoted(t.Audience)), raiseFormat(strings.Join(audiences, ", ")), t.Audience, using)
+		t.Audience, t.Audience, literals(audiences), raiseFormat(t.Table), raiseFormat(sqlutil.Unquote(t.Audience)), raiseFormat(strings.Join(audiences, ", ")), t.Audience, using)
 	fmt.Fprintf(&b, "  IF NEW.%s IS NULL OR NEW.%s NOT IN (%s) THEN\n    RAISE EXCEPTION '%s.%s is none of %s: %%', NEW.%s\n      %s\n  END IF;\n",
-		t.Agents, t.Agents, literals(ir.AgentAccesses), raiseFormat(t.Table), raiseFormat(unquoted(t.Agents)), raiseFormat(strings.Join(ir.AgentAccesses, ", ")), t.Agents, using)
+		t.Agents, t.Agents, literals(ir.AgentAccesses), raiseFormat(t.Table), raiseFormat(sqlutil.Unquote(t.Agents)), raiseFormat(strings.Join(ir.AgentAccesses, ", ")), t.Agents, using)
 	fmt.Fprintf(&b, "  own := array_remove(ARRAY[NEW.%s]::UUID[], NULL);\n", t.Owner)
 	if t.Parent != "" {
 		fmt.Fprintf(&b, "  IF NEW.%s = 'inherit' AND NEW.%s IS NOT NULL THEN\n", t.Audience, t.ParentColumn)
@@ -332,12 +332,7 @@ func (c AudienceCascade) FunctionSQL() string {
 func literals(values []string) string {
 	out := make([]string, len(values))
 	for i, v := range values {
-		out[i] = stringLiteral(v)
+		out[i] = sqlutil.QuoteLiteral(v)
 	}
 	return strings.Join(out, ", ")
-}
-
-// unquoted is a quoted identifier as its name.
-func unquoted(quoted string) string {
-	return strings.Trim(quoted, `"`)
 }

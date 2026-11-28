@@ -3,6 +3,8 @@ package sqlgen
 import (
 	"fmt"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 )
 
 // References' and attachments' triggers on SQLite (D182), which has no
@@ -30,19 +32,19 @@ import (
 // SQLiteTrigger renders the clearing trigger on SQLite. quote quotes an
 // identifier as the SQLite dialect does.
 func (c ReferencesClear) SQLiteTrigger(quote func(string) string) SQLiteTrigger {
-	q := func(s string) string { return quote(unquoted(s)) }
+	q := func(s string) string { return quote(sqlutil.Unquote(s)) }
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE TRIGGER %s AFTER DELETE ON %s FOR EACH ROW\nBEGIN\n", quote(c.TriggerName), quote(c.Table))
 	fmt.Fprintf(&b, "  -- The references to the row of %s deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n", c.Origin)
 	for _, h := range c.Holders {
-		where := fmt.Sprintf("%s = %s AND %s = CAST(OLD.%s AS TEXT)", q(h.TargetTable), stringLiteral(c.Origin), q(h.TargetKey), q(c.Key))
+		where := fmt.Sprintf("%s = %s AND %s = CAST(OLD.%s AS TEXT)", q(h.TargetTable), sqlutil.QuoteLiteral(c.Origin), q(h.TargetKey), q(c.Key))
 		if h.Queue != "" {
 			columns := make([]string, len(h.Columns))
 			for i, column := range h.Columns {
 				columns[i] = q(column)
 			}
 			fmt.Fprintf(&b, "  INSERT INTO %s (%s)\n    SELECT %s, CAST(%s AS TEXT), %s, %s, %s FROM %s WHERE %s;\n",
-				q(h.Queue), strings.Join(columns, ", "), stringLiteral(h.Type), q(h.RowColumn), q(h.TargetTable), q(h.TargetKey), q(h.Role), q(h.QuotedTable), where)
+				q(h.Queue), strings.Join(columns, ", "), sqlutil.QuoteLiteral(h.Type), q(h.RowColumn), q(h.TargetTable), q(h.TargetKey), q(h.Role), q(h.QuotedTable), where)
 		}
 		fmt.Fprintf(&b, "  DELETE FROM %s WHERE %s;\n", q(h.QuotedTable), where)
 	}
@@ -53,7 +55,7 @@ func (c ReferencesClear) SQLiteTrigger(quote func(string) string) SQLiteTrigger 
 // SQLiteTrigger renders the release trigger on SQLite. quote quotes an
 // identifier as the SQLite dialect does.
 func (r AttachmentsRelease) SQLiteTrigger(quote func(string) string) SQLiteTrigger {
-	q := func(s string) string { return quote(unquoted(s)) }
+	q := func(s string) string { return quote(sqlutil.Unquote(s)) }
 	columns := make([]string, len(r.Columns))
 	for i, column := range r.Columns {
 		columns[i] = q(column)

@@ -1019,12 +1019,10 @@ type Relationship struct {
 	// value would give the selection struct no finite size.
 	NestedByPointer bool
 
-	// For hasMany relationships, these deterministic names point to the
-	// child's relation field back to this parent (e.g. "Connector") and the
-	// corresponding filter field (e.g. "ConnectorID"). Empty means fallback
-	// candidate probing is used at runtime.
-	HasManyParentRelationField string
-	HasManyParentFilterField   string
+	// Back is how a hasMany relationship's rows point at this table's
+	// (attachHasManyBacks), nil when the target has no to-one relation
+	// back, which a read selecting the relationship refuses.
+	Back *HasManyBack
 
 	// SQL is the foreign key column's parts of the table's statements
 	// (D79), for a to-one relationship.
@@ -1169,6 +1167,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 
 	attachManyRelations(repositories, tables, opts.Naming.Go.ORMRelationFilterSuffix)
+	attachHasManyBacks(repositories)
 	attachInboundReferences(repositories)
 	markNestedCycles(repositories)
 	rules, err := attachRules(schema, repositories, opts.Registry)
@@ -1658,7 +1657,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 				)
 			}
 
-			rel := extractRelationship(fieldDef, typeDef.Name, schema, scalars, unionNames, shapes)
+			rel := extractRelationship(fieldDef, schema, scalars, unionNames, shapes)
 			repo.Relationships = append(repo.Relationships, rel)
 			// Only to-one relationships are local FK columns; hasMany
 			// relationships are hydrated separately and do not participate
@@ -1955,28 +1954,20 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 }
 
 // extractRelationship extracts relationship information from an IR FieldDef.
-func extractRelationship(fieldDef *ir.FieldDef, parentTypeName string, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, shapes codegen.GoOptionalShapes) Relationship {
+func extractRelationship(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, shapes codegen.GoOptionalShapes) Relationship {
 	targetType := fieldDef.TypeRef.Name
 	dbColumnName := sqlutil.ForeignKeyColumn(fieldDef)
 	targetTableName := sqlutil.TableNameOf(schema, targetType)
-	hasManyParentRelationField := ""
-	hasManyParentFilterField := ""
-	if fieldDef.TypeRef.IsArray {
-		hasManyParentRelationField, hasManyParentFilterField = inferHasManyParentMapping(targetType, parentTypeName, schema)
-	}
-
 	return Relationship{
-		FieldName:                  fieldDef.Name,
-		DBColumnName:               dbColumnName,
-		QuotedDBColumn:             sqlutil.QuoteIdentifier(dbColumnName),
-		TargetType:                 targetType,
-		TargetTable:                targetTableName,
-		QuotedTargetTable:          sqlutil.QuoteIdentifier(targetTableName),
-		IsRequired:                 fieldDef.Required,
-		IsArray:                    fieldDef.TypeRef.IsArray,
-		TargetPrimaryKeyIsPointer:  targetPrimaryKeyIsPointer(targetType, schema, scalars, unionNames, shapes),
-		HasManyParentRelationField: hasManyParentRelationField,
-		HasManyParentFilterField:   hasManyParentFilterField,
+		FieldName:                 fieldDef.Name,
+		DBColumnName:              dbColumnName,
+		QuotedDBColumn:            sqlutil.QuoteIdentifier(dbColumnName),
+		TargetType:                targetType,
+		TargetTable:               targetTableName,
+		QuotedTargetTable:         sqlutil.QuoteIdentifier(targetTableName),
+		IsRequired:                fieldDef.Required,
+		IsArray:                   fieldDef.TypeRef.IsArray,
+		TargetPrimaryKeyIsPointer: targetPrimaryKeyIsPointer(targetType, schema, scalars, unionNames, shapes),
 	}
 }
 
@@ -1995,36 +1986,50 @@ func targetPrimaryKeyIsPointer(targetType string, schema *ir.Schema, scalars map
 	return false
 }
 
-// inferHasManyParentMapping finds the child's relation field that points back
-// at the parent so generated hasMany hydration can target it deterministically.
-func inferHasManyParentMapping(childTypeName string, parentTypeName string, schema *ir.Schema) (string, string) {
-	childType := schema.Types[childTypeName]
-	if childType == nil {
-		return "", ""
+// HasManyBack is the to-one relation of a hasMany relationship's target
+// that points back at the relationship's table: the one sqlutil.ToMany
+// names, which the TypeScript repositories' include reads by too (D90).
+// GoField is its member of the target's struct and field selection,
+// FilterField the filter of its foreign key, and Pointer marks an optional
+// relation, a pointer on the target's struct.
+type HasManyBack struct {
+	GoField     string
+	FilterField string
+	Pointer     bool
+}
+
+// attachHasManyBacks gives each hasMany relationship the relation of its
+// target that points back (Relationship.Back), which the repository's
+// hydrateHasMany selects, filters the target's rows by and groups them
+// by. A relationship whose table names no such relation, or whose target
+// has no repository, keeps none.
+func attachHasManyBacks(repositories []Repository) {
+	byType := make(map[string]*Repository, len(repositories))
+	for i := range repositories {
+		byType[repositories[i].TypeName] = &repositories[i]
 	}
-
-	for _, childField := range childType.Fields {
-		if childField == nil || childField.TypeRef.IsArray {
-			continue
+	for i := range repositories {
+		repo := &repositories[i]
+		for j := range repo.Relationships {
+			rel := &repo.Relationships[j]
+			if !rel.IsArray || repo.Table == nil {
+				continue
+			}
+			many := repo.Table.ToManyNamed(rel.FieldName)
+			target := byType[rel.TargetType]
+			if many == nil || !many.HasMany || target == nil || many.Source != rel.TargetType {
+				continue
+			}
+			for _, back := range target.Relationships {
+				if back.IsArray || back.FieldName != many.Field {
+					continue
+				}
+				goField := codegen.ToPascalCase(back.FieldName)
+				rel.Back = &HasManyBack{GoField: goField, FilterField: goField + "ID", Pointer: !back.IsRequired}
+				break
+			}
 		}
-		if childField.TypeRef.Name != parentTypeName {
-			continue
-		}
-
-		parentRelationField := codegen.ToPascalCase(childField.Name)
-		filterBaseField := childField.Name
-		if childField.Relation != nil && childField.Relation.Field != "" {
-			filterBaseField = childField.Relation.Field
-		}
-		filterBaseField = strings.TrimSuffix(filterBaseField, "Id")
-		filterBaseField = strings.TrimSuffix(filterBaseField, "ID")
-		if filterBaseField == "" {
-			filterBaseField = childField.Name
-		}
-		return parentRelationField, codegen.ToPascalCase(filterBaseField) + "ID"
 	}
-
-	return "", ""
 }
 
 // attachTable gives repo the table sqlutil models for it (D79): its
@@ -2266,11 +2271,6 @@ func computeImportNeeds(repo *Repository) {
 	}
 	if repo.HasSoftDelete && !repo.Released {
 		repo.NeedsTime = true
-	}
-	for _, rel := range repo.Relationships {
-		if rel.IsArray {
-			repo.NeedsReflect = true
-		}
 	}
 	for i := range repo.Fields {
 		field := &repo.Fields[i]

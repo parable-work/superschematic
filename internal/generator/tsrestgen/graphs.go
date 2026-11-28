@@ -2,6 +2,7 @@ package tsrestgen
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -135,7 +136,7 @@ func (o *APIOutput) GraphHandlers() []string {
 	for _, route := range o.GraphRoutes() {
 		handlers[route.Handler()] = struct{}{}
 	}
-	return sortedKeys(handlers)
+	return slices.Sorted(maps.Keys(handlers))
 }
 
 // GraphFacades are the facade classes router.ts imports from the
@@ -145,7 +146,7 @@ func (o *APIOutput) GraphFacades() []string {
 	for _, set := range o.GraphSets {
 		facades[set.Facade] = struct{}{}
 	}
-	return sortedKeys(facades)
+	return slices.Sorted(maps.Keys(facades))
 }
 
 // GraphFacadeModule is the module router.ts imports the facades' types

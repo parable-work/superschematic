@@ -69,7 +69,7 @@ Examples:
 	}
 	cmd.Flags().StringVar(&flags.databaseURL, "database-url", "", "the runtime database: a postgres:// URL, a SQLite file or a d1:// URL (default $DATABASE_URL)")
 	cmd.Flags().StringVar(&flags.out, "out", "", "the service directory to write (required)")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: the superschematic.toml found walking up from --out)")
+	addNamingFlag(cmd, &flags.namingPath, "(default: the superschematic.toml found walking up from --out)")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "replace files that exist")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

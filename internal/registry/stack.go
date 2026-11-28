@@ -13,6 +13,7 @@ import (
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -1290,11 +1291,7 @@ func validateValue(schema *validator.Schema, v map[string]any) error {
 	if err != nil {
 		return err
 	}
-	doc, err := validator.UnmarshalJSON(bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	err = schema.Validate(doc)
+	err = jsonschemas.Validate(schema, data)
 	var verr *validator.ValidationError
 	if !errors.As(err, &verr) {
 		return err

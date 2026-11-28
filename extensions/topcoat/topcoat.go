@@ -35,6 +35,7 @@ package topcoat
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -178,7 +179,7 @@ func identityTable(value any) (*IdentityPagesConfig, error) {
 		return &IdentityPagesConfig{Enabled: value}, nil
 	case map[string]any:
 		out := &IdentityPagesConfig{Enabled: true}
-		for _, key := range sortedKeys(value) {
+		for _, key := range slices.Sorted(maps.Keys(value)) {
 			on, ok := value[key].(bool)
 			switch {
 			case key != "sign_up":
@@ -210,7 +211,7 @@ func pagesPrefixes(value any, services []string) (map[string]string, error) {
 			prefixes[service] = value
 		}
 	case map[string]any:
-		for _, service := range sortedKeys(value) {
+		for _, service := range slices.Sorted(maps.Keys(value)) {
 			if !slices.Contains(services, service) {
 				return nil, fmt.Errorf("[extension.topcoat] pages_prefix names %q, which services does not list", service)
 			}
@@ -221,7 +222,7 @@ func pagesPrefixes(value any, services []string) (map[string]string, error) {
 			if err := CheckPagesPrefix(prefix); err != nil {
 				return nil, fmt.Errorf("[extension.topcoat] pages_prefix.%s: %w", service, err)
 			}
-			for _, other := range sortedKeys(prefixes) {
+			for _, other := range slices.Sorted(maps.Keys(prefixes)) {
 				if taken := prefixes[other]; under(prefix, taken) || under(taken, prefix) {
 					return nil, fmt.Errorf("[extension.topcoat] pages_prefix: %s's %q and %s's %q overlap, and an app that links both crates would serve one's pages inside the other's; give each a path of its own", other, taken, service, prefix)
 				}

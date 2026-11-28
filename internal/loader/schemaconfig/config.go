@@ -26,6 +26,7 @@ import (
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -148,17 +149,10 @@ var (
 
 func compiledSchema() (*validator.Schema, error) {
 	compileOnce.Do(func() {
-		resource, err := validator.UnmarshalJSON(bytes.NewReader(definitionBytes))
-		if err != nil {
-			compileErr = fmt.Errorf("decoding embedded schema-config JSON Schema: %w", err)
-			return
+		compiled, compileErr = jsonschemas.Compile("superschematic://schema-config.schema.json", definitionBytes)
+		if compileErr != nil {
+			compileErr = fmt.Errorf("compiling embedded schema-config JSON Schema: %w", compileErr)
 		}
-		compiler := validator.NewCompiler()
-		if err := compiler.AddResource("superschematic://schema-config.schema.json", resource); err != nil {
-			compileErr = fmt.Errorf("registering schema-config JSON Schema: %w", err)
-			return
-		}
-		compiled, compileErr = compiler.Compile("superschematic://schema-config.schema.json")
 	})
 	return compiled, compileErr
 }
@@ -212,11 +206,7 @@ func DecodeJSON(data []byte, source string, known KindSet) (*SchemaConfig, error
 	if err != nil {
 		return nil, err
 	}
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", source, err)
-	}
-	if err := sch.Validate(instance); err != nil {
+	if err := jsonschemas.Validate(sch, data); err != nil {
 		return nil, fmt.Errorf("%s: %w", source, err)
 	}
 
@@ -291,19 +281,44 @@ func validateCalls(cfg *SchemaConfig) error {
 	if len(cfg.Calls) > 0 && cfg.Kind != ir.SchemaKindAPI && cfg.Kind != ir.SchemaKindSite {
 		return fmt.Errorf("schema config for %s sets calls, which only an API or a Site service may set (this service is kind %s)", cfg.Name, cfg.Kind)
 	}
-	seen := make(map[string]bool, len(cfg.Calls))
-	for _, call := range cfg.Calls {
+	return checkHandles(cfg, handleList{
+		field:     "calls",
+		kind:      ir.SchemaKindAPI,
+		wrongKind: "calls %s, a handle of kind %q; calls names API services only",
+		self:      "calls itself",
+		duplicate: "calls %s more than once",
+	}, cfg.Calls)
+}
+
+// handleList is how checkHandles words the errors of one list of handles
+// a config names, each of kind and named once. wrongKind formats the
+// handle's name and kind, duplicate its name; self, when set, refuses the
+// config's own name.
+type handleList struct {
+	field     string
+	kind      ir.SchemaKind
+	wrongKind string
+	self      string
+	duplicate string
+}
+
+// checkHandles checks the handles of one list of cfg's (calls, buckets,
+// memoryStores): each has a name, is of the list's kind, and is listed
+// once.
+func checkHandles(cfg *SchemaConfig, list handleList, handles []ServiceDependency) error {
+	seen := make(map[string]bool, len(handles))
+	for _, h := range handles {
 		switch {
-		case call.Name == "":
-			return fmt.Errorf("schema config for %s has a calls entry with no name", cfg.Name)
-		case call.Kind != ir.SchemaKindAPI:
-			return fmt.Errorf("schema config for %s calls %s, a handle of kind %q; calls names API services only", cfg.Name, call.Name, call.Kind)
-		case call.Name == cfg.Name:
-			return fmt.Errorf("schema config for %s calls itself", cfg.Name)
-		case seen[call.Name]:
-			return fmt.Errorf("schema config for %s calls %s more than once", cfg.Name, call.Name)
+		case h.Name == "":
+			return fmt.Errorf("schema config for %s has a %s entry with no name", cfg.Name, list.field)
+		case h.Kind != list.kind:
+			return fmt.Errorf("schema config for %s "+list.wrongKind, cfg.Name, h.Name, h.Kind)
+		case list.self != "" && h.Name == cfg.Name:
+			return fmt.Errorf("schema config for %s "+list.self, cfg.Name)
+		case seen[h.Name]:
+			return fmt.Errorf("schema config for %s "+list.duplicate, cfg.Name, h.Name)
 		}
-		seen[call.Name] = true
+		seen[h.Name] = true
 	}
 	return nil
 }
@@ -335,19 +350,12 @@ func validateBuckets(cfg *SchemaConfig) error {
 	if len(cfg.Buckets) > 0 && cfg.Kind != ir.SchemaKindAPI {
 		return fmt.Errorf("schema config for %s sets buckets, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
 	}
-	seen := make(map[string]bool, len(cfg.Buckets))
-	for _, bucket := range cfg.Buckets {
-		switch {
-		case bucket.Name == "":
-			return fmt.Errorf("schema config for %s has a buckets entry with no name", cfg.Name)
-		case bucket.Kind != ir.SchemaKindBucket:
-			return fmt.Errorf("schema config for %s lists %s in buckets, a handle of kind %q; buckets names %s services only", cfg.Name, bucket.Name, bucket.Kind, ir.SchemaKindBucket)
-		case seen[bucket.Name]:
-			return fmt.Errorf("schema config for %s lists bucket %s more than once", cfg.Name, bucket.Name)
-		}
-		seen[bucket.Name] = true
-	}
-	return nil
+	return checkHandles(cfg, handleList{
+		field:     "buckets",
+		kind:      ir.SchemaKindBucket,
+		wrongKind: "lists %s in buckets, a handle of kind %q; buckets names " + string(ir.SchemaKindBucket) + " services only",
+		duplicate: "lists bucket %s more than once",
+	}, cfg.Buckets)
 }
 
 // validateMemoryStores checks memoryStores and rateLimitStore, an API
@@ -380,17 +388,13 @@ func validateMemoryStores(cfg *SchemaConfig) error {
 	if (len(cfg.MemoryStores) > 0 || cfg.RateLimitStore != nil) && cfg.Kind != ir.SchemaKindAPI {
 		return fmt.Errorf("schema config for %s sets memoryStores or rateLimitStore, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
 	}
-	seen := make(map[string]bool, len(cfg.MemoryStores))
-	for _, store := range cfg.MemoryStores {
-		switch {
-		case store.Name == "":
-			return fmt.Errorf("schema config for %s has a memoryStores entry with no name", cfg.Name)
-		case store.Kind != ir.SchemaKindMemoryStore:
-			return fmt.Errorf("schema config for %s lists %s in memoryStores, a handle of kind %q; memoryStores names %s services only", cfg.Name, store.Name, store.Kind, ir.SchemaKindMemoryStore)
-		case seen[store.Name]:
-			return fmt.Errorf("schema config for %s lists memory store %s more than once", cfg.Name, store.Name)
-		}
-		seen[store.Name] = true
+	if err := checkHandles(cfg, handleList{
+		field:     "memoryStores",
+		kind:      ir.SchemaKindMemoryStore,
+		wrongKind: "lists %s in memoryStores, a handle of kind %q; memoryStores names " + string(ir.SchemaKindMemoryStore) + " services only",
+		duplicate: "lists memory store %s more than once",
+	}, cfg.MemoryStores); err != nil {
+		return err
 	}
 	if store := cfg.RateLimitStore; store != nil {
 		switch {
